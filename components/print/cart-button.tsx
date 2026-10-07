@@ -1,6 +1,7 @@
 "use client";
 
 import { ShoppingCartIcon } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { useCart } from "./cart-context";
 
 /**
@@ -16,16 +17,18 @@ export function CartButton() {
   if (itemCount === 0) return null;
 
   return (
-    <button
+    <Button
+      variant="secondary"
+      size="sm"
       onClick={open}
-      className="flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-sm bg-muted/50 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
       aria-label={`Cart (${itemCount} items)`}
+      className="gap-1.5"
     >
-      <ShoppingCartIcon className="h-4 w-4 shrink-0" />
-      <span>Cart</span>
-      <span className="ml-0.5 rounded-full bg-primary px-1.5 py-1 text-xs font-semibold text-primary-foreground leading-none">
+      <ShoppingCartIcon aria-hidden="true" />
+      Cart
+      <span className="tabular-nums text-muted-foreground">
         {itemCount > 99 ? "99+" : itemCount}
       </span>
-    </button>
+    </Button>
   );
 }

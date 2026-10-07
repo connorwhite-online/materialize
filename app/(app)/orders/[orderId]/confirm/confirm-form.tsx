@@ -29,11 +29,15 @@ export function ConfirmOrderForm({ orderId, confirmationToken }: Props) {
   };
 
   return (
-    <div className="space-y-2">
-      <Button size="lg" onClick={onConfirm} disabled={isPending} className="w-full">
+    <div className="flex flex-col items-start gap-2">
+      <Button size="lg" onClick={onConfirm} loading={isPending}>
         {isPending ? "Preparing checkout…" : "Confirm and pay"}
       </Button>
-      {error && <p className="text-xs text-destructive">{error}</p>}
+      {error && (
+        <p role="alert" className="text-[13px] leading-[18px] text-destructive">
+          {error}
+        </p>
+      )}
     </div>
   );
 }

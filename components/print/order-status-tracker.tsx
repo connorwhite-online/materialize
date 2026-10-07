@@ -1,16 +1,32 @@
 "use client";
 
 import { useState } from "react";
+import { CheckIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
-import { Alert } from "@/components/ui/alert";
 import { requestOrderRefund } from "@/app/actions/print";
+import { cn } from "@/lib/utils";
 
 const STEPS = [
-  { key: "ordered", label: "Confirmed" },
-  { key: "in_production", label: "In Production" },
-  { key: "shipped", label: "Shipped" },
-  { key: "received", label: "Delivered" },
+  {
+    key: "ordered",
+    label: "Confirmed",
+    detail: "The print shop has your order and will start on it soon.",
+  },
+  {
+    key: "in_production",
+    label: "In production",
+    detail: "Your part is being made.",
+  },
+  {
+    key: "shipped",
+    label: "Shipped",
+    detail: "Your print is on its way.",
+  },
+  {
+    key: "received",
+    label: "Delivered",
+    detail: "Your print has been delivered.",
+  },
 ] as const;
 
 interface OrderStatusTrackerProps {
@@ -34,100 +50,106 @@ export function OrderStatusTracker({
   const isRefunded = currentStatus === "refunded";
   const isTerminal = isCancelled || isRefunded;
 
+  const current = currentIndex >= 0 ? STEPS[currentIndex] : null;
+
   return (
-    <div>
+    <div className="flex flex-col gap-4">
       {isBlocked ? (
         <BlockedOrderCard orderId={orderId} />
       ) : isRefunded ? (
-        <Alert className="border-blue-200 bg-blue-50 text-blue-800 dark:border-blue-800 dark:bg-blue-950 dark:text-blue-200">
-          <p className="text-sm font-medium">Order Refunded</p>
-          <p className="text-xs mt-1">
-            A full refund has been issued to your original payment method. It may take 5-10 business days to appear.
-          </p>
-        </Alert>
+        <TerminalState title="Order refunded">
+          A full refund went back to your original payment method. It can
+          take 5–10 business days to appear.
+        </TerminalState>
       ) : isCancelled ? (
-        <Alert variant="destructive">
-          <p className="text-sm font-medium">Order Cancelled</p>
-        </Alert>
+        <TerminalState title="Order cancelled">
+          This order won&apos;t be made or shipped.
+        </TerminalState>
       ) : (
-        <div className="flex items-center gap-2">
-          {STEPS.map((step, index) => {
-            const isCompleted = index <= currentIndex;
-            const isCurrent = index === currentIndex;
-
-            return (
-              <div key={step.key} className="flex flex-1 flex-col items-center">
-                <div className="flex w-full items-center">
-                  {index > 0 && (
-                    <div
-                      className={`h-0.5 flex-1 ${
-                        isCompleted ? "bg-foreground" : "bg-foreground/20"
-                      }`}
-                    />
-                  )}
-                  <div
-                    className={`h-3 w-3 rounded-full ${
-                      isCurrent
-                        ? "bg-foreground ring-2 ring-foreground/20 ring-offset-2 ring-offset-background"
-                        : isCompleted
-                          ? "bg-foreground"
-                          : "bg-foreground/20"
-                    }`}
-                  />
-                  {index < STEPS.length - 1 && (
-                    <div
-                      className={`h-0.5 flex-1 ${
-                        index < currentIndex
-                          ? "bg-foreground"
-                          : "bg-foreground/20"
-                      }`}
-                    />
-                  )}
-                </div>
-                <span
-                  className={`mt-2 text-xs ${
-                    isCompleted ? "font-medium" : "text-muted-foreground"
-                  }`}
+        <div>
+          <ol className="grid grid-cols-4" aria-label="Order progress">
+            {STEPS.map((step, index) => {
+              const done = index < currentIndex;
+              const isCurrent = index === currentIndex;
+              const reached = index <= currentIndex;
+              return (
+                <li
+                  key={step.key}
+                  aria-current={isCurrent ? "step" : undefined}
+                  className="relative flex flex-col items-center text-center"
                 >
-                  {step.label}
-                </span>
-              </div>
-            );
-          })}
+                  {/* Connector to the previous step, drawn behind the dot. */}
+                  {index > 0 && (
+                    <span
+                      aria-hidden="true"
+                      className={cn(
+                        "absolute top-2.5 right-1/2 h-0.5 w-full -translate-y-1/2",
+                        reached ? "bg-foreground" : "bg-border"
+                      )}
+                    />
+                  )}
+                  <span
+                    aria-hidden="true"
+                    className={cn(
+                      "relative flex size-5 items-center justify-center rounded-full",
+                      done && "bg-foreground text-background",
+                      isCurrent &&
+                        "bg-foreground ring-4 ring-foreground/10",
+                      !reached && "bg-background ring-2 ring-border ring-inset"
+                    )}
+                  >
+                    {done && <CheckIcon className="size-3" strokeWidth={3} />}
+                    {isCurrent && (
+                      <span className="size-1.5 rounded-full bg-background" />
+                    )}
+                  </span>
+                  <span
+                    className={cn(
+                      "mt-2 text-[13px] leading-[18px]",
+                      reached ? "font-medium" : "text-muted-foreground"
+                    )}
+                  >
+                    {step.label}
+                  </span>
+                </li>
+              );
+            })}
+          </ol>
+          {current && (
+            <p className="mt-4 text-center text-sm text-muted-foreground">
+              {current.detail}
+            </p>
+          )}
         </div>
       )}
 
       {trackingInfo?.trackingNumber && !isTerminal && (
-        <Card className="mt-4">
-          <CardContent className="p-3 text-sm">
-            <p>
-              Tracking: {trackingInfo.carrier && `${trackingInfo.carrier} — `}
-              {trackingInfo.trackingUrl ? (
-                <a
-                  href={trackingInfo.trackingUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="underline"
-                >
-                  {trackingInfo.trackingNumber}
-                </a>
-              ) : (
-                <span>{trackingInfo.trackingNumber}</span>
-              )}
-            </p>
-          </CardContent>
-        </Card>
+        <p className="text-sm">
+          <span className="text-muted-foreground">
+            Tracking{trackingInfo.carrier ? ` · ${trackingInfo.carrier}` : ""}:{" "}
+          </span>
+          {trackingInfo.trackingUrl ? (
+            <a
+              href={trackingInfo.trackingUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="font-medium underline underline-offset-3"
+            >
+              {trackingInfo.trackingNumber}
+            </a>
+          ) : (
+            <span className="font-medium">{trackingInfo.trackingNumber}</span>
+          )}
+        </p>
       )}
 
       {/* Cancel option — only for orders not yet in production */}
-      {currentStatus === "ordered" && (
-        <CancelOrderOption orderId={orderId} />
-      )}
+      {currentStatus === "ordered" && <CancelOrderOption orderId={orderId} />}
 
       {/* In production or shipped — contact support for changes */}
       {(currentStatus === "in_production" || currentStatus === "shipped") && (
-        <p className="mt-4 text-xs text-muted-foreground">
-          Need to make a change? Contact support — your order is already being manufactured.
+        <p className="text-center text-[13px] leading-[18px] text-subtle-foreground">
+          Need a change? Contact support — your order is already being made.
         </p>
       )}
     </div>
@@ -152,28 +174,46 @@ function CancelOrderOption({ orderId }: { orderId: string }) {
   };
 
   if (result) {
-    return <p className="mt-4 text-xs text-muted-foreground">{result}</p>;
+    return (
+      <p role="status" className="text-center text-sm text-muted-foreground">
+        {result}
+      </p>
+    );
   }
 
   if (!confirming) {
     return (
-      <button
+      <Button
+        variant="ghost"
+        size="sm"
+        className="self-center text-muted-foreground"
         onClick={() => setConfirming(true)}
-        className="mt-4 text-xs text-muted-foreground hover:text-foreground transition-colors"
       >
         Cancel order
-      </button>
+      </Button>
     );
   }
 
   return (
-    <div className="mt-4 flex items-center gap-2">
-      <p className="text-xs text-muted-foreground">Are you sure?</p>
-      <Button size="xs" variant="destructive" onClick={handleCancel} disabled={processing}>
-        {processing ? "Cancelling..." : "Yes, cancel and refund"}
+    <div className="flex flex-wrap items-center justify-center gap-2">
+      <p className="text-sm text-muted-foreground">
+        Cancel and get a full refund?
+      </p>
+      <Button
+        size="sm"
+        variant="ghost"
+        onClick={() => setConfirming(false)}
+        disabled={processing}
+      >
+        Keep order
       </Button>
-      <Button size="xs" variant="ghost" onClick={() => setConfirming(false)}>
-        No
+      <Button
+        size="sm"
+        variant="destructive"
+        onClick={handleCancel}
+        loading={processing}
+      >
+        Cancel and refund
       </Button>
     </div>
   );
@@ -189,51 +229,66 @@ function BlockedOrderCard({ orderId }: { orderId: string }) {
     if ("error" in result) {
       setRefundResult(result.error);
     } else {
-      setRefundResult("Refund issued successfully.");
+      setRefundResult("Refund issued.");
     }
     setRefunding(false);
   };
 
   return (
-    <Alert className="border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-950">
-      <div>
-        <p className="text-sm font-medium text-amber-800 dark:text-amber-200">
-          Order Could Not Be Completed
+    <TerminalState title="Order could not be completed" tone="warning">
+      <p>
+        The print shop couldn&apos;t make this order — the geometry may not
+        suit the material, stock or capacity ran short, or the file needs
+        adjusting. Try another material or shop, or get a full refund.
+      </p>
+      {refundResult ? (
+        <p role="status" className="mt-3 font-medium text-foreground">
+          {refundResult}
         </p>
-        <p className="text-xs text-amber-700 dark:text-amber-300 mt-1">
-          The manufacturing facility was unable to fulfill this order. This can
-          happen for a number of reasons — geometry that doesn&apos;t suit the
-          material, temporary stock or capacity issues, or the file needing
-          adjustments for production.
-        </p>
+      ) : (
+        <Button
+          variant="secondary"
+          size="sm"
+          onClick={handleRefund}
+          loading={refunding}
+          className="mt-3"
+        >
+          Request a full refund
+        </Button>
+      )}
+    </TerminalState>
+  );
+}
 
-        <div className="mt-3 space-y-2">
-          <p className="text-xs font-medium text-amber-800 dark:text-amber-200">
-            Your options:
-          </p>
-          <ul className="text-xs text-amber-700 dark:text-amber-300 space-y-1 list-disc list-inside">
-            <li>Try again with a different material or manufacturer</li>
-            <li>Adjust your model and resubmit a new print order</li>
-            <li>Request a full refund below</li>
-          </ul>
-        </div>
-
-        {refundResult ? (
-          <p className="mt-3 text-xs font-medium text-amber-800 dark:text-amber-200">
-            {refundResult}
-          </p>
-        ) : (
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={handleRefund}
-            disabled={refunding}
-            className="mt-3"
-          >
-            {refunding ? "Processing refund..." : "Request Full Refund"}
-          </Button>
+/**
+ * An order that left the happy path (blocked / cancelled / refunded):
+ * a status line and what it means, in place of the stepper. Unboxed —
+ * it sits inside the page's Status card.
+ */
+function TerminalState({
+  title,
+  tone = "neutral",
+  children,
+}: {
+  title: string;
+  tone?: "neutral" | "warning";
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="flex gap-3">
+      <span
+        aria-hidden="true"
+        className={cn(
+          "mt-1.5 size-2 shrink-0 rounded-full",
+          tone === "warning" ? "bg-warning" : "bg-subtle-foreground"
         )}
+      />
+      <div className="min-w-0">
+        <p className="text-sm leading-5 font-medium">{title}</p>
+        <div className="mt-0.5 text-sm text-pretty text-muted-foreground">
+          {children}
+        </div>
       </div>
-    </Alert>
+    </div>
   );
 }

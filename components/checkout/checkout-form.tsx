@@ -2,9 +2,11 @@
 
 import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Separator } from "@/components/ui/separator";
-import { Alert } from "@/components/ui/alert";
+import { Card } from "@/components/ui/card";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { SummaryRow, formatUsd } from "@/components/ui/summary-list";
+import { SandboxBadge } from "@/components/sandbox-badge";
+import { useSandbox } from "@/components/sandbox-context";
 import { ShippingAddressForm } from "@/components/print/shipping-address-form";
 import {
   FeePaymentSheet,
@@ -80,6 +82,7 @@ export function CheckoutForm({
   serviceFee,
 }: CheckoutFormProps) {
   const router = useRouter();
+  const sandbox = useSandbox();
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [feeSheet, setFeeSheet] = useState<FeeSheetPayload | null>(null);
@@ -173,8 +176,10 @@ export function CheckoutForm({
     }
   };
 
+  const money = (cents: number) => formatUsd(cents);
+
   return (
-    <div className="grid items-start gap-6 lg:grid-cols-5">
+    <div className="grid items-start gap-8 lg:grid-cols-[minmax(0,1fr)_22rem] lg:gap-12">
       <FeePaymentSheet sheet={feeSheet} onClose={() => setFeeSheet(null)} />
       <SavedCardFeeSheet
         confirm={savedCardConfirm?.payload ?? null}
@@ -182,10 +187,71 @@ export function CheckoutForm({
         onUseDifferentCard={() => resumeWithFeePayment("new_card")}
         onClose={() => setSavedCardConfirm(null)}
       />
-      <div className="lg:col-span-3">
+
+      {/* Summary first in the DOM on phones (you check what you're
+          paying for before typing an address); the right column on
+          desktop. */}
+      <div className="lg:sticky lg:top-20 lg:order-2">
+        <Card className="gap-0 px-5 py-4">
+          <div className="mb-3 flex items-center gap-2">
+            <h2 className="text-sm leading-5 font-semibold">Order summary</h2>
+            {sandbox && <SandboxBadge />}
+          </div>
+          <ul className="-mx-1 mb-3 flex flex-col">
+            {items.map((item, idx) => {
+              const name =
+                item.fileName ??
+                item.originalFilename?.replace(/\.[^.]+$/, "") ??
+                "3D print";
+              return (
+                <li key={idx} className="flex items-center gap-3 px-1 py-1.5">
+                  <span
+                    aria-hidden="true"
+                    className="flex size-9 shrink-0 items-center justify-center rounded-[10px] bg-muted text-[13px] font-medium text-muted-foreground tabular-nums"
+                  >
+                    ×{item.quantity}
+                  </span>
+                  <span className="min-w-0 flex-1 truncate text-sm font-medium">
+                    {name}
+                  </span>
+                  <span className="shrink-0 text-sm tabular-nums">
+                    {money(item.materialSubtotal * item.quantity)}
+                  </span>
+                </li>
+              );
+            })}
+          </ul>
+          <dl className="flex flex-col gap-2.5 border-t border-border pt-3 text-sm">
+            {productionFee > 0 && (
+              <SummaryRow
+                label={
+                  <>
+                    Vendor minimum
+                    <span className="block text-xs text-subtle-foreground">
+                      Tops the order up to this shop&apos;s minimum
+                    </span>
+                  </>
+                }
+                value={money(productionFee)}
+              />
+            )}
+            {shippingTotal > 0 && (
+              <SummaryRow label="Shipping" value={money(shippingTotal)} />
+            )}
+            <SummaryRow label="Service fee (3%)" value={money(serviceFee)} />
+            <SummaryRow
+              total
+              label="Total"
+              value={money(totalPrice + serviceFee)}
+            />
+          </dl>
+        </Card>
+      </div>
+
+      <div className="flex flex-col gap-4 lg:order-1">
         {error && (
-          <Alert variant="destructive" className="mb-4">
-            <p className="text-sm">{error}</p>
+          <Alert variant="destructive">
+            <AlertDescription className="text-destructive">{error}</AlertDescription>
           </Alert>
         )}
         <ShippingAddressForm
@@ -193,75 +259,6 @@ export function CheckoutForm({
           onBack={() => router.back()}
           isSubmitting={submitting}
         />
-      </div>
-
-      <div className="lg:col-span-2 lg:sticky lg:top-6">
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Order Summary</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            {items.map((item, idx) => {
-              const name =
-                item.fileName ??
-                item.originalFilename?.replace(/\.[^.]+$/, "") ??
-                "3D Print";
-              const lineTotal = item.materialSubtotal * item.quantity;
-              return (
-                <div key={idx} className="flex justify-between text-sm">
-                  <span className="text-muted-foreground truncate pr-2">
-                    {name} ({item.quantity}x)
-                  </span>
-                  <span className="tabular-nums shrink-0">
-                    ${(lineTotal / 100).toFixed(2)}
-                  </span>
-                </div>
-              );
-            })}
-
-            {productionFee > 0 && (
-              <div>
-                <div className="flex justify-between text-sm">
-                  <span className="text-muted-foreground">
-                    Vendor minimum fee
-                  </span>
-                  <span className="tabular-nums">
-                    +${(productionFee / 100).toFixed(2)}
-                  </span>
-                </div>
-                <p className="mt-1 text-xs text-amber-700 dark:text-amber-300">
-                  Additional charge to meet this vendor&apos;s minimum production
-                  requirement
-                </p>
-              </div>
-            )}
-
-            <div className="flex justify-between text-sm">
-              <span className="text-muted-foreground">Service fee (3%)</span>
-              <span className="tabular-nums">
-                ${(serviceFee / 100).toFixed(2)}
-              </span>
-            </div>
-
-            {shippingTotal > 0 && (
-              <div className="flex justify-between text-sm">
-                <span className="text-muted-foreground">Shipping</span>
-                <span className="tabular-nums">
-                  ${(shippingTotal / 100).toFixed(2)}
-                </span>
-              </div>
-            )}
-
-            <Separator />
-
-            <div className="flex justify-between font-semibold">
-              <span>Total</span>
-              <span className="tabular-nums">
-                ${((totalPrice + serviceFee) / 100).toFixed(2)}
-              </span>
-            </div>
-          </CardContent>
-        </Card>
       </div>
     </div>
   );

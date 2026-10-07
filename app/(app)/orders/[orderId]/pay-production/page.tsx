@@ -167,7 +167,7 @@ export default async function PayProductionPage({
       <PageHeader
         icon={<BuildingIcon />}
         eyebrow="Print order"
-        title="One more step — pay for production"
+        title="Pay for production"
         description={
           <>
             {fee === "authorized" && (
@@ -207,7 +207,7 @@ export default async function PayProductionPage({
           label={
             <>
               Service fee
-              <span className="block text-xs text-muted-foreground/80">
+              <span className="block text-xs text-subtle-foreground">
                 Authorized — charged when your order is placed
               </span>
             </>
@@ -217,8 +217,8 @@ export default async function PayProductionPage({
       </SummaryCard>
 
       <Button
-        size="xl"
-        className="w-full"
+        size="lg"
+        className="self-start"
         render={<a href={order.bridgeSessionUrl} />}
       >
         Continue to CraftCloud payment

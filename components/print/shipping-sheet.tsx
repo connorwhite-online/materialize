@@ -4,15 +4,10 @@ import { useEffect, useState } from "react";
 import type { CheckoutModel } from "@/lib/env";
 import { NativeSheet } from "@/components/ui/native-sheet";
 import { Button } from "@/components/ui/button";
-import { Label } from "@/components/ui/label";
-import { Separator } from "@/components/ui/separator";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { SummaryRow } from "@/components/ui/summary-list";
+import { DottedSpinner } from "@/components/icons/dotted-spinner";
+import { TwoChargesNote } from "./two-charges-note";
+import { cn } from "@/lib/utils";
 import { SandboxBadge } from "@/components/sandbox-badge";
 import { useSandbox } from "@/components/sandbox-context";
 import { calcServiceFee } from "@/lib/fees";
@@ -158,193 +153,153 @@ export function ShippingSheet({
     >
       <div className="px-6 pt-1 pb-1">
         {step === "shipping" ? (
-          <>
-            <div className="flex items-center gap-2">
-              <div>
-                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                  Shipping
+          <div className="flex flex-col gap-5">
+            <div className="flex items-start gap-3">
+              <div className="min-w-0 flex-1">
+                <p className="text-[13px] leading-[18px] text-muted-foreground">
+                  Ships from
                 </p>
-                <h2 className="text-lg font-semibold leading-tight">
+                <h2 className="truncate text-lg leading-6 font-semibold">
                   {quote.vendorName}
                 </h2>
               </div>
-              {sandbox && <SandboxBadge className="ml-auto" />}
+              {sandbox && <SandboxBadge className="mt-1" />}
             </div>
 
-            <div className="mt-4 space-y-2">
-              <Label htmlFor="shipping-select">Delivery option</Label>
+            <section aria-labelledby="delivery-heading" className="flex flex-col gap-2">
+              <h3 id="delivery-heading" className="text-sm leading-5 font-semibold">
+                Delivery
+              </h3>
               {shippingLocked && selectedShipping ? (
                 <div>
-                  <div className="flex items-center justify-between rounded-xl border border-border bg-muted/40 px-3 py-2.5">
-                    <div className="min-w-0">
-                      <span className="text-sm">{selectedShipping.name}</span>
-                      <span className="ml-1 text-xs text-muted-foreground">
-                        ({selectedShipping.deliveryTime} days)
-                      </span>
-                    </div>
-                    <span className="text-sm font-medium tabular-nums">
-                      ${selectedShipping.price.toFixed(2)}
-                    </span>
-                  </div>
+                  <DeliveryOptionRow option={selectedShipping} selected locked />
                   {shippingLockedNotice && (
-                    <p className="mt-1 text-xs text-muted-foreground">
+                    <p className="mt-1.5 text-[13px] leading-[18px] text-muted-foreground">
                       {shippingLockedNotice}
                     </p>
                   )}
                 </div>
               ) : vendorShipping.length === 0 ? (
-                <p className="rounded-xl border border-border bg-muted/40 px-3 py-2.5 text-sm text-muted-foreground">
-                  Shipping options are still loading for this vendor…
+                <p className="flex items-center gap-2 rounded-xl bg-muted/60 px-3 py-2.5 text-sm text-muted-foreground">
+                  <DottedSpinner />
+                  Loading delivery options…
                 </p>
               ) : (
-                <Select
-                  value={selectedShipping?.shippingId ?? null}
-                  onValueChange={(value) => {
-                    if (value == null) return;
-                    const option = vendorShipping.find(
-                      (s) => s.shippingId === value
+                // A handful of options with a price and a speed each —
+                // radio rows show every trade-off at once, where the old
+                // dropdown hid all but the pre-selected one.
+                <div
+                  role="radiogroup"
+                  aria-labelledby="delivery-heading"
+                  className="flex flex-col gap-1.5"
+                  onKeyDown={(e) => {
+                    if (!["ArrowDown", "ArrowUp", "ArrowRight", "ArrowLeft"].includes(e.key)) return;
+                    e.preventDefault();
+                    const idx = vendorShipping.findIndex(
+                      (s) => s.shippingId === selectedShipping?.shippingId
                     );
-                    if (option) onSelectShipping(option);
+                    const step = e.key === "ArrowDown" || e.key === "ArrowRight" ? 1 : -1;
+                    const next =
+                      vendorShipping[
+                        (idx + step + vendorShipping.length) % vendorShipping.length
+                      ];
+                    onSelectShipping(next);
+                    const el = e.currentTarget.querySelector<HTMLElement>(
+                      `[data-shipping-id="${next.shippingId}"]`
+                    );
+                    el?.focus();
                   }}
                 >
-                  <SelectTrigger id="shipping-select" className="w-full">
-                    <SelectValue placeholder="Select shipping">
-                      {(value) => {
-                        const option = vendorShipping.find(
-                          (s) => s.shippingId === value
-                        );
-                        if (!option) return "Select shipping";
-                        return (
-                          <>
-                            <span className="truncate">{option.name}</span>
-                            <span className="text-muted-foreground">
-                              ({option.deliveryTime}d)
-                            </span>
-                            <span className="ml-auto tabular-nums">
-                              ${option.price.toFixed(2)}
-                            </span>
-                          </>
-                        );
-                      }}
-                    </SelectValue>
-                  </SelectTrigger>
-                  <SelectContent>
-                    {vendorShipping.map((option) => (
-                      <SelectItem
+                  {vendorShipping.map((option, i) => {
+                    const isSelected =
+                      option.shippingId === selectedShipping?.shippingId;
+                    const focusable = selectedShipping
+                      ? isSelected
+                      : i === 0;
+                    return (
+                      <DeliveryOptionRow
                         key={option.shippingId}
-                        value={option.shippingId}
-                      >
-                        <span>{option.name}</span>
-                        <span className="text-muted-foreground">
-                          ({option.deliveryTime} days)
-                        </span>
-                        <span className="ml-auto tabular-nums">
-                          ${option.price.toFixed(2)}
-                        </span>
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                        option={option}
+                        selected={isSelected}
+                        tabIndex={focusable ? 0 : -1}
+                        onSelect={() => onSelectShipping(option)}
+                      />
+                    );
+                  })}
+                </div>
               )}
-            </div>
+            </section>
 
-            <div className="mt-5 space-y-2.5">
-              <div className="flex justify-between text-sm">
-                <span className="text-muted-foreground">
-                  Material ({quantity}x)
-                </span>
-                <span className="tabular-nums">
-                  ${materialCost.toFixed(2)}
-                </span>
-              </div>
-
+            <dl className="flex flex-col gap-2.5 text-sm">
+              <SummaryRow
+                label={`Material${quantity > 1 ? ` × ${quantity}` : ""}`}
+                value={money(materialCost)}
+              />
               {minimumFee > 0 && (
-                <div>
-                  <div className="flex justify-between text-sm">
-                    <span className="text-muted-foreground">
-                      Vendor minimum fee
-                    </span>
-                    <span className="tabular-nums">
-                      +${minimumFee.toFixed(2)}
-                    </span>
-                  </div>
-                  <p className="mt-1 text-xs text-amber-700 dark:text-amber-300">
-                    This vendor has a $
-                    {minimumFeeInfo!.vendorMinimumPrice.toFixed(2)} minimum
-                    production charge
-                  </p>
-                </div>
+                <SummaryRow
+                  label={
+                    <>
+                      Vendor minimum
+                      <span className="block text-xs text-subtle-foreground">
+                        This shop&apos;s minimum order is{" "}
+                        {money(minimumFeeInfo!.vendorMinimumPrice)}
+                      </span>
+                    </>
+                  }
+                  value={money(minimumFee)}
+                />
               )}
-
-              {checkingMinimum && selectedShipping && (
-                <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                  <div className="h-3 w-3 animate-spin rounded-full border border-muted border-t-foreground" />
-                  Checking vendor pricing…
-                </div>
-              )}
-
-              <div className="flex justify-between text-sm">
-                <span className="text-muted-foreground">Shipping</span>
-                <span className="tabular-nums">
-                  {selectedShipping ? `$${shippingCost.toFixed(2)}` : "—"}
-                </span>
+              <SummaryRow
+                label="Shipping"
+                value={selectedShipping ? money(shippingCost) : "—"}
+              />
+              <SummaryRow label="Service fee (3%)" value={money(serviceFee)} />
+              <div aria-live="polite" aria-atomic="true">
+                <SummaryRow
+                  total
+                  label="Total"
+                  value={
+                    checkingMinimum && selectedShipping ? (
+                      <span className="inline-flex items-center gap-2 text-sm font-normal text-muted-foreground">
+                        <DottedSpinner />
+                        Checking price…
+                      </span>
+                    ) : (
+                      money(total)
+                    )
+                  }
+                />
               </div>
-
-              <Separator />
-
-              <div className="flex justify-between text-sm">
-                <span className="text-muted-foreground">Service fee (3%)</span>
-                <span className="tabular-nums">${serviceFee.toFixed(2)}</span>
-              </div>
-
-              <Separator />
-
-              <div
-                className="flex justify-between font-semibold"
-                aria-live="polite"
-                aria-atomic="true"
-              >
-                <span>Total</span>
-                <span className="tabular-nums">${total.toFixed(2)}</span>
-              </div>
-            </div>
+            </dl>
 
             {checkoutError && (
               <p
                 role="alert"
-                className="mt-3 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive"
+                className="rounded-xl bg-destructive/10 px-3 py-2 text-[13px] leading-[18px] text-destructive"
               >
                 {checkoutError}
               </p>
             )}
 
-            {checkoutModel === "two_step" && (
-              <p className="mt-3 rounded-lg border border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
-                You&apos;ll see two charges: a hold for the Materialize
-                service fee shown above (only charged once your order is
-                placed) and CraftCloud&apos;s charge for production +
-                shipping.
-              </p>
-            )}
+            {checkoutModel === "two_step" && <TwoChargesNote />}
 
-            <div className="mt-4 space-y-2.5">
+            <div className="flex gap-2">
               {onAddToCart && (
                 <Button
                   type="button"
-                  variant="outline"
+                  variant="secondary"
                   size="lg"
-                  className="w-full"
                   onClick={onAddToCart}
                   disabled={!selectedShipping || busy}
                   loading={!!isAddingToCart}
                 >
-                  Add to Cart
+                  Add to cart
                 </Button>
               )}
               <Button
                 type="button"
                 size="lg"
-                className="w-full"
+                className="flex-1"
                 onClick={onCheckout}
                 disabled={!selectedShipping || busy}
                 loading={isCheckingOut}
@@ -352,7 +307,7 @@ export function ShippingSheet({
                 Proceed to checkout
               </Button>
             </div>
-          </>
+          </div>
         ) : (
           <>
           {/* A failed checkout lands back on this step (the configurator
@@ -361,7 +316,7 @@ export function ShippingSheet({
           {checkoutError && (
             <p
               role="alert"
-              className="mb-3 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive"
+              className="mb-4 rounded-xl bg-destructive/10 px-3 py-2 text-[13px] leading-[18px] text-destructive"
             >
               {checkoutError}
             </p>
@@ -378,5 +333,82 @@ export function ShippingSheet({
         )}
       </div>
     </NativeSheet>
+  );
+}
+
+function money(dollars: number): string {
+  return `$${dollars.toFixed(2)}`;
+}
+
+/**
+ * One delivery choice: name + speed left, price right, a check when
+ * selected. Selected = soft fill, not a heavy border (DESIGN_SYSTEM §
+ * Lists and rows).
+ */
+function DeliveryOptionRow({
+  option,
+  selected,
+  locked = false,
+  tabIndex,
+  onSelect,
+}: {
+  option: ShippingOption;
+  selected: boolean;
+  locked?: boolean;
+  tabIndex?: number;
+  onSelect?: () => void;
+}) {
+  const body = (
+    <>
+      <span
+        aria-hidden="true"
+        className={cn(
+          "flex size-4 shrink-0 items-center justify-center rounded-full border transition-colors duration-150",
+          selected
+            ? "border-primary bg-primary text-primary-foreground"
+            : "border-input"
+        )}
+      >
+        {selected && <span className="size-1.5 rounded-full bg-current" />}
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-sm leading-5 font-medium">
+          {option.name}
+        </span>
+        <span className="block text-[13px] leading-[18px] text-muted-foreground">
+          {option.deliveryTime} {option.deliveryTime === 1 ? "day" : "days"}
+          {locked ? " · fixed by your cart" : ""}
+        </span>
+      </span>
+      <span className="shrink-0 text-sm font-medium tabular-nums">
+        {money(option.price)}
+      </span>
+    </>
+  );
+  const base =
+    "flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left ring-1 transition-[background-color,box-shadow] duration-150";
+  if (locked || !onSelect) {
+    return (
+      <div className={cn(base, "bg-muted/60 ring-transparent")}>{body}</div>
+    );
+  }
+  return (
+    <button
+      type="button"
+      role="radio"
+      aria-checked={selected}
+      tabIndex={tabIndex}
+      data-shipping-id={option.shippingId}
+      onClick={onSelect}
+      className={cn(
+        base,
+        "cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-ring",
+        selected
+          ? "bg-muted ring-foreground/15"
+          : "ring-border hover:bg-muted/60"
+      )}
+    >
+      {body}
+    </button>
   );
 }

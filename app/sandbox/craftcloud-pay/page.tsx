@@ -12,6 +12,8 @@ import { db } from "@/lib/db";
 import { printOrders } from "@/lib/db/schema";
 import { isMockCheckoutMode } from "@/lib/craftcloud/client";
 import { SandboxPayButton } from "./pay-button";
+import { Button } from "@/components/ui/button";
+import { SandboxBadge } from "@/components/sandbox-badge";
 
 /**
  * Sandbox stand-in for CraftCloud's hosted production-payment page.
@@ -66,10 +68,10 @@ export default async function SandboxCraftCloudPayPage({
 
   return (
     <div className="mx-auto flex min-h-svh max-w-md flex-col justify-center px-4 py-10">
-      <div className="rounded-3xl border border-border bg-card p-6 shadow-sm">
+      <div className="rounded-3xl bg-card p-6 ring-1 ring-border">
         <div className="flex items-center gap-3">
-          <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-orange-100 text-orange-600 dark:bg-orange-950 dark:text-orange-400">
-            <FactoryIcon className="h-6 w-6" strokeWidth={2.5} />
+          <div className="flex size-10 shrink-0 items-center justify-center rounded-[10px] bg-muted text-foreground">
+            <FactoryIcon className="size-5" />
           </div>
           <div>
             <h1 className="text-lg font-semibold leading-tight">
@@ -80,12 +82,10 @@ export default async function SandboxCraftCloudPayPage({
               {order.vendorName ? ` · ${order.vendorName}` : ""}
             </p>
           </div>
-          <span className="ml-auto rounded-full bg-amber-100 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide text-amber-700 dark:bg-amber-950 dark:text-amber-400">
-            Sandbox
-          </span>
+          <SandboxBadge className="ml-auto" />
         </div>
 
-        <p className="mt-4 text-xs leading-relaxed text-muted-foreground">
+        <p className="mt-4 text-[13px] leading-[18px] text-muted-foreground">
           This page stands in for CraftCloud&apos;s hosted checkout while
           Materialize runs in mock checkout mode — nothing is charged.
           Paying here marks the production payment complete exactly the way
@@ -94,7 +94,7 @@ export default async function SandboxCraftCloudPayPage({
 
         {order.status === "awaiting_production_payment" ? (
           <>
-            <div className="mt-5 space-y-2.5 rounded-2xl border border-border/60 p-4 text-sm">
+            <div className="mt-5 space-y-2.5 rounded-2xl p-4 text-sm ring-1 ring-border">
               {order.materialSubtotal != null && (
                 <Row
                   label={`Production${quantity > 1 ? ` × ${quantity}` : ""}`}
@@ -109,11 +109,11 @@ export default async function SandboxCraftCloudPayPage({
               </div>
             </div>
 
-            <div className="mt-4 flex items-center gap-3 rounded-2xl border border-border/60 px-4 py-3.5">
-              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-blue-100 text-blue-600 dark:bg-blue-950 dark:text-blue-400">
-                <CreditCardIcon className="h-5 w-5" strokeWidth={2.5} />
+            <div className="mt-3 flex items-center gap-3 rounded-2xl px-4 py-3 ring-1 ring-border">
+              <div className="flex size-9 shrink-0 items-center justify-center rounded-[10px] bg-muted text-foreground">
+                <CreditCardIcon className="size-4" />
               </div>
-              <span className="text-[15px] font-medium">
+              <span className="text-sm font-medium">
                 Test card •••• 4242
               </span>
               <span className="ml-auto text-xs text-muted-foreground">
@@ -138,9 +138,8 @@ export default async function SandboxCraftCloudPayPage({
         ) : order.status === "cancelled" ? (
           <StatusCard
             icon={
-              <TimerOffIcon className="h-6 w-6" strokeWidth={2.5} />
+              <TimerOffIcon className="size-5" />
             }
-            tone="bg-red-100 text-red-600 dark:bg-red-950 dark:text-red-400"
             title="This checkout expired"
             body="The production payment was never completed, so the order was cancelled and the service-fee hold released."
             cta={{ href: "/print", label: "Start a new print" }}
@@ -148,9 +147,8 @@ export default async function SandboxCraftCloudPayPage({
         ) : order.status === "cart_created" ? (
           <StatusCard
             icon={
-              <CreditCardIcon className="h-6 w-6" strokeWidth={2.5} />
+              <CreditCardIcon className="size-5" />
             }
-            tone="bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-400"
             title="Service fee not authorized yet"
             body="Finish the service-fee step first — resume this order from your orders page."
             cta={{ href: "/dashboard/orders", label: "Go to your orders" }}
@@ -158,9 +156,8 @@ export default async function SandboxCraftCloudPayPage({
         ) : (
           <StatusCard
             icon={
-              <PackageCheckIcon className="h-6 w-6" strokeWidth={2.5} />
+              <PackageCheckIcon className="size-5" />
             }
-            tone="bg-green-100 text-green-600 dark:bg-green-950 dark:text-green-400"
             title="Already paid"
             body="Production payment is complete and this order has been placed."
             cta={{ href: "/dashboard/orders", label: "Track your order" }}
@@ -173,38 +170,31 @@ export default async function SandboxCraftCloudPayPage({
 
 function StatusCard({
   icon,
-  tone,
   title,
   body,
   cta,
 }: {
   icon: React.ReactNode;
-  tone: string;
   title: string;
   body: string;
   cta: { href: string; label: string };
 }) {
   return (
     <div className="mt-5 space-y-4">
-      <div className="flex items-center gap-3">
-        <div
-          className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl ${tone}`}
-        >
+      <div className="flex items-start gap-3">
+        <div className="flex size-10 shrink-0 items-center justify-center rounded-[10px] bg-muted text-foreground">
           {icon}
         </div>
         <div>
           <p className="font-semibold">{title}</p>
-          <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">
+          <p className="mt-0.5 text-[13px] leading-[18px] text-muted-foreground">
             {body}
           </p>
         </div>
       </div>
-      <Link
-        href={cta.href}
-        className="block w-full rounded-2xl bg-primary px-4 py-3 text-center text-sm font-semibold text-primary-foreground transition-opacity hover:opacity-90"
-      >
+      <Button size="lg" className="w-full" render={<Link href={cta.href} />}>
         {cta.label}
-      </Link>
+      </Button>
     </div>
   );
 }

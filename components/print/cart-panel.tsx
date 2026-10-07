@@ -7,13 +7,14 @@ import { useCart, type LocalCartItem } from "./cart-context";
 import type { CartItemWithMeta } from "@/app/actions/cart";
 import { useAuthModal } from "@/components/auth/auth-modal";
 import { Button } from "@/components/ui/button";
-import { Separator } from "@/components/ui/separator";
+import { SummaryRow } from "@/components/ui/summary-list";
+import { X } from "@/components/icons/x";
+import { CartLineRow } from "./cart-line-row";
 import {
   Dialog,
   DialogContent,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { MinusIcon, PlusIcon, TrashIcon } from "lucide-react";
 import { checkoutVendorGroup } from "@/app/actions/print";
 import { dedupeShippingByShipId } from "@/lib/pricing/shipping";
 import { useRouter } from "next/navigation";
@@ -107,7 +108,7 @@ function PriceCell({ cents, pending }: { cents: number; pending: boolean }) {
   if (pending) {
     return <span className="inline-block h-3.5 w-12 animate-pulse rounded bg-muted" />;
   }
-  return <span>${(cents / 100).toFixed(2)}</span>;
+  return <>${(cents / 100).toFixed(2)}</>;
 }
 
 interface CartPanelProps {
@@ -170,31 +171,20 @@ function CartPanelInner({ checkoutModel }: { checkoutModel: CheckoutModel }) {
       >
         {/* Grab-handle affordance — bottom-sheet only. */}
         <div className="mx-auto mt-2.5 h-1 w-10 shrink-0 rounded-full bg-muted-foreground/30 md:hidden" />
-        <div className="flex items-center justify-between p-4 pb-2 md:pt-4">
-          <DialogTitle className="flex items-center gap-2 text-base font-semibold md:text-sm">
+        <div className="flex items-center justify-between px-4 pt-3 pb-1 md:pt-3">
+          <DialogTitle className="flex items-center gap-2 text-base leading-6 font-semibold">
             Cart
             {sandbox && <SandboxBadge />}
           </DialogTitle>
-          <button
+          <Button
+            variant="ghost"
+            size="icon-sm"
             onClick={close}
             aria-label="Close cart"
-            className="-mr-1 rounded-md p-1.5 text-muted-foreground hover:text-foreground transition-colors"
+            className="-mr-1.5 text-muted-foreground"
           >
-            <svg
-              aria-hidden="true"
-              xmlns="http://www.w3.org/2000/svg"
-              width="16"
-              height="16"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <path d="M18 6 6 18" /><path d="M6 6l12 12" />
-            </svg>
-          </button>
+            <X size={16} />
+          </Button>
         </div>
 
         {loading && isEmpty ? (
@@ -206,20 +196,25 @@ function CartPanelInner({ checkoutModel }: { checkoutModel: CheckoutModel }) {
             Loading your cart…
           </div>
         ) : isEmpty ? (
-          <div className="px-4 pb-6 pt-4 text-center">
-            <p className="text-sm text-muted-foreground">
-              Your cart is empty.
+          // Same anatomy as <EmptyState bare> (components/ui/page.tsx),
+          // inlined so the globally-mounted cart doesn't pull page
+          // scaffolding (next/link et al.) into its bundle.
+          <div className="flex flex-col items-center px-6 pt-4 pb-6 text-center">
+            <p className="text-base leading-6 font-semibold">Your cart is empty</p>
+            <p className="mt-1.5 max-w-xs text-sm text-pretty text-muted-foreground">
+              Quote a print and add it here to check out several parts from
+              one shop together.
             </p>
             <Button
-              variant="outline"
+              variant="secondary"
               size="sm"
-              className="mt-3"
+              className="mt-4"
               onClick={() => {
                 close();
                 router.push("/print");
               }}
             >
-              Start printing
+              Start a print
             </Button>
           </div>
         ) : (
@@ -304,8 +299,8 @@ function CartItemsList({
   };
 
   return (
-    <div className="px-4 pb-4">
-      {vendorGroups.map((group, groupIdx) => (
+    <div className="flex flex-col divide-y divide-border px-4 pb-4">
+      {vendorGroups.map((group) => (
         <VendorGroup
           key={group.vendorId}
           group={group}
@@ -318,7 +313,6 @@ function CartItemsList({
           materializing={materializing}
           close={close}
           router={router}
-          showSeparator={groupIdx < vendorGroups.length - 1}
           checkoutModel={checkoutModel}
         />
       ))}
@@ -337,7 +331,6 @@ function VendorGroup({
   materializing,
   close,
   router,
-  showSeparator,
   checkoutModel,
 }: {
   group: { vendorId: string; vendorName: string | null; items: DisplayItem[] };
@@ -350,7 +343,6 @@ function VendorGroup({
   materializing: boolean;
   close: () => void;
   router: ReturnType<typeof useRouter>;
-  showSeparator: boolean;
   checkoutModel: CheckoutModel;
 }) {
   const cart = useCart();
@@ -425,13 +417,20 @@ function VendorGroup({
     }
   };
 
-  return (
-    <div>
-      <p className="text-xs font-medium text-muted-foreground mb-2 mt-2">
-        Vendor: {group.vendorName ?? group.vendorId}
-      </p>
+  const lineCount = group.items.reduce((sum, i) => sum + i.quantity, 0);
 
-      <div className="space-y-3">
+  return (
+    <section className="flex flex-col py-3 first:pt-1">
+      <div className="flex items-baseline justify-between gap-3">
+        <h3 className="truncate text-[13px] leading-[18px] font-medium text-muted-foreground">
+          {group.vendorName ?? group.vendorId}
+        </h3>
+        <span className="shrink-0 text-xs text-subtle-foreground">
+          {lineCount} {lineCount === 1 ? "item" : "items"}
+        </span>
+      </div>
+
+      <div className="mt-1 flex flex-col">
         {group.items.map((item) => (
           <CartItemRow
             key={item.id}
@@ -442,53 +441,47 @@ function VendorGroup({
         ))}
       </div>
 
-      <Separator className="my-3" />
-
-      <div className="space-y-1 text-sm">
-        <div className="flex justify-between text-muted-foreground">
-          <span>Material</span>
-          <PriceCell cents={material} pending={groupRepricing} />
-        </div>
-        <div className="flex justify-between text-muted-foreground">
-          <span>Service fee (3%)</span>
-          <PriceCell cents={serviceFee} pending={groupRepricing} />
-        </div>
-        <div className="flex justify-between text-muted-foreground">
-          <span>Shipping</span>
-          <span>${(shipping / 100).toFixed(2)}</span>
-        </div>
-        <div className="flex justify-between font-semibold">
-          <span>Total</span>
-          <PriceCell cents={total} pending={groupRepricing} />
-        </div>
-      </div>
+      <dl className="mt-2 flex flex-col gap-1.5 border-t border-border pt-3 text-sm">
+        <SummaryRow
+          label="Material"
+          value={<PriceCell cents={material} pending={groupRepricing} />}
+        />
+        <SummaryRow
+          label="Service fee (3%)"
+          value={<PriceCell cents={serviceFee} pending={groupRepricing} />}
+        />
+        <SummaryRow label="Shipping" value={`$${(shipping / 100).toFixed(2)}`} />
+        <SummaryRow
+          total
+          label="Total"
+          value={<PriceCell cents={total} pending={groupRepricing} />}
+        />
+      </dl>
 
       {error && (
         <p
           role="alert"
-          className="mt-2 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive"
+          className="mt-3 rounded-xl bg-destructive/10 px-3 py-2 text-[13px] leading-[18px] text-destructive"
         >
           {error}
         </p>
       )}
 
+      {/* The cart is a popover / bottom sheet — a full-width action is
+          the sheet exception in DESIGN_SYSTEM § Controls. */}
       <Button
         onClick={handleCheckout}
-        disabled={checkingOut || materializing}
-        className="mt-3 h-11 w-full md:h-9"
-        size="sm"
+        loading={checkingOut || materializing}
+        className="mt-3 w-full"
+        size="lg"
       >
         {materializing
-          ? "Preparing files..."
-          : checkingOut
-            ? "Processing..."
-            : !isSignedIn
-              ? "Sign up to checkout"
-              : "Checkout"}
+          ? "Preparing files…"
+          : !isSignedIn
+            ? "Sign up to check out"
+            : "Check out"}
       </Button>
-
-      {showSeparator && <Separator className="my-4" />}
-    </div>
+    </section>
   );
 }
 
@@ -503,69 +496,17 @@ function CartItemRow({
 }) {
   const cart = useCart();
   const repricing = !!cart?.repricingIds.has(item.id);
-  const unitPrice = item.materialPrice / 100;
-  const lineTotal = (item.materialPrice * item.quantity) / 100;
   const name = item.fileName ?? item.originalFilename;
 
   return (
-    <div className="flex items-start gap-3">
-      <div className="flex-1 min-w-0">
-        <p className="text-sm font-medium truncate">
-          {name}
-        </p>
-        {repricing ? (
-          <span className="mt-1 inline-block h-3 w-16 animate-pulse rounded bg-muted align-middle" />
-        ) : (
-          <p className="text-xs text-muted-foreground">
-            ${unitPrice.toFixed(2)} each
-          </p>
-        )}
-        {item.staleQuote && (
-          <p className="mt-0.5 text-[10px] text-amber-700 dark:text-amber-300">
-            Quote may have expired — re-add from the print page if checkout fails.
-          </p>
-        )}
-      </div>
-
-      <div className="flex items-center gap-1">
-        <button
-          onClick={() => item.quantity > 1 && onUpdateQty(item.quantity - 1)}
-          disabled={item.quantity <= 1}
-          aria-label={`Decrease quantity of ${name}`}
-          className="rounded p-0.5 text-muted-foreground hover:text-foreground disabled:opacity-30 transition-colors"
-        >
-          <MinusIcon className="h-3.5 w-3.5" aria-hidden="true" />
-        </button>
-        <span className="w-6 text-center text-sm tabular-nums" aria-live="polite">
-          {item.quantity}
-        </span>
-        <button
-          onClick={() => item.quantity < 100 && onUpdateQty(item.quantity + 1)}
-          disabled={item.quantity >= 100}
-          aria-label={`Increase quantity of ${name}`}
-          className="rounded p-0.5 text-muted-foreground hover:text-foreground disabled:opacity-30 transition-colors"
-        >
-          <PlusIcon className="h-3.5 w-3.5" aria-hidden="true" />
-        </button>
-      </div>
-
-      {repricing ? (
-        <span className="w-16 flex justify-end">
-          <span className="inline-block h-3.5 w-12 animate-pulse rounded bg-muted" />
-        </span>
-      ) : (
-        <span className="text-sm font-medium w-16 text-right tabular-nums">
-          ${lineTotal.toFixed(2)}
-        </span>
-      )}
-
-      <button
-        onClick={onRemove}
-        aria-label={`Remove ${name} from cart`}
-        className="rounded p-0.5 text-muted-foreground hover:text-destructive transition-colors"
-      >
-        <TrashIcon className="h-3.5 w-3.5" aria-hidden="true" />
-      </button>
-    </div>
+    <CartLineRow
+      name={name}
+      quantity={item.quantity}
+      unitCents={item.materialPrice}
+      repricing={repricing}
+      stale={item.staleQuote}
+      onUpdateQty={onUpdateQty}
+      onRemove={onRemove}
+    />
   );
 }

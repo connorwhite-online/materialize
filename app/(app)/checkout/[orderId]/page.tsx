@@ -9,6 +9,7 @@ import {
 } from "@/lib/db/schema";
 import { eq, and } from "drizzle-orm";
 import { CheckoutForm } from "@/components/checkout/checkout-form";
+import { Page, PageHeader } from "@/components/ui/page";
 
 /**
  * Checkout page for a `cart_created` print order. Reached via the
@@ -86,7 +87,11 @@ export default async function CheckoutPage(props: {
   );
 
   return (
-    <div className="mx-auto max-w-3xl px-4 py-8">
+    <Page className="max-w-5xl gap-6">
+      <PageHeader
+        title="Checkout"
+        description="Where should we ship it? You'll pay on the next step."
+      />
       <CheckoutForm
         orderId={order.id}
         items={items.map((i) => ({
@@ -100,6 +105,6 @@ export default async function CheckoutPage(props: {
         totalPrice={order.totalPrice}
         serviceFee={order.serviceFee}
       />
-    </div>
+    </Page>
   );
 }

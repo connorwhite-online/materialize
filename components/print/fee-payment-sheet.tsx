@@ -130,7 +130,7 @@ export function FeePaymentSheet({ sheet, onClose }: FeePaymentSheetProps) {
             className="max-w-[16rem]"
           />
         </div>
-        <p className="text-xs leading-relaxed text-muted-foreground">
+        <p className="text-[13px] leading-[18px] text-muted-foreground">
           Held now, charged only when your order is placed. Production and
           shipping are paid to CraftCloud in the next step.
         </p>
@@ -283,7 +283,7 @@ function FeeForm({
         />
         <div className="flex items-center gap-3">
           <div aria-hidden="true" className="h-px flex-1 bg-border" />
-          <span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+          <span className="text-xs text-subtle-foreground">
             or pay with card
           </span>
           <div aria-hidden="true" className="h-px flex-1 bg-border" />
@@ -318,7 +318,7 @@ function FeeForm({
       />
 
       {error && (
-        <p role="alert" className="text-sm text-destructive">
+        <p role="alert" className="text-[13px] leading-[18px] text-destructive">
           {error}
         </p>
       )}
@@ -339,7 +339,7 @@ function FeeForm({
             : `Authorize ${fmt(amountCents)}`)}
       </Button>
 
-      <p className="text-center text-[11px] text-muted-foreground">
+      <p className="text-center text-xs text-subtle-foreground">
         Your card details are handled by Stripe and saved for one-tap
         checkout next time.
       </p>
@@ -437,14 +437,14 @@ export function SavedCardFeeSheet({
             old "Mastercard •••• 4444 / Saved" row — logo top-left,
             metal chip on the right midline, pan on the face. */}
         <div>
-          <p className="text-xs font-medium text-muted-foreground">
+          <p className="text-[13px] leading-[18px] text-muted-foreground">
             Service fee
           </p>
-          <p className="text-3xl font-bold tabular-nums">
+          <p className="text-3xl leading-9 font-semibold tabular-nums">
             {fmt(confirm.amountCents)}
           </p>
         </div>
-        <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
+        <p className="mt-2 text-[13px] leading-[18px] text-muted-foreground">
           Held now, charged only when your order is placed. Production and
           shipping are paid to CraftCloud in the next step.
         </p>
@@ -462,7 +462,7 @@ export function SavedCardFeeSheet({
 
         <div className="space-y-3">
           {error && (
-            <p role="alert" className="text-sm text-destructive">
+            <p role="alert" className="text-[13px] leading-[18px] text-destructive">
               {error}
             </p>
           )}

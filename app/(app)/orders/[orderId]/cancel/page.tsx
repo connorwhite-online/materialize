@@ -146,9 +146,8 @@ export default async function CancelAgentOrderPage({
         <CancelOrderForm orderId={orderId} confirmationToken={token} />
       ) : (
         <Button
-          variant="outline"
-          size="lg"
-          className="w-full"
+          variant="secondary"
+          className="self-start"
           render={<Link href="/dashboard/orders" />}
         >
           Back to your orders

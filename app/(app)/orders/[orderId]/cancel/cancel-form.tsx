@@ -3,6 +3,7 @@
 import { useState, useTransition } from "react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { cancelAutoApprovedOrder } from "@/app/actions/agent-orders";
 
 interface Props {
@@ -32,34 +33,27 @@ export function CancelOrderForm({ orderId, confirmationToken }: Props) {
 
   if (success) {
     return (
-      <div className="space-y-3 rounded-lg border border-border bg-muted/30 p-4 text-sm">
-        <p className="font-medium">Order cancelled.</p>
-        <p className="text-muted-foreground">
-          A refund is on its way to your saved card. Most banks reflect it
-          within 5–10 business days.
-        </p>
-        <Link
-          href="/dashboard/orders"
-          className="inline-block underline hover:text-foreground"
-        >
-          View your orders →
-        </Link>
-      </div>
+      <Alert variant="success">
+        <AlertTitle>Order cancelled</AlertTitle>
+        <AlertDescription>
+          A refund is on its way to your saved card. Most banks show it within
+          5–10 business days.{" "}
+          <Link href="/dashboard/orders">View your orders</Link>
+        </AlertDescription>
+      </Alert>
     );
   }
 
   return (
-    <div className="space-y-2">
-      <Button
-        size="lg"
-        variant="destructive"
-        onClick={onCancel}
-        disabled={isPending}
-        className="w-full"
-      >
+    <div className="flex flex-col items-start gap-2">
+      <Button size="lg" variant="destructive" onClick={onCancel} loading={isPending}>
         {isPending ? "Cancelling…" : "Cancel and refund"}
       </Button>
-      {error && <p className="text-xs text-destructive">{error}</p>}
+      {error && (
+        <p role="alert" className="text-[13px] leading-[18px] text-destructive">
+          {error}
+        </p>
+      )}
     </div>
   );
 }

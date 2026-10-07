@@ -1,5 +1,6 @@
 "use client";
 
+import { Button } from "@/components/ui/button";
 import { useState } from "react";
 import { paySandboxProductionOrder } from "@/app/actions/sandbox-checkout";
 
@@ -36,22 +37,25 @@ export function SandboxPayButton({
   };
 
   return (
-    <div className="space-y-3">
+    <div className="flex flex-col gap-2">
       {error && (
-        <p role="alert" className="text-sm text-destructive">
+        <p role="alert" className="text-[13px] leading-[18px] text-destructive">
           {error}
         </p>
       )}
-      <button
+      {/* Stand-in for a hosted payment page: a single full-width pay
+          button is the convention there (and this column is ~22rem). */}
+      <Button
         type="button"
+        size="lg"
+        className="w-full"
         onClick={pay}
-        disabled={phase !== "idle"}
-        className="w-full rounded-2xl bg-primary px-4 py-3.5 text-center text-[15px] font-semibold text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
+        loading={phase !== "idle"}
       >
         {phase === "paying" && "Processing…"}
         {phase === "redirecting" && "Back to Materialize…"}
         {phase === "idle" && `Pay ${amountLabel}`}
-      </button>
+      </Button>
     </div>
   );
 }

@@ -168,19 +168,17 @@ describe("label maps (must key every status — a miss renders a blank/raw label
     expect(missing).toEqual([]);
   });
 
-  // TODO(MTR-163): the order-detail page has its OWN duplicate
-  // STATUS_LABELS map (app/(app)/dashboard/orders/[orderId]/page.tsx),
-  // but it can't be imported here — App Router page files reject
-  // arbitrary named exports at `next build` time (only `default` +
-  // reserved route config are allowed; exporting it green-lights
-  // tsc/vitest but fails the Vercel build). MTR-163 will hoist that
-  // copy into a shared module (e.g. lib/print-statuses.ts) alongside
-  // orders-tab's copy so a single source of truth can be asserted
-  // here. Until then the label-map contract is still covered via the
-  // importable orders-tab duplicate above.
-  it.todo(
-    "app/(app)/dashboard/orders/[orderId]/page.tsx STATUS_LABELS covers every status (MTR-163: un-importable page-file map)"
-  );
+  // The order-detail page's map now lives in a sibling module
+  // (order-detail-view.tsx) precisely so it can be imported here —
+  // page files can't carry named exports. MTR-163 still owns merging
+  // it with orders-tab's copy.
+  it("app/(app)/dashboard/orders/[orderId]/order-detail-view.tsx ORDER_STATUS_LABELS covers every status", async () => {
+    const { ORDER_STATUS_LABELS } = await import(
+      "@/app/(app)/dashboard/orders/[orderId]/order-detail-view"
+    );
+    const missing = ALL_STATUSES.filter((s) => !(s in ORDER_STATUS_LABELS));
+    expect(missing).toEqual([]);
+  });
 });
 
 describe("components/print/order-status-tracker.tsx STEPS array (rendered, not exported)", () => {
@@ -210,17 +208,17 @@ describe("components/print/order-status-tracker.tsx STEPS array (rendered, not e
     const { unmount: unmountBlocked } = render(
       <OrderStatusTracker orderId="order-1" currentStatus="blocked" />
     );
-    expect(screen.getByText("Order Could Not Be Completed")).toBeTruthy();
+    expect(screen.getByText("Order could not be completed")).toBeTruthy();
     unmountBlocked();
 
     const { unmount: unmountCancelled } = render(
       <OrderStatusTracker orderId="order-1" currentStatus="cancelled" />
     );
-    expect(screen.getByText("Order Cancelled")).toBeTruthy();
+    expect(screen.getByText("Order cancelled")).toBeTruthy();
     unmountCancelled();
 
     render(<OrderStatusTracker orderId="order-1" currentStatus="refunded" />);
-    expect(screen.getByText("Order Refunded")).toBeTruthy();
+    expect(screen.getByText("Order refunded")).toBeTruthy();
   });
 
   it("the four STEPS statuses (ordered/in_production/shipped/received) render their step labels", async () => {
@@ -230,7 +228,7 @@ describe("components/print/order-status-tracker.tsx STEPS array (rendered, not e
 
     render(<OrderStatusTracker orderId="order-1" currentStatus="ordered" />);
     expect(screen.getByText("Confirmed")).toBeTruthy();
-    expect(screen.getByText("In Production")).toBeTruthy();
+    expect(screen.getByText("In production")).toBeTruthy();
     expect(screen.getByText("Shipped")).toBeTruthy();
     expect(screen.getByText("Delivered")).toBeTruthy();
   });

@@ -77,10 +77,10 @@ function fillRequiredFields() {
   fireEvent.change(screen.getByLabelText("Email"), {
     target: { value: "ada@example.com" },
   });
-  fireEvent.change(screen.getByLabelText("First Name"), {
+  fireEvent.change(screen.getByLabelText("First name"), {
     target: { value: "Ada" },
   });
-  fireEvent.change(screen.getByLabelText("Last Name"), {
+  fireEvent.change(screen.getByLabelText("Last name"), {
     target: { value: "Lovelace" },
   });
   fireEvent.change(screen.getByLabelText("Address"), {
@@ -89,7 +89,7 @@ function fillRequiredFields() {
   fireEvent.change(screen.getByLabelText("City"), {
     target: { value: "London" },
   });
-  fireEvent.change(screen.getByLabelText("Postal Code"), {
+  fireEvent.change(screen.getByLabelText("Postal code"), {
     target: { value: "NW1 5LR" },
   });
   fireEvent.change(screen.getByLabelText("Phone"), {
@@ -166,7 +166,7 @@ describe("ShippingAddressForm — authed mode", () => {
     );
 
     fillRequiredFields();
-    fireEvent.click(screen.getByRole("button", { name: /Place Order & Pay/i }));
+    fireEvent.click(screen.getByRole("button", { name: /Continue to payment/i }));
 
     await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
     expect(calls.signUpCreate).not.toHaveBeenCalled();
@@ -187,10 +187,10 @@ describe("ShippingAddressForm — authed mode", () => {
     fireEvent.change(screen.getByLabelText("Email"), {
       target: { value: "ada@example.com" },
     });
-    fireEvent.click(screen.getByRole("button", { name: /Place Order & Pay/i }));
+    fireEvent.click(screen.getByRole("button", { name: /Continue to payment/i }));
 
     expect(onSubmit).not.toHaveBeenCalled();
-    expect(await screen.findAllByText(/Required/i)).not.toHaveLength(0);
+    expect(await screen.findAllByText(/^Enter a /)).not.toHaveLength(0);
   });
 
   // CraftCloud rejects an order with no shipping phone number.
@@ -208,9 +208,9 @@ describe("ShippingAddressForm — authed mode", () => {
     fireEvent.change(screen.getByLabelText("Phone"), {
       target: { value: "" },
     });
-    fireEvent.click(screen.getByRole("button", { name: /Place Order & Pay/i }));
+    fireEvent.click(screen.getByRole("button", { name: /Continue to payment/i }));
 
-    expect(await screen.findByText("Phone number required")).toBeTruthy();
+    expect(await screen.findByText("Enter a phone number")).toBeTruthy();
     expect(onSubmit).not.toHaveBeenCalled();
     expect(document.activeElement?.id).toBe("phoneNumber");
   });

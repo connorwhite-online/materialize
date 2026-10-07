@@ -46,7 +46,7 @@ describe("PriceDisplay sandbox chip", () => {
   it("flags the order summary when the deployment is in sandbox mode", () => {
     render(<SandboxProvider sandbox>{renderSummary()}</SandboxProvider>);
     expect(chip()).toBeTruthy();
-    expect(screen.getByText("Order Summary")).toBeTruthy();
+    expect(screen.getByText("Order summary")).toBeTruthy();
   });
 
   it("stays out of the way on a live deployment", () => {

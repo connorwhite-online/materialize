@@ -3,11 +3,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useUser } from "@clerk/nextjs";
-import { TrashIcon, MinusIcon, PlusIcon } from "lucide-react";
 import { ChevronDown } from "@/components/icons/chevron-down";
-import { ChevronUp } from "@/components/icons/chevron-up";
 import { Button } from "@/components/ui/button";
-import { Separator } from "@/components/ui/separator";
+import { FormActions } from "@/components/ui/field";
+import { SummaryRow } from "@/components/ui/summary-list";
+import { cn } from "@/lib/utils";
+import { CartLineRow } from "./cart-line-row";
 import { useCart, type LocalCartItem } from "./cart-context";
 import { useAuthModal } from "@/components/auth/auth-modal";
 import type { CartItemWithMeta } from "@/app/actions/cart";
@@ -80,7 +81,7 @@ function SlotPriceCell({ cents, pending }: { cents: number; pending: boolean }) 
   if (pending) {
     return <span className="inline-block h-3.5 w-12 animate-pulse rounded bg-muted" />;
   }
-  return <span>${(cents / 100).toFixed(2)}</span>;
+  return <>${(cents / 100).toFixed(2)}</>;
 }
 
 function groupShipping(items: DisplayItem[]): number {
@@ -209,10 +210,8 @@ export function CartSlotStack({
     visibleGroups.some((g) => g.vendorId === pendingItem.vendorId);
 
   return (
-    <div className="space-y-3">
-      <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
-        Your carts
-      </p>
+    <section className="flex flex-col gap-2">
+      <h2 className="text-sm leading-5 font-semibold">Your carts</h2>
       {visibleGroups.map((group) => {
         const hasPending =
           pendingMatchesExisting &&
@@ -229,7 +228,7 @@ export function CartSlotStack({
           />
         );
       })}
-    </div>
+    </section>
   );
 }
 
@@ -336,54 +335,55 @@ function CartSlot({
 
   return (
     <div
-      className={`rounded-xl border bg-card ${
-        pendingItem
-          ? "border-primary ring-2 ring-primary/20"
-          : "border-border"
-      }`}
+      className={cn(
+        "overflow-hidden rounded-2xl bg-card ring-1 transition-shadow duration-150",
+        pendingItem ? "ring-foreground/25" : "ring-border"
+      )}
     >
       <button
         type="button"
         onClick={() => setExpanded((v) => !v)}
-        className="flex w-full cursor-pointer items-center justify-between px-4 py-3 text-left"
+        aria-expanded={expanded}
+        className="flex w-full cursor-pointer items-center gap-3 px-4 py-3 text-left transition-colors duration-150 hover:bg-muted/50 focus-visible:bg-muted/50 focus-visible:outline-none"
       >
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
-            <p className="truncate text-sm font-medium">
+            <p className="truncate text-sm leading-5 font-medium">
               {group.vendorName ?? group.vendorId}
             </p>
             {pendingItem && (
-              <span className="shrink-0 rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-primary">
-                + 1 pending
+              <span className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">
+                +1 adding
               </span>
             )}
           </div>
-          <p className="mt-0.5 text-[11px] text-muted-foreground">
+          <p className="text-[13px] leading-[18px] text-muted-foreground tabular-nums">
             {itemCount} {itemCount === 1 ? "item" : "items"} · $
             {(total / 100).toFixed(2)}
           </p>
         </div>
-        {expanded ? (
-          <ChevronUp className="shrink-0 text-muted-foreground" />
-        ) : (
-          <ChevronDown className="shrink-0 text-muted-foreground" />
-        )}
+        <ChevronDown
+          aria-hidden="true"
+          className={cn(
+            "shrink-0 text-muted-foreground transition-transform duration-150",
+            expanded && "rotate-180"
+          )}
+        />
       </button>
 
       {expanded && (
-        <div className="border-t border-border px-4 py-3 space-y-3">
+        <div className="border-t border-border px-4 pt-1 pb-4">
           {pendingItem && (
-            <div className="flex items-start gap-2 rounded-lg border border-dashed border-primary/40 bg-primary/5 px-3 py-2">
+            <div className="-mx-2 mt-2 flex items-center gap-3 rounded-xl bg-muted/60 px-2 py-2">
               <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-medium">
+                <p className="truncate text-sm leading-5 font-medium">
                   {pendingItem.filename}
                 </p>
-                <p className="text-[11px] text-muted-foreground">
-                  ${(pendingItem.materialPrice / 100).toFixed(2)} each ·
-                  will merge on Add to Cart
+                <p className="text-[13px] leading-[18px] text-muted-foreground">
+                  Joins this cart when you add it
                 </p>
               </div>
-              <span className="text-sm font-medium tabular-nums">
+              <span className="text-[13px] text-muted-foreground tabular-nums">
                 ×{pendingItem.quantity}
               </span>
               <span className="w-16 shrink-0 text-right text-sm font-medium tabular-nums">
@@ -396,102 +396,59 @@ function CartSlot({
             </div>
           )}
 
-          {group.items.map((item) => (
-            <div key={item.id} className="flex items-start gap-2">
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-medium">
-                  {item.fileName ?? item.originalFilename}
-                </p>
-                {cart?.repricingIds.has(item.id) ? (
-                  <span className="mt-1 inline-block h-3 w-16 animate-pulse rounded bg-muted align-middle" />
-                ) : (
-                  <p className="text-[11px] text-muted-foreground">
-                    ${(item.materialPrice / 100).toFixed(2)} each
-                  </p>
-                )}
-                {item.staleQuote && (
-                  <p className="mt-0.5 text-[10px] text-amber-700 dark:text-amber-300">
-                    Quote may have expired — re-add if checkout fails.
-                  </p>
-                )}
-              </div>
-
-              <div className="flex items-center gap-1">
-                <button
-                  onClick={() =>
-                    item.quantity > 1 &&
-                    handleUpdateQty(item, item.quantity - 1)
-                  }
-                  disabled={item.quantity <= 1}
-                  className="rounded p-0.5 text-muted-foreground hover:text-foreground disabled:opacity-30 transition-colors"
-                >
-                  <MinusIcon className="h-3.5 w-3.5" />
-                </button>
-                <span className="w-6 text-center text-sm tabular-nums">
-                  {item.quantity}
-                </span>
-                <button
-                  onClick={() =>
-                    item.quantity < 100 &&
-                    handleUpdateQty(item, item.quantity + 1)
-                  }
-                  disabled={item.quantity >= 100}
-                  className="rounded p-0.5 text-muted-foreground hover:text-foreground disabled:opacity-30 transition-colors"
-                >
-                  <PlusIcon className="h-3.5 w-3.5" />
-                </button>
-              </div>
-
-              <button
-                onClick={() => handleRemove(item)}
-                className="rounded p-0.5 text-muted-foreground hover:text-destructive transition-colors"
-              >
-                <TrashIcon className="h-3.5 w-3.5" />
-              </button>
-            </div>
-          ))}
-
-          <Separator />
-
-          <div className="space-y-1 text-sm">
-            <div className="flex justify-between text-muted-foreground">
-              <span>Material</span>
-              <SlotPriceCell cents={material} pending={groupRepricing} />
-            </div>
-            <div className="flex justify-between text-muted-foreground">
-              <span>Service fee (3%)</span>
-              <SlotPriceCell cents={serviceFee} pending={groupRepricing} />
-            </div>
-            <div className="flex justify-between text-muted-foreground">
-              <span>Shipping</span>
-              <span>${(shipping / 100).toFixed(2)}</span>
-            </div>
-            <div className="flex justify-between font-semibold">
-              <span>Total</span>
-              <SlotPriceCell cents={total} pending={groupRepricing} />
-            </div>
+          <div className="flex flex-col">
+            {group.items.map((item) => (
+              <CartLineRow
+                key={item.id}
+                name={item.fileName ?? item.originalFilename}
+                quantity={item.quantity}
+                unitCents={item.materialPrice}
+                repricing={!!cart?.repricingIds.has(item.id)}
+                stale={item.staleQuote}
+                onUpdateQty={(qty) => handleUpdateQty(item, qty)}
+                onRemove={() => handleRemove(item)}
+              />
+            ))}
           </div>
 
+          <dl className="mt-2 flex flex-col gap-1.5 border-t border-border pt-3 text-sm">
+            <SummaryRow
+              label="Material"
+              value={<SlotPriceCell cents={material} pending={groupRepricing} />}
+            />
+            <SummaryRow
+              label="Service fee (3%)"
+              value={<SlotPriceCell cents={serviceFee} pending={groupRepricing} />}
+            />
+            <SummaryRow label="Shipping" value={`$${(shipping / 100).toFixed(2)}`} />
+            <SummaryRow
+              total
+              label="Total"
+              value={<SlotPriceCell cents={total} pending={groupRepricing} />}
+            />
+          </dl>
+
           {error && (
-            <p className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
+            <p
+              role="alert"
+              className="mt-3 rounded-xl bg-destructive/10 px-3 py-2 text-[13px] leading-[18px] text-destructive"
+            >
               {error}
             </p>
           )}
 
-          <Button
-            onClick={handleCheckout}
-            disabled={checkingOut || cart?.materializing}
-            className="w-full"
-            size="sm"
-          >
-            {cart?.materializing
-              ? "Preparing files..."
-              : checkingOut
-                ? "Processing..."
+          <FormActions className="mt-3">
+            <Button
+              onClick={handleCheckout}
+              loading={checkingOut || !!cart?.materializing}
+            >
+              {cart?.materializing
+                ? "Preparing files…"
                 : !isSignedIn
-                  ? "Sign up to checkout"
-                  : "Checkout"}
-          </Button>
+                  ? "Sign up to check out"
+                  : "Check out"}
+            </Button>
+          </FormActions>
         </div>
       )}
     </div>

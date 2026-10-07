@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { auth } from "@clerk/nextjs/server";
 import { db } from "@/lib/db";
@@ -9,31 +8,10 @@ import {
   files,
 } from "@/lib/db/schema";
 import { eq, and, asc } from "drizzle-orm";
-import { OrderStatusTracker } from "@/components/print/order-status-tracker";
-import { OrderModelPreview } from "@/components/print/order-model-preview";
 import { loadPreviewView } from "@/lib/files/load-preview-view";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Separator } from "@/components/ui/separator";
 import { getMaterialById } from "@/lib/materials";
 import { formatOrderNumber } from "@/lib/utils/order-number";
-
-const STATUS_LABELS: Record<string, string> = {
-  quoting: "Quoting",
-  awaiting_agent_approval: "Awaiting Approval",
-  auto_approved: "Approved — Placing Soon",
-  cart_created: "Pending Payment",
-  awaiting_production_payment: "Awaiting production payment",
-  ordered: "Confirmed",
-  in_production: "In Production",
-  shipped: "Shipped",
-  received: "Delivered",
-  blocked: "Needs Attention",
-  refunded: "Refunded",
-  cancelled: "Cancelled",
-};
+import { OrderDetailView } from "./order-detail-view";
 
 export default async function OrderDetailPage(props: {
   params: Promise<{ orderId: string }>;
@@ -136,7 +114,6 @@ export default async function OrderDetailPage(props: {
   const materialMeta = displayMaterialId ? getMaterialById(displayMaterialId) : null;
   const displayVendorName = order.vendorName ?? order.vendor ?? null;
   const orderNumber = formatOrderNumber(order.id);
-  const statusLabel = STATUS_LABELS[order.status] || order.status;
 
   // Price breakdown — split the lumped totalPrice into its
   // components so the user can see what they paid for. Production
@@ -151,227 +128,58 @@ export default async function OrderDetailPage(props: {
     order.totalPrice - breakdownMaterial - breakdownShipping
   );
 
+  const title = displayFilename
+    ? extraItemCount > 0
+      ? `${displayFilename} + ${extraItemCount} more`
+      : displayFilename
+    : materialMeta?.name || "3D print";
+  const quantityLabel =
+    order.fileAssetId && order.quantity && order.quantity > 1
+      ? `× ${order.quantity}`
+      : items.length > 1
+        ? `(${items.length} items)`
+        : null;
+
   return (
-    <div className="mz-enter mx-auto max-w-3xl px-4 py-8 sm:py-12">
-      {searchParams.payment === "success" && (
-        <Alert variant="success" className="mb-6">
-          <AlertTitle>Payment confirmed</AlertTitle>
-          <AlertDescription>
-            Your print has been sent to production. We&apos;ll keep you updated.
-          </AlertDescription>
-        </Alert>
-      )}
-
-      {searchParams.payment === "cancelled" && (
-        <Alert variant="destructive" className="mb-6">
-          <AlertTitle>Payment cancelled</AlertTitle>
-          <AlertDescription>
-            No charges were made. You can retry from your orders page.
-          </AlertDescription>
-        </Alert>
-      )}
-
-      {/* Header */}
-      <div className="flex items-start justify-between">
-        <div>
-          <p className="text-sm text-muted-foreground">Order {orderNumber}</p>
-          <h1 className="text-2xl font-semibold mt-0.5">
-            {displayFilename
-              ? extraItemCount > 0
-                ? `${displayFilename} + ${extraItemCount} more`
-                : displayFilename
-              : materialMeta?.name || order.material || "3D Print"}
-          </h1>
-          <p className="text-sm text-muted-foreground mt-1">
-            {[
-              displayVendorName,
-              materialMeta?.name,
-              materialMeta?.method,
-            ]
-              .filter(Boolean)
-              .join(" · ")}
-          </p>
-        </div>
-        <Badge
-          variant={
-            order.status === "cancelled" || order.status === "blocked"
-              ? "destructive"
-              : order.status === "refunded"
-                ? "secondary"
-                : "outline"
-          }
-        >
-          {statusLabel}
-        </Badge>
-      </div>
-
-      {/* Model preview rendered with the ordered material's color.
-          For multi-item orders, shows the first item's model with a
-          "+N more" badge in the corner so it's clear there are more
-          items in the order. */}
-      {previewFileAssetId && previewFormat && (
-        <div className="relative mt-6 aspect-[16/9] w-full overflow-hidden rounded-2xl border border-border bg-gradient-to-br from-muted/40 to-muted/10">
-          <OrderModelPreview
-            fileAssetId={previewFileAssetId}
-            format={previewFormat}
-            materialColor={materialMeta?.color ?? "#a1a1aa"}
-            initialView={previewView}
-          />
-          {extraItemCount > 0 && (
-            <div className="absolute right-3 top-3 rounded-full bg-background/85 px-2.5 py-1 text-xs font-medium backdrop-blur">
-              +{extraItemCount} more{extraItemCount === 1 ? " item" : " items"}
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Two-step checkout limbo: the 3% service fee is authorized
-          (held, not charged) and the CraftCloud order is placed, but
-          production + shipping haven't been paid to CraftCloud yet.
-          The tracker below renders all-pending for this status, so
-          spell out what's owed and link the payment interstitial. */}
-      {order.status === "awaiting_production_payment" && (
-        <Alert variant="warning" className="mt-6">
-          <AlertTitle>Awaiting production payment</AlertTitle>
-          <AlertDescription>
-            Service fee authorized — finish paying CraftCloud for production.
-            Your card hold for the Materialize service fee is only charged once your
-            order is confirmed.
-          </AlertDescription>
-          <Button
-            size="sm"
-            className="mt-3 w-fit"
-            render={<Link href={`/orders/${order.id}/pay-production`} />}
-          >
-            Complete payment
-          </Button>
-        </Alert>
-      )}
-
-      {/* Status tracker */}
-      <div className="mt-8">
-        <OrderStatusTracker
-          orderId={order.id}
-          currentStatus={order.status}
-          trackingInfo={order.trackingInfo}
-        />
-      </div>
-
-      {/* Info grid */}
-      <div className="mt-8 grid grid-cols-1 md:grid-cols-2 gap-4">
-        {/* Price breakdown */}
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base">Price Breakdown</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-2 text-sm">
-            {breakdownMaterial > 0 && (
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">
-                  Material
-                  {order.fileAssetId && order.quantity && order.quantity > 1
-                    ? ` (${order.quantity}x)`
-                    : items.length > 1
-                      ? ` (${items.length} items)`
-                      : ""}
-                </span>
-                <span className="tabular-nums">
-                  ${(breakdownMaterial / 100).toFixed(2)}
-                </span>
-              </div>
-            )}
-            {breakdownProductionFee > 0 && (
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">
-                  Vendor minimum fee
-                </span>
-                <span className="tabular-nums">
-                  ${(breakdownProductionFee / 100).toFixed(2)}
-                </span>
-              </div>
-            )}
-            {breakdownShipping > 0 && (
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Shipping</span>
-                <span className="tabular-nums">
-                  ${(breakdownShipping / 100).toFixed(2)}
-                </span>
-              </div>
-            )}
-            {/* Fallback for legacy rows where materialSubtotal +
-                shippingSubtotal are null — just show the lumped total. */}
-            {breakdownMaterial === 0 && breakdownShipping === 0 && (
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Production</span>
-                <span className="tabular-nums">
-                  ${(order.totalPrice / 100).toFixed(2)}
-                </span>
-              </div>
-            )}
-            <div className="flex justify-between">
-              <span className="text-muted-foreground">Service fee</span>
-              <span className="tabular-nums">
-                ${(order.serviceFee / 100).toFixed(2)}
-              </span>
-            </div>
-            <Separator />
-            <div className="flex justify-between font-semibold">
-              <span>Total</span>
-              <span className="tabular-nums">
-                ${((order.totalPrice + order.serviceFee) / 100).toFixed(2)}
-              </span>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* Material info */}
-      {materialMeta && (
-        <Card className="mt-4">
-          <CardContent className="p-4 flex items-center gap-4">
-            <div
-              className="h-10 w-10 rounded-md shrink-0 border border-border"
-              style={{
-                background: `linear-gradient(135deg, ${materialMeta.color}, ${materialMeta.color}dd)`,
-              }}
-            />
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium">{materialMeta.name}</p>
-              <p className="text-xs text-muted-foreground">
-                {materialMeta.method} · {materialMeta.category}
-              </p>
-            </div>
-            <div className="flex gap-2 text-[10px] text-muted-foreground">
-              {(["strength", "flexibility", "detail"] as const).map((prop) => (
-                <div key={prop} className="flex items-center gap-0.5">
-                  <span className="capitalize">{prop.slice(0, 3)}</span>
-                  <div className="flex gap-px">
-                    {Array.from({ length: 5 }).map((_, i) => (
-                      <div
-                        key={i}
-                        className={`h-1 w-1 rounded-full ${
-                          i < materialMeta.properties[prop]
-                            ? "bg-foreground/50"
-                            : "bg-muted"
-                        }`}
-                      />
-                    ))}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
-      <div className="mt-6 text-xs text-muted-foreground">
-        Ordered{" "}
-        {order.createdAt.toLocaleDateString("en-US", {
-          year: "numeric",
-          month: "long",
-          day: "numeric",
-        })}
-      </div>
-    </div>
+    <OrderDetailView
+      order={{
+        id: order.id,
+        status: order.status,
+        orderNumber,
+        createdAt: order.createdAt,
+        totalPrice: order.totalPrice,
+        serviceFee: order.serviceFee,
+        trackingInfo: order.trackingInfo,
+      }}
+      title={title}
+      vendorName={displayVendorName}
+      material={
+        materialMeta
+          ? {
+              name: materialMeta.name,
+              method: materialMeta.method,
+              color: materialMeta.color,
+            }
+          : null
+      }
+      quantityLabel={quantityLabel}
+      breakdown={{
+        material: breakdownMaterial,
+        productionFee: breakdownProductionFee,
+        shipping: breakdownShipping,
+      }}
+      preview={
+        previewFileAssetId && previewFormat
+          ? {
+              fileAssetId: previewFileAssetId,
+              format: previewFormat,
+              color: materialMeta?.color ?? "#a1a1aa",
+              initialView: previewView,
+              extraItemCount,
+            }
+          : null
+      }
+      payment={searchParams.payment}
+    />
   );
 }

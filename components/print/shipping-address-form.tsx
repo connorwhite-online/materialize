@@ -1,22 +1,17 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import {
-  MailOpenIcon,
-  MapPinIcon,
-  PackageIcon,
-  TruckIcon,
-} from "lucide-react";
+import { MapPinIcon } from "lucide-react";
 import { useSignUp, useSignIn } from "@clerk/nextjs/legacy";
 import { setUsernameFromEmail } from "@/app/actions/onboarding";
 import { reportClientError } from "@/lib/observability/report-client-error";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { CheckboxField } from "@/components/ui/checkbox";
-import { Card, CardContent } from "@/components/ui/card";
+import { Field, FormActions } from "@/components/ui/field";
 import { OtpField } from "@/components/ui/otp-field";
 import { ChevronLeft } from "@/components/icons/chevron-left";
+import { ChevronDown } from "@/components/icons/chevron-down";
+import { cn } from "@/lib/utils";
 
 interface Address {
   firstName: string;
@@ -160,15 +155,6 @@ export function ShippingAddressForm({
     phoneNumber: "",
     ...savedAddress?.shipping,
   });
-  const [billingSame, setBillingSame] = useState(true);
-  const [billing, setBilling] = useState<Address>({
-    firstName: "",
-    lastName: "",
-    address: "",
-    city: "",
-    zipCode: "",
-    countryCode: "US",
-  });
   const [errors, setErrors] = useState<Record<string, string>>({});
 
   // Ref used to focus the first invalid field on failed submit (CON-149).
@@ -184,14 +170,14 @@ export function ShippingAddressForm({
 
   const validate = () => {
     const errs: Record<string, string> = {};
-    if (!email || !email.includes("@")) errs.email = "Valid email required";
-    if (!shipping.firstName) errs.firstName = "Required";
-    if (!shipping.lastName) errs.lastName = "Required";
-    if (!shipping.address) errs.address = "Required";
-    if (!shipping.city) errs.city = "Required";
-    if (!shipping.zipCode) errs.zipCode = "Required";
+    if (!email || !email.includes("@")) errs.email = "Enter a valid email address";
+    if (!shipping.firstName) errs.firstName = "Enter a first name";
+    if (!shipping.lastName) errs.lastName = "Enter a last name";
+    if (!shipping.address) errs.address = "Enter a street address";
+    if (!shipping.city) errs.city = "Enter a city";
+    if (!shipping.zipCode) errs.zipCode = "Enter a postal code";
     if ((shipping.phoneNumber ?? "").replace(/\D/g, "").length < 7) {
-      errs.phoneNumber = "Phone number required";
+      errs.phoneNumber = "Enter a phone number";
     }
     setErrors(errs);
     return errs;
@@ -216,11 +202,14 @@ export function ShippingAddressForm({
       return;
     }
 
-    const billingAddress = billingSame ? shipping : billing;
+    // Billing mirrors shipping. There used to be a "billing same as
+    // shipping" checkbox, but unticking it never revealed billing
+    // fields — it just sent CraftCloud an empty billing address. The
+    // card's own billing details are collected by Stripe.
     const payload = {
       email,
       shipping,
-      billing: { ...billingAddress, isCompany: false },
+      billing: { ...shipping, isCompany: false },
     };
 
     // Authed path — just hand the parent the data and let it drive
@@ -413,64 +402,119 @@ export function ShippingAddressForm({
     };
   }, [stage]);
 
-  const updateShipping = (field: keyof Address, value: string) => {
-    setShipping((prev) => ({ ...prev, [field]: value }));
-    if (errors[field]) {
-      setErrors((prev) => {
-        const next = { ...prev };
-        delete next[field];
-        return next;
-      });
-    }
+  const clearError = (field: string) => {
+    if (!errors[field]) return;
+    setErrors((prev) => {
+      const next = { ...prev };
+      delete next[field];
+      return next;
+    });
   };
 
+  const updateShipping = (field: keyof Address, value: string) => {
+    setShipping((prev) => ({ ...prev, [field]: value }));
+    clearError(field);
+  };
+
+  /** Props shared by every validated text input: a11y wiring + error ring. */
+  const fieldProps = (id: string) => ({
+    id,
+    name: id,
+    "aria-invalid": !!errors[id],
+    "aria-describedby": errors[id] ? `${id}-error` : undefined,
+  });
+
+  /** Field error with an id the input's aria-describedby can point at. */
+  const errorFor = (id: string) =>
+    errors[id] ? <span id={`${id}-error`}>{errors[id]}</span> : undefined;
+
+  // Step header. Embedded (sheet) gets the "← Shipping" back chip above
+  // a sheet title; on a page the PageHeader above already names the
+  // step, so the form leads with its first section heading instead.
+  const stepHeader = (
+    title: string,
+    description?: React.ReactNode,
+    backDisabled?: boolean
+  ) =>
+    embedded ? (
+      <div>
+        <EmbeddedSheetBack onClick={onBack} disabled={backDisabled} />
+        <h2
+          ref={titleRef}
+          tabIndex={-1}
+          className="mt-2 text-lg leading-6 font-semibold outline-none"
+        >
+          {title}
+        </h2>
+        {description && (
+          <p className="mt-1 text-sm text-pretty text-muted-foreground">
+            {description}
+          </p>
+        )}
+      </div>
+    ) : (
+      <div>
+        <h2
+          ref={titleRef}
+          tabIndex={-1}
+          className="text-base leading-6 font-semibold outline-none"
+        >
+          {title}
+        </h2>
+        {description && (
+          <p className="mt-0.5 text-sm text-pretty text-muted-foreground">
+            {description}
+          </p>
+        )}
+      </div>
+    );
+
   // One-tap path for returning buyers: their last-used address as a
-  // chunky card. The payload skips validate() — it already passed the
-  // same checks when it was originally submitted (and
+  // selectable object. The payload skips validate() — it already passed
+  // the same checks when it was originally submitted (and
   // getSavedShippingAddress re-checks the required fields).
   if (stage === "saved" && savedAddress) {
     const { shipping: saved } = savedAddress;
-    const body = (
-      <div className="space-y-4">
-        {!embedded && (
-          <div className="flex flex-row items-center gap-3">
-            <IconTile tone="bg-green-100 text-green-600 dark:bg-green-950 dark:text-green-400">
-              <PackageIcon className="h-6 w-6" strokeWidth={2.5} />
-            </IconTile>
-            <div>
-              <h2
-                ref={titleRef}
-                tabIndex={-1}
-                className="text-base font-semibold outline-none"
-              >
-                Ship it to the usual?
-              </h2>
-              <p className="mt-0.5 text-xs text-muted-foreground">
-                We kept your address from last time.
-              </p>
-            </div>
-          </div>
+    const deliver = (
+      <Button
+        type="button"
+        size={embedded ? "lg" : "default"}
+        className={embedded ? "w-full" : undefined}
+        loading={isSubmitting}
+        onClick={() => onSubmit(savedAddress)}
+      >
+        Deliver to this address
+      </Button>
+    );
+    const different = (
+      <Button
+        type="button"
+        variant={embedded ? "ghost" : "secondary"}
+        size={embedded ? "lg" : "default"}
+        className={embedded ? "w-full text-muted-foreground" : undefined}
+        onClick={() => setStage("form")}
+        disabled={isSubmitting}
+      >
+        Use a different address
+      </Button>
+    );
+
+    return (
+      <div className="flex flex-col gap-5">
+        {stepHeader(
+          "Ship it to the usual?",
+          "We kept your address from last time.",
+          isSubmitting
         )}
-        {embedded && (
-          <div>
-            <EmbeddedSheetBack onClick={onBack} disabled={isSubmitting} />
-            <h2
-              ref={titleRef}
-              tabIndex={-1}
-              className="mt-2 text-lg font-semibold outline-none"
-            >
-              Ship it to the usual?
-            </h2>
-            <p className="mt-0.5 text-xs text-muted-foreground">
-              We kept your address from last time.
-            </p>
-          </div>
-        )}
-        <div className="flex items-start gap-3 rounded-2xl border border-border/60 p-4">
-          <IconTile tone="bg-blue-100 text-blue-600 dark:bg-blue-950 dark:text-blue-400">
-            <MapPinIcon className="h-5 w-5" strokeWidth={2.5} />
-          </IconTile>
-          <div className="min-w-0 text-sm">
+
+        <div className="flex items-start gap-3 rounded-2xl px-4 py-3.5 ring-1 ring-border">
+          <span
+            aria-hidden="true"
+            className="flex size-9 shrink-0 items-center justify-center rounded-[10px] bg-muted text-foreground"
+          >
+            <MapPinIcon className="size-4" />
+          </span>
+          <div className="min-w-0 text-sm leading-5">
             <p className="font-medium">
               {saved.firstName} {saved.lastName}
             </p>
@@ -480,384 +524,336 @@ export function ShippingAddressForm({
             </p>
             <p className="text-muted-foreground">
               {saved.city}
-              {saved.stateCode ? `, ${saved.stateCode}` : ""} {saved.zipCode} ·{" "}
-              {saved.countryCode}
+              {saved.stateCode ? `, ${saved.stateCode}` : ""} {saved.zipCode}{" "}
+              · {saved.countryCode}
             </p>
-            <p className="mt-1 truncate text-xs text-muted-foreground">
-              {savedAddress.email}
+            <p className="mt-1 truncate text-[13px] leading-[18px] text-subtle-foreground">
+              {[savedAddress.email, saved.phoneNumber].filter(Boolean).join(" · ")}
             </p>
           </div>
         </div>
 
-        <div className="space-y-3">
-          <Button
-            type="button"
-            className="w-full"
-            disabled={isSubmitting}
-            onClick={() => onSubmit(savedAddress)}
-          >
-            <TruckIcon
-              className="mr-2 h-4 w-4"
-              strokeWidth={2.5}
-              aria-hidden="true"
-            />
-            {isSubmitting ? "Processing..." : "Deliver to this address"}
-          </Button>
-          <button
-            type="button"
-            onClick={() => setStage("form")}
-            disabled={isSubmitting}
-            className="block w-full text-center text-xs text-muted-foreground transition-colors hover:text-foreground disabled:opacity-50"
-          >
-            Use a different address
-          </button>
-        </div>
-      </div>
-    );
-
-    if (embedded) return <div>{body}</div>;
-
-    return (
-      <div>
-        <Card>
-          <CardContent className="pt-6">{body}</CardContent>
-        </Card>
-        <div className="mt-6">
-          <Button
-            type="button"
-            variant="outline"
-            onClick={onBack}
-            disabled={isSubmitting}
-          >
-            Back
-          </Button>
-        </div>
+        {embedded ? (
+          <div className="flex flex-col gap-1">
+            {deliver}
+            {different}
+          </div>
+        ) : (
+          <FormActions align="between">
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={onBack}
+              disabled={isSubmitting}
+            >
+              Back
+            </Button>
+            <div className="flex flex-wrap gap-2">
+              {different}
+              {deliver}
+            </div>
+          </FormActions>
+        )}
       </div>
     );
   }
 
   if (stage === "code") {
-    const codeBody = (
-      <div className="space-y-4">
-        {embedded ? (
-          <div>
-            <EmbeddedSheetBack
-              onClick={onBack}
-              disabled={otpVerifying || isSubmitting}
-            />
-            <h2
-              ref={titleRef}
-              tabIndex={-1}
-              className="mt-2 text-lg font-semibold outline-none"
+    const busy = otpVerifying || isSubmitting;
+    return (
+      <div className="flex flex-col gap-5">
+        {stepHeader(
+          "Verify your email",
+          <>
+            We sent a 6-digit code to{" "}
+            <span className="font-medium text-foreground">{email}</span>.{" "}
+            {authFlow === "sign-up"
+              ? "Enter it to finish setting up your account and place your order."
+              : "Looks like you already have an account — enter the code to sign in and place your order."}
+          </>,
+          busy
+        )}
+        <div className="flex flex-col items-center gap-2">
+          <OtpField
+            value={otpCode}
+            onChange={(val) => {
+              setOtpCode(val);
+              if (val.length === 6) handleVerifyOtp(val);
+            }}
+            autoFocus
+            disabled={busy}
+            aria-label="6-digit verification code"
+            aria-invalid={!!otpError}
+            aria-describedby={otpError ? "otp-error" : undefined}
+          />
+          {otpError && (
+            <p
+              id="otp-error"
+              role="alert"
+              className="text-center text-[13px] leading-[18px] text-destructive"
             >
-              Verify your email
-            </h2>
-          </div>
-        ) : (
-          <div className="flex flex-row items-center gap-3">
-            <IconTile tone="bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-400">
-              <MailOpenIcon className="h-6 w-6" strokeWidth={2.5} />
-            </IconTile>
-            <h2
-              ref={titleRef}
-              tabIndex={-1}
-              className="text-base font-semibold outline-none"
+              {otpError}
+            </p>
+          )}
+          {busy && (
+            <p
+              role="status"
+              className="text-center text-[13px] leading-[18px] text-muted-foreground"
             >
-              Verify your email
-            </h2>
-          </div>
-        )}
-        <p className="text-sm text-muted-foreground">
-          We sent a 6-digit code to{" "}
-          <span className="font-medium text-foreground">{email}</span>.{" "}
-          {authFlow === "sign-up"
-            ? "Enter it to finish setting up your account and place your order."
-            : "Looks like you already have an account — enter the code to sign in and place your order."}
-        </p>
-        <OtpField
-          value={otpCode}
-          onChange={(val) => {
-            setOtpCode(val);
-            if (val.length === 6) handleVerifyOtp(val);
-          }}
-          autoFocus
-          disabled={otpVerifying || isSubmitting}
-          aria-label="6-digit verification code"
-          aria-invalid={!!otpError}
-          aria-describedby={otpError ? "otp-error" : undefined}
-        />
-        {otpError && (
-          <p
-            id="otp-error"
-            role="alert"
-            className="text-center text-xs text-destructive"
-          >
-            {otpError}
-          </p>
-        )}
-        {(otpVerifying || isSubmitting) && (
-          <p role="status" className="text-center text-xs text-muted-foreground">
-            {isSubmitting ? "Placing your order…" : "Verifying…"}
-          </p>
-        )}
-        <button
+              {isSubmitting ? "Placing your order…" : "Verifying…"}
+            </p>
+          )}
+        </div>
+        <Button
           type="button"
+          variant="ghost"
+          size="sm"
+          className="self-center text-muted-foreground"
           onClick={() => {
             setStage("form");
             setOtpCode("");
             setOtpError("");
             setPendingSubmission(null);
           }}
-          disabled={otpVerifying || isSubmitting}
-          className="block w-full text-center text-xs text-muted-foreground transition-colors hover:text-foreground disabled:opacity-50"
+          disabled={busy}
         >
           Use a different email
-        </button>
+        </Button>
       </div>
-    );
-    if (embedded) return <div>{codeBody}</div>;
-    return (
-      <Card>
-        <CardContent className="pt-6">{codeBody}</CardContent>
-      </Card>
     );
   }
 
-  const formFields = (
-          <div className="space-y-4">
-        {embedded ? (
-          <div>
-            <EmbeddedSheetBack
-              onClick={onBack}
-              disabled={isSubmitting || otpSending}
-            />
-            <h2
-              ref={titleRef}
-              tabIndex={-1}
-              className="mt-2 text-lg font-semibold outline-none"
-            >
-              Where should we ship?
-            </h2>
-          </div>
-        ) : (
-          <div className="flex flex-row items-center gap-3">
-            <IconTile tone="bg-blue-100 text-blue-600 dark:bg-blue-950 dark:text-blue-400">
-              <TruckIcon className="h-6 w-6" strokeWidth={2.5} />
-            </IconTile>
-            <h2
-              ref={titleRef}
-              tabIndex={-1}
-              className="text-base font-semibold outline-none"
-            >
-              Shipping Address
-            </h2>
-          </div>
-        )}
-          <div>
-            <Label htmlFor="email">Email</Label>
-            <Input
-              id="email"
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="you@example.com"
-              aria-required="true"
-              aria-invalid={!!errors.email}
-              aria-describedby={errors.email ? "email-error" : undefined}
-            />
-            {errors.email && (
-              <p id="email-error" className="mt-1 text-xs text-destructive">{errors.email}</p>
-            )}
-          </div>
-
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <Label htmlFor="firstName">First Name</Label>
-              <Input
-                id="firstName"
-                value={shipping.firstName}
-                onChange={(e) => updateShipping("firstName", e.target.value)}
-                aria-required="true"
-                aria-invalid={!!errors.firstName}
-                aria-describedby={errors.firstName ? "firstName-error" : undefined}
-              />
-              {errors.firstName && (
-                <p id="firstName-error" className="mt-1 text-xs text-destructive">{errors.firstName}</p>
-              )}
-            </div>
-            <div>
-              <Label htmlFor="lastName">Last Name</Label>
-              <Input
-                id="lastName"
-                value={shipping.lastName}
-                onChange={(e) => updateShipping("lastName", e.target.value)}
-                aria-required="true"
-                aria-invalid={!!errors.lastName}
-                aria-describedby={errors.lastName ? "lastName-error" : undefined}
-              />
-              {errors.lastName && (
-                <p id="lastName-error" className="mt-1 text-xs text-destructive">{errors.lastName}</p>
-              )}
-            </div>
-          </div>
-
-          <div>
-            <Label htmlFor="address">Address</Label>
-            <Input
-              id="address"
-              value={shipping.address}
-              onChange={(e) => updateShipping("address", e.target.value)}
-              placeholder="123 Main St"
-              aria-required="true"
-              aria-invalid={!!errors.address}
-              aria-describedby={errors.address ? "address-error" : undefined}
-            />
-            {errors.address && (
-              <p id="address-error" className="mt-1 text-xs text-destructive">{errors.address}</p>
-            )}
-          </div>
-
-          <div>
-            <Label htmlFor="addressLine2">Address Line 2 (optional)</Label>
-            <Input
-              id="addressLine2"
-              value={shipping.addressLine2}
-              onChange={(e) => updateShipping("addressLine2", e.target.value)}
-              placeholder="Apt, suite, etc."
-            />
-          </div>
-
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <Label htmlFor="city">City</Label>
-              <Input
-                id="city"
-                value={shipping.city}
-                onChange={(e) => updateShipping("city", e.target.value)}
-                aria-required="true"
-                aria-invalid={!!errors.city}
-                aria-describedby={errors.city ? "city-error" : undefined}
-              />
-              {errors.city && (
-                <p id="city-error" className="mt-1 text-xs text-destructive">{errors.city}</p>
-              )}
-            </div>
-            <div>
-              <Label htmlFor="zipCode">Postal Code</Label>
-              <Input
-                id="zipCode"
-                value={shipping.zipCode}
-                onChange={(e) => updateShipping("zipCode", e.target.value)}
-                aria-required="true"
-                aria-invalid={!!errors.zipCode}
-                aria-describedby={errors.zipCode ? "zipCode-error" : undefined}
-              />
-              {errors.zipCode && (
-                <p id="zipCode-error" className="mt-1 text-xs text-destructive">{errors.zipCode}</p>
-              )}
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <Label htmlFor="stateCode">State/Province (optional)</Label>
-              <Input
-                id="stateCode"
-                value={shipping.stateCode}
-                onChange={(e) => updateShipping("stateCode", e.target.value)}
-              />
-            </div>
-            <div>
-              <Label htmlFor="countryCode">Country</Label>
-              <select
-                id="countryCode"
-                value={shipping.countryCode}
-                onChange={(e) => updateShipping("countryCode", e.target.value)}
-                className="flex h-9 w-full rounded-lg border border-input bg-background px-3 py-1 text-sm shadow-xs"
-              >
-                {COUNTRIES.map((c) => (
-                  <option key={c.code} value={c.code}>
-                    {c.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-          </div>
-
-          <div>
-            <Label htmlFor="phoneNumber">Phone</Label>
-            <Input
-              id="phoneNumber"
-              type="tel"
-              autoComplete="tel"
-              value={shipping.phoneNumber}
-              onChange={(e) => updateShipping("phoneNumber", e.target.value)}
-              aria-required="true"
-              aria-invalid={!!errors.phoneNumber}
-              aria-describedby={errors.phoneNumber ? "phoneNumber-error" : "phoneNumber-hint"}
-            />
-            {errors.phoneNumber ? (
-              <p id="phoneNumber-error" className="mt-1 text-xs text-destructive">{errors.phoneNumber}</p>
-            ) : (
-              <p id="phoneNumber-hint" className="mt-1 text-xs text-muted-foreground">
-                The print shop&apos;s carrier needs it for delivery.
-              </p>
-            )}
-          </div>
-
-          <div className="pt-2">
-            <CheckboxField
-              id="billingSame"
-              checked={billingSame}
-              onCheckedChange={(checked) => setBillingSame(checked === true)}
-              label="Billing address same as shipping"
-            />
-          </div>
-          </div>
-  );
+  const busy = isSubmitting || otpSending;
+  const submitLabel = otpSending
+    ? "Sending code…"
+    : anonMode
+      ? "Continue"
+      : "Continue to payment";
 
   return (
-    <form ref={formRef} onSubmit={handleSubmit}>
-      {embedded ? (
-        formFields
-      ) : (
-        <Card>
-          <CardContent className="pt-6">{formFields}</CardContent>
-        </Card>
-      )}
+    <form
+      ref={formRef}
+      onSubmit={handleSubmit}
+      noValidate
+      autoComplete="on"
+      className="flex flex-col gap-6"
+    >
+      {embedded && stepHeader("Where should we ship?", undefined, busy)}
 
-      {anonMode && otpError && stage === "form" && (
-        <p role="alert" className="mt-3 text-xs text-destructive">
+      <FormSection
+        title="Contact"
+        headingRef={embedded ? undefined : titleRef}
+        embedded={embedded}
+      >
+        <Field
+          label="Email"
+          htmlFor="email"
+          error={errorFor("email")}
+          hint={
+            anonMode
+              ? "We'll email you a code to confirm it and set up your account."
+              : "For your receipt and delivery updates."
+          }
+        >
+          <Input
+            {...fieldProps("email")}
+            type="email"
+            inputMode="email"
+            autoComplete="email"
+            autoCapitalize="off"
+            spellCheck={false}
+            value={email}
+            onChange={(e) => {
+              setEmail(e.target.value);
+              clearError("email");
+            }}
+            placeholder="you@example.com"
+            aria-required="true"
+          />
+        </Field>
+        <Field
+          label="Phone"
+          htmlFor="phoneNumber"
+          error={errorFor("phoneNumber")}
+          hint={
+            <span id="phoneNumber-hint">
+              The print shop&apos;s carrier needs it for delivery.
+            </span>
+          }
+        >
+          <Input
+            {...fieldProps("phoneNumber")}
+            type="tel"
+            inputMode="tel"
+            autoComplete="tel"
+            value={shipping.phoneNumber}
+            onChange={(e) => updateShipping("phoneNumber", e.target.value)}
+            aria-required="true"
+            aria-describedby={
+              errors.phoneNumber ? "phoneNumber-error" : "phoneNumber-hint"
+            }
+          />
+        </Field>
+      </FormSection>
+
+      <FormSection title="Shipping address" embedded={embedded}>
+        <Field label="Country" htmlFor="countryCode">
+          <div className="relative">
+            <select
+              id="countryCode"
+              name="countryCode"
+              autoComplete="country"
+              value={shipping.countryCode}
+              onChange={(e) => updateShipping("countryCode", e.target.value)}
+              className="field-text h-9 w-full min-w-0 cursor-pointer appearance-none rounded-[10px] border border-input bg-background py-1 pr-9 pl-3 outline-none transition-[border-color,box-shadow] duration-150 ease-out hover:border-foreground/25 focus-visible:border-ring focus-visible:shadow-input-focus md:text-sm"
+            >
+              {COUNTRIES.map((c) => (
+                <option key={c.code} value={c.code}>
+                  {c.name}
+                </option>
+              ))}
+            </select>
+            <ChevronDown
+              aria-hidden="true"
+              className="pointer-events-none absolute top-1/2 right-3 size-3.5 -translate-y-1/2 text-muted-foreground"
+            />
+          </div>
+        </Field>
+
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="First name" htmlFor="firstName" error={errorFor("firstName")}>
+            <Input
+              {...fieldProps("firstName")}
+              autoComplete="shipping given-name"
+              value={shipping.firstName}
+              onChange={(e) => updateShipping("firstName", e.target.value)}
+              aria-required="true"
+            />
+          </Field>
+          <Field label="Last name" htmlFor="lastName" error={errorFor("lastName")}>
+            <Input
+              {...fieldProps("lastName")}
+              autoComplete="shipping family-name"
+              value={shipping.lastName}
+              onChange={(e) => updateShipping("lastName", e.target.value)}
+              aria-required="true"
+            />
+          </Field>
+        </div>
+
+        <Field label="Address" htmlFor="address" error={errorFor("address")}>
+          <Input
+            {...fieldProps("address")}
+            autoComplete="shipping address-line1"
+            value={shipping.address}
+            onChange={(e) => updateShipping("address", e.target.value)}
+            placeholder="Street and number"
+            aria-required="true"
+          />
+        </Field>
+
+        <Field label="Apartment, suite, etc." htmlFor="addressLine2" optional>
+          <Input
+            id="addressLine2"
+            name="addressLine2"
+            autoComplete="shipping address-line2"
+            value={shipping.addressLine2}
+            onChange={(e) => updateShipping("addressLine2", e.target.value)}
+          />
+        </Field>
+
+        {/* City spans the row on phones; at sm+ city / state / postal
+            code share one row, the way every address form reads. */}
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-[1.4fr_0.8fr_1.2fr]">
+          <Field
+            label="City"
+            htmlFor="city"
+            error={errorFor("city")}
+            className="col-span-2 sm:col-span-1"
+          >
+            <Input
+              {...fieldProps("city")}
+              autoComplete="shipping address-level2"
+              value={shipping.city}
+              onChange={(e) => updateShipping("city", e.target.value)}
+              aria-required="true"
+            />
+          </Field>
+          <Field label="State" htmlFor="stateCode">
+            <Input
+              id="stateCode"
+              name="stateCode"
+              autoComplete="shipping address-level1"
+              value={shipping.stateCode}
+              onChange={(e) => updateShipping("stateCode", e.target.value)}
+            />
+          </Field>
+          <Field label="Postal code" htmlFor="zipCode" error={errorFor("zipCode")}>
+            <Input
+              {...fieldProps("zipCode")}
+              autoComplete="shipping postal-code"
+              value={shipping.zipCode}
+              onChange={(e) => updateShipping("zipCode", e.target.value)}
+              aria-required="true"
+            />
+          </Field>
+        </div>
+      </FormSection>
+
+      {anonMode && otpError && (
+        <p role="alert" className="-mt-2 text-[13px] leading-[18px] text-destructive">
           {otpError}
         </p>
       )}
 
-      <div className="mt-6 flex gap-3">
-        {!embedded && (
-          <Button
-            type="button"
-            variant="outline"
-            onClick={onBack}
-            disabled={isSubmitting || otpSending}
-          >
+      {embedded ? (
+        <Button type="submit" size="lg" className="w-full" loading={busy}>
+          {submitLabel}
+        </Button>
+      ) : (
+        <FormActions align="between">
+          <Button type="button" variant="ghost" onClick={onBack} disabled={busy}>
             Back
           </Button>
-        )}
-        <Button
-          type="submit"
-          disabled={isSubmitting || otpSending}
-          className="flex-1"
-        >
-          {otpSending
-            ? "Sending code…"
-            : isSubmitting
-              ? "Processing..."
-              : anonMode
-                ? "Continue"
-                : "Place Order & Pay"}
-        </Button>
-      </div>
+          <Button type="submit" size="lg" loading={busy}>
+            {submitLabel}
+          </Button>
+        </FormActions>
+      )}
     </form>
+  );
+}
+
+/**
+ * A titled group of fields (Contact, Shipping address). Grouped by a
+ * heading and space, not a box — the form isn't an object.
+ */
+function FormSection({
+  title,
+  headingRef,
+  embedded,
+  children,
+}: {
+  title: string;
+  headingRef?: React.Ref<HTMLHeadingElement>;
+  embedded: boolean;
+  children: React.ReactNode;
+}) {
+  const Heading = embedded ? "h3" : "h2";
+  return (
+    <section className="flex flex-col gap-4">
+      <Heading
+        ref={headingRef}
+        tabIndex={headingRef ? -1 : undefined}
+        className={cn(
+          "font-semibold outline-none",
+          embedded ? "text-sm leading-5" : "text-base leading-6"
+        )}
+      >
+        {title}
+      </Heading>
+      {children}
+    </section>
   );
 }
 
@@ -878,31 +874,10 @@ function EmbeddedSheetBack({
       type="button"
       onClick={onClick}
       disabled={disabled}
-      className="inline-flex cursor-pointer items-center gap-1 rounded-lg px-3 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground disabled:pointer-events-none disabled:opacity-50 -ml-3"
+      className="-ml-2 inline-flex h-8 cursor-pointer items-center gap-1 rounded-lg pr-2.5 pl-1.5 text-sm text-muted-foreground transition-colors duration-150 hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none disabled:pointer-events-none disabled:opacity-50"
     >
       <ChevronLeft size={14} />
       Shipping
     </button>
-  );
-}
-
-/**
- * Chunky rounded icon tile — the checkout flow's shared visual accent
- * (also used by the fee sheets and the sandbox CraftCloud page).
- */
-function IconTile({
-  tone,
-  children,
-}: {
-  tone: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div
-      aria-hidden="true"
-      className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl ${tone}`}
-    >
-      {children}
-    </div>
   );
 }
