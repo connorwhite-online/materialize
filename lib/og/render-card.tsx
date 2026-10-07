@@ -2,6 +2,10 @@ import { ImageResponse } from "next/og";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
+  WORDMARK_GLYPHS,
+  WORDMARK_MARK_WIDTH,
+} from "@/components/brand/logo-paths";
+import {
   resolveImageUrl,
   shouldFullBleed,
   toSatoriSafeDataUrl,
@@ -90,7 +94,36 @@ type CardProps = {
    * fanned across the frame. Ignored by the other layouts.
    */
   images?: string[] | null;
+  /**
+   * Paint the Materialize "M" bottom-left of a full-bleed card. For cards
+   * where the artwork IS the brand (the site-wide card); per-entity cards
+   * leave it off because the title and domain already sit beneath the
+   * image in every client.
+   */
+  mark?: boolean;
 };
+
+const MARK_HEIGHT = 56;
+const MARK_INSET = 56;
+// The "M" is the wordmark's first glyph — the one the mobile nav pill and
+// the Apple touch icon wear — NOT the legacy standalone MARK_PATH.
+const MARK_WIDTH = Math.round((MARK_HEIGHT * WORDMARK_MARK_WIDTH) / 100);
+
+/** The brand "M" as satori-safe inline SVG (path from logo-paths.ts). */
+function OgMark() {
+  return (
+    <svg
+      width={MARK_WIDTH}
+      height={MARK_HEIGHT}
+      viewBox={`0 0 ${WORDMARK_MARK_WIDTH} 100`}
+      fillRule="evenodd"
+      fill="#fafafa"
+      style={{ position: "absolute", left: MARK_INSET, bottom: MARK_INSET }}
+    >
+      <path d={WORDMARK_GLYPHS[0].d} />
+    </svg>
+  );
+}
 
 /**
  * Fan geometry for the stack layout.
@@ -225,6 +258,7 @@ export async function renderOgCard(props: CardProps): Promise<ImageResponse> {
             width: "100%",
             height: "100%",
             display: "flex",
+            position: "relative",
             background: BRAND_BG,
             fontFamily: "Materialize",
           }}
@@ -239,6 +273,7 @@ export async function renderOgCard(props: CardProps): Promise<ImageResponse> {
               objectFit: props.fit ?? "cover",
             }}
           />
+          {props.mark ? <OgMark /> : null}
         </div>
       ),
       {

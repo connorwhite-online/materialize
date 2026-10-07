@@ -90,6 +90,20 @@ describe("OG card rendering", () => {
     expectPng(buf);
   }, 30000);
 
+  it("renders a full-bleed card with the M mark bottom-left", async () => {
+    const buf = await save(
+      "site-mark",
+      await renderOgCard({
+        title: "Materialize",
+        layout: "full",
+        fit: "cover",
+        imageUrl: photo,
+        mark: true,
+      })
+    );
+    expectPng(buf);
+  }, 30000);
+
   it("falls back to the split card when a full layout has no image", async () => {
     const buf = await save(
       "fallback-split",
