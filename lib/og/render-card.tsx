@@ -1,7 +1,10 @@
 import { ImageResponse } from "next/og";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { MARK_PATH, MARK_VIEWBOX } from "@/components/brand/logo-paths";
+import {
+  WORDMARK_GLYPHS,
+  WORDMARK_MARK_WIDTH,
+} from "@/components/brand/logo-paths";
 import {
   resolveImageUrl,
   shouldFullBleed,
@@ -102,7 +105,9 @@ type CardProps = {
 
 const MARK_HEIGHT = 56;
 const MARK_INSET = 56;
-const MARK_WIDTH = Math.round((MARK_HEIGHT * 415) / 251);
+// The "M" is the wordmark's first glyph — the one the mobile nav pill and
+// the Apple touch icon wear — NOT the legacy standalone MARK_PATH.
+const MARK_WIDTH = Math.round((MARK_HEIGHT * WORDMARK_MARK_WIDTH) / 100);
 
 /** The brand "M" as satori-safe inline SVG (path from logo-paths.ts). */
 function OgMark() {
@@ -110,11 +115,12 @@ function OgMark() {
     <svg
       width={MARK_WIDTH}
       height={MARK_HEIGHT}
-      viewBox={MARK_VIEWBOX}
+      viewBox={`0 0 ${WORDMARK_MARK_WIDTH} 100`}
+      fillRule="evenodd"
       fill="#fafafa"
       style={{ position: "absolute", left: MARK_INSET, bottom: MARK_INSET }}
     >
-      <path d={MARK_PATH} />
+      <path d={WORDMARK_GLYPHS[0].d} />
     </svg>
   );
 }
