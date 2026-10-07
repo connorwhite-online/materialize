@@ -2,6 +2,10 @@ import { ImageResponse } from "next/og";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
+  WORDMARK_GLYPHS,
+  WORDMARK_VIEWBOX,
+} from "@/components/brand/logo-paths";
+import {
   resolveImageUrl,
   shouldFullBleed,
   toSatoriSafeDataUrl,
@@ -90,7 +94,42 @@ type CardProps = {
    * fanned across the frame. Ignored by the other layouts.
    */
   images?: string[] | null;
+  /**
+   * Paint the Materialize wordmark bottom-left of a full-bleed card. For
+   * cards where the artwork IS the brand (the site-wide card); per-entity
+   * cards leave it off because the title and domain already sit beneath
+   * the image in every client.
+   */
+  wordmark?: boolean;
 };
+
+const WORDMARK_HEIGHT = 34;
+const WORDMARK_INSET = 52;
+const WORDMARK_WIDTH = Math.round(
+  (WORDMARK_HEIGHT * 1122.335342) / 100
+);
+
+/** The brand wordmark as satori-safe inline SVG (paths from logo-paths.ts). */
+function OgWordmark() {
+  return (
+    <svg
+      width={WORDMARK_WIDTH}
+      height={WORDMARK_HEIGHT}
+      viewBox={WORDMARK_VIEWBOX}
+      fill="#fafafa"
+      fillRule="evenodd"
+      style={{
+        position: "absolute",
+        left: WORDMARK_INSET,
+        bottom: WORDMARK_INSET,
+      }}
+    >
+      {WORDMARK_GLYPHS.map((g, i) => (
+        <path key={i} d={g.d} />
+      ))}
+    </svg>
+  );
+}
 
 /**
  * Fan geometry for the stack layout.
@@ -225,6 +264,7 @@ export async function renderOgCard(props: CardProps): Promise<ImageResponse> {
             width: "100%",
             height: "100%",
             display: "flex",
+            position: "relative",
             background: BRAND_BG,
             fontFamily: "Materialize",
           }}
@@ -239,6 +279,7 @@ export async function renderOgCard(props: CardProps): Promise<ImageResponse> {
               objectFit: props.fit ?? "cover",
             }}
           />
+          {props.wordmark ? <OgWordmark /> : null}
         </div>
       ),
       {

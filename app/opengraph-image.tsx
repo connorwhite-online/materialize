@@ -1,3 +1,5 @@
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
 import { OG_CONTENT_TYPE, OG_SIZE, renderOgCard } from "@/lib/og/render-card";
 
 /**
@@ -15,6 +17,13 @@ import { OG_CONTENT_TYPE, OG_SIZE, renderOgCard } from "@/lib/og/render-card";
  * `(app)/files/[slug]`, `(app)/projects/[slug]`, `(app)/materials/[slug]`
  * and `(app)/[handle]` still take precedence on their own routes.
  *
+ * The art is the landing hero's "Host the whole build" step — the
+ * Pneuma S enclosure exploded, captured from the real 3D scene
+ * (`public/og/landing-exploded.png`, see `public/og/README.md`) — with the
+ * wordmark bottom-left. Dark only, like every other OG card: link previews
+ * have no theme to follow, and the scene itself is shot on `#0a0a0a`-ish
+ * black.
+ *
  * Static: no params, no fetches, so Next renders it once at build time.
  */
 
@@ -24,8 +33,15 @@ export const size = OG_SIZE;
 export const contentType = OG_CONTENT_TYPE;
 
 export default async function Image() {
+  // Read off disk as a data URL: a build-time render has no request, so
+  // the relative-URL resolution the per-entity cards use isn't available.
+  const art = await readFile(join(process.cwd(), "public/og/landing-exploded.png"));
   return renderOgCard({
     title: "Materialize",
     subtitle: "3D-print files marketplace · on-demand printing",
+    imageUrl: `data:image/png;base64,${art.toString("base64")}`,
+    layout: "full",
+    fit: "cover",
+    wordmark: true,
   });
 }

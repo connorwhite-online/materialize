@@ -90,6 +90,20 @@ describe("OG card rendering", () => {
     expectPng(buf);
   }, 30000);
 
+  it("renders a full-bleed card with the wordmark bottom-left", async () => {
+    const buf = await save(
+      "site-wordmark",
+      await renderOgCard({
+        title: "Materialize",
+        layout: "full",
+        fit: "cover",
+        imageUrl: photo,
+        wordmark: true,
+      })
+    );
+    expectPng(buf);
+  }, 30000);
+
   it("falls back to the split card when a full layout has no image", async () => {
     const buf = await save(
       "fallback-split",
