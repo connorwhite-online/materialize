@@ -81,7 +81,7 @@ export function OtpField({
     <div className={cn("group/otp grid h-12 justify-center", className)}>
       <div
         aria-hidden
-        className="col-start-1 row-start-1 flex items-center gap-1"
+        className="col-start-1 row-start-1 flex items-center gap-1.5"
       >
         {Array.from({ length }, (_, i) => {
           const isActive =
