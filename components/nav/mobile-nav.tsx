@@ -203,7 +203,9 @@ const DRAG_CLOSE_VELOCITY = 500;
 const NAV_SURFACE = cn(
   "glass-surface",
   "ring-1 ring-border/70",
-  "shadow-[0_2px_8px_-2px_oklch(0_0_0/0.14),0_18px_44px_-14px_oklch(0_0_0/0.38)]"
+  // ChatGPT's popover elevation, a touch deeper: the pill floats over
+  // arbitrary page content, so it needs more separation than a menu.
+  "shadow-[0_4px_8px_-2px_oklch(0_0_0/0.08),0_12px_28px_-8px_oklch(0_0_0/0.16)]"
 );
 
 /**

@@ -38,7 +38,7 @@ const ICON_GLYPH =
   "text-neutral-900 hover:text-neutral-900 dark:text-neutral-100 dark:hover:text-neutral-100";
 
 const ICON_BUBBLE = cn(
-  "size-10 shrink-0 rounded-[20px]",
+  "size-10 shrink-0 rounded-full",
   BUBBLE_SHADOW,
   ICON_GLYPH
 );
@@ -227,10 +227,9 @@ function AuthCluster({
         href={profileHref}
         aria-label="Your profile"
         className={cn(
-          "box-border flex h-10 min-w-[12rem] items-center gap-2 overflow-hidden p-1 pr-3 transition-colors",
+          "box-border flex h-10 max-w-[14rem] items-center gap-2 overflow-hidden rounded-full p-1 pr-3.5 transition-colors",
           BUBBLE_SHADOW
         )}
-        style={{ borderRadius: "24px 12px 12px 24px" }}
       >
         <UserAvatar
           seed={user.username || user.id}
@@ -253,11 +252,10 @@ function AuthCluster({
       <NotificationsPopover
         initialUnreadCount={initialUnreadCount}
         triggerClassName={cn(
-          "flex size-10 shrink-0 items-center justify-center overflow-hidden transition-colors",
+          "flex size-10 shrink-0 items-center justify-center overflow-hidden rounded-full transition-colors",
           BUBBLE_SHADOW,
           ICON_GLYPH
         )}
-        triggerStyle={{ borderRadius: "12px 24px 24px 12px" }}
       />
     </div>
   );

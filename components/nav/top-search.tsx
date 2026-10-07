@@ -155,11 +155,11 @@ export function TopSearch() {
           }
         }}
         className={cn(
-          "box-border overflow-hidden rounded-3xl bg-gradient-to-t from-neutral-50 to-white p-1 shadow-[0_0_2px_oklch(0_0_0/0.06),0_0_14px_oklch(0_0_0/0.08)] dark:from-neutral-900 dark:to-neutral-800 dark:shadow-[0_0_2px_oklch(0_0_0/0.4),0_0_18px_oklch(0_0_0/0.45)]"
+          "box-border overflow-hidden rounded-[20px] bg-background p-1 shadow-surface transition-shadow duration-200 focus-within:shadow-float"
         )}
       >
         <div className="flex h-8 items-center gap-1">
-          <div className="flex h-full min-w-0 flex-1 items-center rounded-[16px] bg-muted/80 pl-3 pr-1.5">
+          <div className="flex h-full min-w-0 flex-1 items-center rounded-[16px] bg-muted pl-3 pr-1.5">
             <Browse
               size={16}
               className="mr-2 shrink-0 text-muted-foreground"
@@ -173,7 +173,7 @@ export function TopSearch() {
               }}
               onFocus={() => setOpen(true)}
               placeholder="Search (⌘K)"
-              className="h-full min-w-0 flex-1 bg-transparent text-sm placeholder:text-muted-foreground/60 focus:outline-none"
+              className="h-full min-w-0 flex-1 bg-transparent text-sm placeholder:text-subtle-foreground focus:outline-none"
               autoComplete="off"
               autoCorrect="off"
               spellCheck={false}
