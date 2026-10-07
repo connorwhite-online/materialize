@@ -181,7 +181,7 @@ export function OrderDetailView({
         <div className={cn("flex flex-col gap-6", preview && "lg:sticky lg:top-20")}>
 
           <Card className="gap-0 px-5 pt-4 pb-5">
-            <h2 className="mb-4 text-xs font-medium tracking-wide text-muted-foreground uppercase">
+            <h2 className="mb-4 text-sm leading-5 font-semibold">
               Status
             </h2>
             <OrderStatusTracker

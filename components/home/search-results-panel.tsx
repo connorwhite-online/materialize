@@ -156,7 +156,7 @@ function Section({
 }) {
   return (
     <div>
-      <h3 className="mb-1.5 px-2 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+      <h3 className="mb-1.5 px-2 text-xs text-subtle-foreground">
         {title}
       </h3>
       <div className="flex gap-2 overflow-x-auto px-2 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">

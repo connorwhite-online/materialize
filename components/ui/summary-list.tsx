@@ -20,7 +20,7 @@ export function SummaryCard({
   return (
     <Card className={cn("gap-0 px-5 py-4", className)}>
       {title && (
-        <p className="mb-3 text-xs font-medium tracking-wide text-muted-foreground uppercase">
+        <p className="mb-3 text-sm leading-5 font-semibold">
           {title}
         </p>
       )}

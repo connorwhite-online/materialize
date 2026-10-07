@@ -52,7 +52,7 @@ export function BuildGuideChapters({ intro, chapters }: Props) {
       {showToc && (
         <nav className="rounded-xl border border-border bg-muted/40 p-3">
           <div className="mb-1.5 flex items-center justify-between">
-            <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            <span className="text-[13px] font-medium text-muted-foreground">
               Contents
             </span>
             <button
