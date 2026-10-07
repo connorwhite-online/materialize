@@ -165,12 +165,11 @@ export function CommentsSection({
           acceptPhoto={acceptPhoto}
         />
       ) : (
-        <Link
-          href={signInHref}
-          className="block rounded-xl border border-dashed border-border px-4 py-3 text-center text-sm text-muted-foreground hover:bg-muted/40 transition-colors"
-        >
-          Sign in to comment
-        </Link>
+        <div className="flex items-center gap-3">
+          <Button variant="secondary" size="sm" render={<Link href={signInHref} />}>
+            Sign in to comment
+          </Button>
+        </div>
       )}
 
       <div className="space-y-5">

@@ -22,7 +22,6 @@ import { loadFileBySlug, loadPreviewView } from "./loader";
 import { pickCurrentAsset } from "@/lib/files/current-version";
 import { ownsLoadedFile, userHasUsedFile } from "@/lib/entitlement";
 import { isOrgMember } from "@/lib/authorization";
-import { Card, CardContent } from "@/components/ui/card";
 import { OwnerBar } from "@/components/ui/owner-bar";
 import { ExpandableDescription } from "@/components/ui/expandable-description";
 import { Button } from "@/components/ui/button";
@@ -50,7 +49,8 @@ import {
   type CommentRow,
 } from "@/components/comments/comments-section";
 import { UserAvatar } from "@/components/auth/user-avatar";
-import { LicenseBadge } from "@/components/licenses/license-badge";
+import { getLicenseMeta } from "@/lib/licenses";
+import { DetailList, DetailRow, formatMm } from "@/components/files/detail-list";
 import { getCategoryLabel } from "@/lib/categories";
 import { getMaterialById } from "@/lib/materials";
 import { findMaterialConfig, getCraftCloudCatalog } from "@/lib/craftcloud/catalog";
@@ -635,8 +635,27 @@ export default async function FileDetailPage(props: {
         })
       : null;
 
+  const licenseMeta = getLicenseMeta(file.license);
+  const categoryLabel = file.category ? getCategoryLabel(file.category) : null;
+  const creatorName = file.displayName || file.username;
+  const paidAndLocked = file.price > 0 && !canDownload;
+
+  // Social proof under the title. Counts come from the same rows the
+  // Activity section lists, so the two can never disagree.
+  const proof = [
+    printActivity.length > 0 &&
+      `${printActivity.length} ${printActivity.length === 1 ? "print" : "prints"}`,
+    downloadActivity.length > 0 &&
+      `${downloadActivity.length} ${downloadActivity.length === 1 ? "download" : "downloads"}`,
+  ].filter(Boolean);
+
+  const discussionEmpty = comments.length === 0 && buildsWithUrls.length === 0;
+  // Owners don't see an empty Discussion invitation on their own
+  // listing: there is nothing to invite themselves to.
+  const showDiscussion = !(discussionEmpty && isOwner);
+
   return (
-    <div className="mx-auto max-w-4xl px-4 py-8">
+    <div className="mz-enter mx-auto w-full max-w-6xl px-4 pt-6 pb-16 sm:pt-10">
       {jsonLd && (
         <script
           type="application/ld+json"
@@ -658,9 +677,7 @@ export default async function FileDetailPage(props: {
           flaggedAt={file.flaggedAt}
         />
       )}
-      <div className="flex flex-col gap-8">
-        {/* Admin-only bar — visibility status + owner controls, above
-            all page content. */}
+      <div className="flex flex-col gap-6">
         {isOwner && (
           <OwnerBar
             visibility={file.visibility === "public" ? "public" : "private"}
@@ -715,12 +732,16 @@ export default async function FileDetailPage(props: {
           </OwnerBar>
         )}
 
-        {/* Hero — 3D preview left, file info right on md+ */}
-        <div className="flex flex-col gap-6 md:grid md:grid-cols-[3fr_2fr] md:items-start md:gap-8">
-          {/* 3D preview */}
-          <div>
+
+        {/* Object left, decision right (DESIGN_SYSTEM § Space and layout).
+            On phones the grid collapses to source order: preview, the
+            title + actions, then the long-form content. From md the aside
+            spans both rows and sticks, so Print stays in reach while the
+            reader scrolls the description and discussion. */}
+        <div className="grid grid-cols-1 gap-x-8 gap-y-8 md:grid-cols-[minmax(0,1fr)_19rem] md:grid-rows-[auto_1fr] lg:grid-cols-[minmax(0,1fr)_22rem] lg:gap-x-10">
+          <div className="md:col-start-1 md:row-start-1">
             {previewable && primaryAsset ? (
-              <div className="aspect-[4/3] w-full overflow-hidden rounded-2xl border border-border bg-gradient-to-br from-muted/40 to-muted/10">
+              <div className="aspect-[4/3] w-full overflow-hidden rounded-2xl bg-muted/60">
                 <FilePreview
                   fileId={file.id}
                   fileAssetId={primaryAsset.id}
@@ -738,8 +759,8 @@ export default async function FileDetailPage(props: {
                 />
               </div>
             ) : (
-              <div className="aspect-[4/3] rounded-2xl bg-gradient-to-br from-muted to-muted/50 flex items-center justify-center">
-                <span className="text-xs text-muted-foreground/50">
+              <div className="flex aspect-[4/3] items-center justify-center rounded-2xl bg-muted">
+                <span className="text-[13px] text-subtle-foreground">
                   {primaryAsset
                     ? `Preview not supported for .${primaryAsset.format}`
                     : "No preview"}
@@ -748,102 +769,99 @@ export default async function FileDetailPage(props: {
             )}
           </div>
 
-          {/* File info + actions */}
-          <div className="flex flex-col gap-4">
-            <div>
-              <div className="flex items-center gap-2">
-                <h1 className="text-2xl font-semibold">{file.name}</h1>
+          <aside className="flex flex-col gap-6 md:sticky md:top-8 nav:top-24 md:col-start-2 md:row-span-2 md:row-start-1 md:self-start">
+            <div className="flex flex-col gap-3">
+              <div className="flex flex-wrap items-center gap-2">
+                <h1 className="text-2xl leading-7 font-semibold text-balance">
+                  {file.name}
+                </h1>
                 {verifying && <VerifyingPill />}
               </div>
-              <div className="mt-2 space-y-1">
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted-foreground">
                 <Link
                   href={`/${file.username}`}
-                  className="flex w-fit items-center gap-1.5 hover:underline"
+                  className="-my-1 -ml-1 flex w-fit items-center gap-2 rounded-full py-1 pr-2 pl-1 text-foreground transition-colors hover:bg-muted"
                 >
                   <UserAvatar
                     seed={file.username || file.userId}
                     imageUrl={file.avatarUrl}
-                    displayName={file.displayName || file.username}
-                    className="h-5 w-5"
+                    displayName={creatorName}
+                    className="size-6 text-[11px]"
                   />
-                  <span className="text-sm text-muted-foreground">
-                    {file.displayName || file.username}
-                  </span>
+                  <span className="font-medium">{creatorName}</span>
                 </Link>
-                {parentProject && (
-                  <Link
-                    href={`/projects/${parentProject.slug}`}
-                    className="flex w-fit items-center gap-1 text-sm text-muted-foreground hover:underline"
-                  >
-                    <span className="text-muted-foreground/60">Part of</span>
-                    <span>{parentProject.name}</span>
-                  </Link>
+                {proof.length > 0 && (
+                  <span className="text-[13px] tabular-nums">
+                    {proof.join(" · ")}
+                  </span>
                 )}
               </div>
-              {primaryAsset && (
-                <p className="mt-3 text-sm text-muted-foreground">
-                  {primaryAsset.originalFilename}
-                  <span className="mx-1.5">·</span>
-                  {formatBytes(primaryAsset.fileSize)}
-                </p>
-              )}
-              {dims && (
-                <p className="mt-1.5 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                  <span className="font-medium text-foreground">Bounding box</span>
-                  <span className="font-mono">
-                    {dims.x.toFixed(1)} × {dims.y.toFixed(1)} × {dims.z.toFixed(1)} mm
-                  </span>
-                </p>
-              )}
-              {file.category && getCategoryLabel(file.category) && (
-                <div className="mt-3">
+              {parentProject && (
+                <p className="text-[13px] leading-[18px] text-muted-foreground">
+                  Part of{" "}
                   <Link
-                    href={`/files?category=${file.category}`}
-                    className="inline-flex items-center rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
+                    href={`/projects/${parentProject.slug}`}
+                    className="font-medium text-foreground underline-offset-4 hover:underline"
                   >
-                    {getCategoryLabel(file.category)}
+                    {parentProject.name}
                   </Link>
-                </div>
+                </p>
               )}
             </div>
 
             {file.price > 0 && (
-              <>
-                {isOwner && !file.ownerOnboarded && <PayoutSetupWarning />}
-                {!canDownload && (
-                  <PurchaseButton fileId={file.id} priceCents={file.price} />
+              <div className="flex flex-col gap-1">
+                <p className="text-2xl leading-7 font-semibold tabular-nums">
+                  ${(file.price / 100).toFixed(2)}
+                </p>
+                <p className="text-[13px] leading-[18px] text-muted-foreground">
+                  {canDownload
+                    ? isOwner
+                      ? "Your listing. Buyers download after paying."
+                      : "You own this file."
+                    : "One-time purchase. Download any time after."}
+                </p>
+                {isOwner && !file.ownerOnboarded && (
+                  <div className="mt-2">
+                    <PayoutSetupWarning />
+                  </div>
                 )}
-              </>
+              </div>
             )}
 
-            {/* Primary action row. Download + Print are what this page is
-                for, so they get the tallest size in the system and a filled
-                treatment on both — the outline/sm pair read as tertiary
-                chrome next to the 3D preview. Print keeps `default` so it
-                still wins the row; Download is `secondary` rather than
-                `outline` so it has weight without competing. */}
-            <div className="flex flex-col gap-2.5">
-              <div className="flex gap-2.5">
+            {/* One primary per view. A paid file you don't own yet is
+                for buying; everything else is for printing, which is
+                why Print outranks Download (download is free and needs
+                no help being found). Natural width, secondary first. */}
+            <div className="flex flex-col gap-3">
+              <div className="flex flex-wrap items-start gap-2">
                 {canDownload && (
                   <Button
                     variant="secondary"
-                    size="xl"
-                    className="min-w-0 flex-1 font-semibold"
+                    size="lg"
                     render={<a href={`/files/${slug}/download`} />}
                   >
-                    <Download size={18} />
+                    <Download size={16} />
                     Download
                   </Button>
                 )}
                 {primaryAsset && (
                   <Button
-                    size="xl"
-                    className="min-w-0 flex-1 font-semibold"
+                    variant={paidAndLocked ? "secondary" : "default"}
+                    size="lg"
                     render={<Link href={`/print/${primaryAsset.id}`} />}
                   >
-                    <Print size={18} />
-                    Print
+                    <Print size={16} />
+                    Get it printed
                   </Button>
+                )}
+                {paidAndLocked && (
+                  <PurchaseButton
+                    fileId={file.id}
+                    priceCents={file.price}
+                    label="Buy file"
+                    size="lg"
+                  />
                 )}
               </div>
               {/* Editable STEP source (MTR-196) — renders only when this asset
@@ -853,71 +871,113 @@ export default async function FileDetailPage(props: {
               {canDownload && primaryAsset && (
                 <StepDownloadLink
                   fileAssetId={primaryAsset.id}
-                  className="w-full"
+                  size="sm"
+                  label="Download STEP (editable CAD)"
+                  className="w-fit"
                 />
               )}
+              {primaryAsset && (
+                <p className="text-[13px] leading-[18px] text-muted-foreground">
+                  Instant quotes from print shops. Pick a material and we
+                  ship it to you.
+                </p>
+              )}
             </div>
-          </div>
-        </div>
 
-        {/* Content below the hero */}
-        <div className="space-y-6">
-          {file.description && (
-            <ExpandableDescription source={file.description} />
-          )}
-
-          {(recommendedMaterial || file.minWallThickness) && (
-            <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-xs text-muted-foreground">
+            <DetailList>
+              {primaryAsset && (
+                <DetailRow label="File">
+                  <span className="truncate" title={primaryAsset.originalFilename}>
+                    {primaryAsset.originalFilename}
+                  </span>
+                  <span className="shrink-0 text-muted-foreground">
+                    {formatBytes(primaryAsset.fileSize)}
+                  </span>
+                </DetailRow>
+              )}
+              {dims && (
+                <DetailRow label="Size">
+                  <span className="tabular-nums">
+                    {formatMm(dims.x)} × {formatMm(dims.y)} × {formatMm(dims.z)} mm
+                  </span>
+                </DetailRow>
+              )}
               {recommendedMaterial && (
-                <span className="inline-flex items-center gap-1.5">
-                  <span className="text-muted-foreground/80">Recommended:</span>
+                <DetailRow label="Material">
                   <span
-                    className="h-3 w-3 rounded-sm border border-border"
+                    aria-hidden
+                    className="size-3 shrink-0 rounded-full ring-1 ring-border"
                     style={{ backgroundColor: recommendedMaterial.color }}
                   />
-                  <span className="font-medium text-foreground">
-                    {recommendedMaterial.name}
-                  </span>
-                  <span className="text-muted-foreground/80">
-                    · {recommendedMaterial.method}
-                  </span>
-                </span>
+                  <span className="truncate">{recommendedMaterial.name}</span>
+                </DetailRow>
               )}
-              {file.minWallThickness && (
-                <span>
-                  {recommendedMaterial && (
-                    <span className="mr-3 text-muted-foreground/40">·</span>
+              {file.minWallThickness ? (
+                <DetailRow label="Min wall">
+                  <span className="tabular-nums">
+                    {(file.minWallThickness / 10).toFixed(1)} mm
+                  </span>
+                </DetailRow>
+              ) : null}
+              {categoryLabel && (
+                <DetailRow label="Category">
+                  <Link
+                    href={`/files?category=${file.category}`}
+                    className="truncate underline-offset-4 hover:underline"
+                  >
+                    {categoryLabel}
+                  </Link>
+                </DetailRow>
+              )}
+              {licenseMeta && (
+                <DetailRow label="License">
+                  <a
+                    href={licenseMeta.url}
+                    target="_blank"
+                    rel="noreferrer noopener"
+                    title={licenseMeta.summary}
+                    className="truncate underline-offset-4 hover:underline"
+                  >
+                    {licenseMeta.shortName}
+                    <span className="text-muted-foreground"> · {licenseMeta.name}</span>
+                  </a>
+                </DetailRow>
+              )}
+            </DetailList>
+          </aside>
+
+          <div className="flex min-w-0 flex-col gap-10 md:col-start-1 md:row-start-2">
+            {file.description && (
+              <section className="flex flex-col gap-2">
+                <h2 className="text-base leading-6 font-semibold">About</h2>
+                <ExpandableDescription source={file.description} />
+              </section>
+            )}
+
+            {(feedPhotos.length > 0 || isOwner) && (
+              <section className="flex flex-col gap-3">
+                <h2 className="text-base leading-6 font-semibold">Photos</h2>
+                <PhotosFeed
+                  photos={feedPhotos}
+                  targetType="file"
+                  targetId={file.id}
+                  ownerId={file.userId}
+                  viewerId={userId}
+                  uploadAs={isOwner ? "creator" : null}
+                />
+              </section>
+            )}
+
+            {showDiscussion && (
+              <section className="flex flex-col gap-4">
+                <h2 className="flex items-baseline gap-2 text-base leading-6 font-semibold">
+                  Discussion
+                  {!discussionEmpty && (
+                    <span className="text-sm font-normal text-subtle-foreground tabular-nums">
+                      {comments.length + buildsWithUrls.length}
+                    </span>
                   )}
-                  Min wall {(file.minWallThickness / 10).toFixed(1)}mm
-                </span>
-              )}
-            </div>
-          )}
-
-          {(feedPhotos.length > 0 || isOwner) && (
-            <div className="space-y-2">
-              <h2 className="text-sm font-semibold">Photos</h2>
-              <PhotosFeed
-                photos={feedPhotos}
-                targetType="file"
-                targetId={file.id}
-                ownerId={file.userId}
-                viewerId={userId}
-                uploadAs={isOwner ? "creator" : null}
-              />
-            </div>
-          )}
-
-          {(() => {
-            const discussionEmpty =
-              comments.length === 0 && buildsWithUrls.length === 0;
-            // Owners don't see an empty Discussion invitation on
-            // their own listing — nothing to invite themselves to.
-            if (discussionEmpty && isOwner) return null;
-
-            if (discussionEmpty) {
-              // Banner alone — no "Discussion" heading when empty.
-              return (
+                </h2>
                 <CommentsSection
                   target="file"
                   targetId={file.id}
@@ -929,36 +989,13 @@ export default async function FileDetailPage(props: {
                   signInRedirect={`/files/${slug}`}
                   acceptPhoto={canPostBuild}
                 />
-              );
-            }
+              </section>
+            )}
 
-            return (
-              <Card className="bg-muted/50">
-                <CardContent className="space-y-5">
-                  <h2 className="text-base font-semibold">Discussion</h2>
-                  <CommentsSection
-                    target="file"
-                    targetId={file.id}
-                    comments={comments}
-                    photoPosts={buildsWithUrls}
-                    ownerId={file.userId}
-                    viewerId={userId}
-                    isSignedIn={!!userId}
-                    signInRedirect={`/files/${slug}`}
-                    acceptPhoto={canPostBuild}
-                  />
-                </CardContent>
-              </Card>
-            );
-          })()}
-
-          <FileActivity
-            prints={printActivity}
-            downloads={downloadActivity}
-          />
-
-          <div className="flex justify-center pt-2">
-            <LicenseBadge license={file.license} />
+            <FileActivity
+              prints={printActivity}
+              downloads={downloadActivity}
+            />
           </div>
         </div>
       </div>

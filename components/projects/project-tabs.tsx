@@ -42,7 +42,7 @@ export function ProjectTabs({ tabs }: { tabs: ProjectTab[] }) {
     // removes a layer of visual nesting (the panels already carry their
     // own structure).
     <Tabs defaultValue={tabs[0].value} className="gap-2">
-      <TabsList className="w-full justify-start">
+      <TabsList className="w-fit max-w-full justify-start overflow-x-auto">
         {tabs.map((tab) => (
           <TabsTrigger key={tab.value} value={tab.value}>
             {tab.label}

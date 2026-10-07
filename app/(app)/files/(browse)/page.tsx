@@ -15,7 +15,7 @@ import { unstable_cache } from "next/cache";
 import Link from "next/link";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { EmptyState } from "@/components/ui/page";
+import { EmptyState, Page } from "@/components/ui/page";
 import { Browse } from "@/components/icons/browse";
 import { UserAvatar } from "@/components/auth/user-avatar";
 import { BrowseSearchBar } from "@/components/browse/browse-search-bar";
@@ -40,8 +40,6 @@ import {
 } from "@/lib/discovery/browse-pool";
 import { recentDownloadCounts } from "@/lib/discovery/signals";
 import { ProjectCoverFallback } from "@/components/projects/project-cover-fallback";
-import { getAvatarGradient } from "@/lib/utils/avatar-gradient";
-import { BUBBLE_SHADOW } from "@/components/nav/bubble-shadow";
 import {
   FileCard,
   FileCardCreator,
@@ -49,11 +47,12 @@ import {
   FileCardPriceBadge,
   fileCardPhotoUrls,
   FILE_CARD_BODY_CLASS,
+  FILE_CARD_LINK_CLASS,
   FILE_CARD_SHELL_CLASS,
   FILE_CARD_TITLE_CLASS,
   FILE_CARD_WELL_CLASS,
 } from "@/components/files/file-card";
-import { SearchIcon } from "@/components/icons/oai";
+import { FolderOpenIcon, SearchIcon } from "@/components/icons/oai";
 
 // Shared with the ranking inspector, which marks this cutoff — see
 // BROWSE_FILES_SHOWN. Also the per-section cap for projects,
@@ -418,16 +417,29 @@ export default async function BrowsePage(props: {
   // filter. Anything less is the idle recent-content grid.
   const active = !!pattern || !!category;
 
-  // The header (search bar + category chips) is identical across states.
+  // The header (title, search field, category chips) is shared across
+  // states; only the title line changes to say what is being browsed.
   const header = (
-    <>
-      <div className="flex justify-center">
-        <BrowseSearchBar defaultValue={query} category={category} />
-      </div>
-      <div className="mt-4 flex">
-        <CategoryFilterBar />
-      </div>
-    </>
+    <BrowseHeader
+      title={
+        query
+          ? `Results for “${query}”`
+          : activeCategory
+            ? activeCategory.label
+            : "Explore"
+      }
+      description={
+        query
+          ? activeCategory
+            ? `In ${activeCategory.label}`
+            : undefined
+          : activeCategory
+            ? activeCategory.description
+            : "Models, projects and creators from the community. Download them or get them printed."
+      }
+      query={query}
+      category={category}
+    />
   );
 
   // Idle state: recent projects + files + creators grid below the header.
@@ -439,53 +451,37 @@ export default async function BrowsePage(props: {
       await getIdleBrowseData();
 
     return (
-      <div className="mx-auto max-w-7xl px-4 py-6">
+      <Page width="wide" className="gap-10">
         {header}
 
-        {/* Projects */}
-        {projectsWithPhotos.length > 0 && (
-          <section className="mt-10">
-            <h2 className="mb-4 text-sm font-medium text-muted-foreground">
-              Projects
-            </h2>
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
-              {projectsWithPhotos.map((p) => (
-                <ProjectCard key={p.id} project={p} />
-              ))}
-            </div>
-          </section>
-        )}
-
-        {/* Files */}
-        <section className="mt-10">
-          <h2 className="mb-4 text-sm font-medium text-muted-foreground">
-            Files
-          </h2>
+        <Section title="Files">
           {filesWithPhotos.length === 0 ? (
             <EmptyState
               icon={<Browse />}
               title="No files published yet"
-              description="Be the first: upload a model and list it for the community."
+              description="Upload a model and list it for the community."
             />
           ) : (
             <FileGrid files={filesWithPhotos} />
           )}
-        </section>
+        </Section>
 
-        {/* Creators */}
-        {recentCreators.length > 0 && (
-          <section className="mt-10">
-            <h2 className="mb-4 text-sm font-medium text-muted-foreground">
-              Creators
-            </h2>
-            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-              {recentCreators.map((u) => (
-                <UserCard key={u.id} user={u} />
+        {projectsWithPhotos.length > 0 && (
+          <Section title="Projects">
+            <div className={GRID_CLASS}>
+              {projectsWithPhotos.map((p) => (
+                <ProjectCard key={p.id} project={p} />
               ))}
             </div>
-          </section>
+          </Section>
         )}
-      </div>
+
+        {recentCreators.length > 0 && (
+          <Section title="Creators">
+            <CreatorList users={recentCreators} />
+          </Section>
+        )}
+      </Page>
     );
   }
 
@@ -713,53 +709,60 @@ export default async function BrowsePage(props: {
 
   // What we're browsing, for the empty-state copy.
   const scopeLabel = query
-    ? `"${query}"`
+    ? `\u201c${query}\u201d`
     : activeCategory
       ? activeCategory.label
       : "";
 
   return (
-    <div className="mx-auto max-w-7xl px-4 py-6">
-      {header}
-
-      {activeCategory && !query && (
-        <div className="mt-6">
-          <h1 className="text-lg font-semibold tracking-tight">
-            {activeCategory.label}
-          </h1>
-          <p className="mt-0.5 text-sm text-muted-foreground">
-            {activeCategory.description}
-          </p>
-        </div>
+    <Page width="wide" className="gap-10">
+      {totalHits === 0 ? (
+        // The empty state below already says "No results for …", so the
+        // title doesn't repeat the query back a second time.
+        <BrowseHeader
+          title={activeCategory && !query ? activeCategory.label : "Explore"}
+          description={activeCategory && !query ? activeCategory.description : undefined}
+          query={query}
+          category={category}
+        />
+      ) : (
+        header
       )}
 
       {totalHits === 0 ? (
         <EmptyState
-          className="mt-10"
           icon={<SearchIcon />}
-          title={<>No results for {scopeLabel}</>}
-          description="Try a shorter search, a different spelling, or browse a category instead."
+          title={
+            query ? <>No results for {scopeLabel}</> : <>Nothing in {scopeLabel} yet</>
+          }
+          description={
+            query
+              ? "Try a shorter search, a different spelling, or another category."
+              : "Be the first to list something here, or browse everything."
+          }
           action={
-            <Button variant="outline" render={<Link href="/files" />}>
-              Clear search
+            <Button variant="secondary" render={<Link href="/files" />}>
+              {query ? "Clear search" : "Browse everything"}
             </Button>
           }
         />
       ) : (
-        <div className="mt-8 space-y-10">
+        <>
           {userRows.length > 0 && (
-            <Section title="Creators">
-              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-                {userRows.map((u) => (
-                  <UserCard key={u.id} user={u} />
-                ))}
-              </div>
+            <Section title="Creators" count={userRows.length}>
+              <CreatorList users={userRows} />
+            </Section>
+          )}
+
+          {fileRowsWithPhotos.length > 0 && (
+            <Section title="Files" count={fileRowsWithPhotos.length}>
+              <FileGrid files={fileRowsWithPhotos} />
             </Section>
           )}
 
           {projectRowsWithPhotos.length > 0 && (
-            <Section title="Projects">
-              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+            <Section title="Projects" count={projectRowsWithPhotos.length}>
+              <div className={GRID_CLASS}>
                 {projectRowsWithPhotos.map((p) => (
                   <ProjectCard key={p.id} project={p} />
                 ))}
@@ -768,40 +771,78 @@ export default async function BrowsePage(props: {
           )}
 
           {collectionRows.length > 0 && (
-            <Section title="Collections">
-              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+            <Section title="Collections" count={collectionRows.length}>
+              <div className={GRID_CLASS}>
                 {collectionRows.map((c) => (
                   <CollectionCard key={c.id} collection={c} />
                 ))}
               </div>
             </Section>
           )}
-
-          {fileRowsWithPhotos.length > 0 && (
-            <Section title="Files">
-              <FileGrid files={fileRowsWithPhotos} />
-            </Section>
-          )}
-        </div>
+        </>
       )}
-    </div>
+    </Page>
+  );
+}
+
+/**
+ * One grid for every tile type so files, projects and collections line
+ * up column for column. Borderless tiles need more vertical air than
+ * boxed cards did, hence the larger row gap.
+ */
+const GRID_CLASS =
+  "grid grid-cols-2 gap-x-3 gap-y-6 sm:grid-cols-3 sm:gap-x-4 lg:grid-cols-4 xl:grid-cols-5";
+
+function BrowseHeader({
+  title,
+  description,
+  query,
+  category,
+}: {
+  title: string;
+  description?: string;
+  query: string;
+  category: string;
+}) {
+  return (
+    <header className="flex flex-col gap-5">
+      <div className="min-w-0">
+        <h1 className="truncate text-2xl leading-7 font-semibold">{title}</h1>
+        {description && (
+          <p className="mt-1 text-sm leading-5 text-pretty text-muted-foreground">
+            {description}
+          </p>
+        )}
+      </div>
+      <div className="flex flex-col gap-3">
+        <BrowseSearchBar key={query} defaultValue={query} category={category} />
+        <CategoryFilterBar active={category} query={query} />
+      </div>
+    </header>
   );
 }
 
 function Section({
   title,
+  count,
   children,
 }: {
   title: string;
+  count?: number;
   children: React.ReactNode;
 }) {
   return (
-    <div>
-      <h2 className="mb-3 text-sm font-medium text-muted-foreground">
+    <section className="flex flex-col gap-4">
+      <h2 className="flex items-baseline gap-2 text-base leading-6 font-semibold">
         {title}
+        {count != null && (
+          <span className="text-sm font-normal text-subtle-foreground tabular-nums">
+            {count}
+          </span>
+        )}
       </h2>
       {children}
-    </div>
+    </section>
   );
 }
 
@@ -821,7 +862,7 @@ interface FileRow {
 
 function FileGrid({ files }: { files: FileRow[] }) {
   return (
-    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+    <div className={GRID_CLASS}>
       {files.map((file) => (
         <FileCard
           key={file.id}
@@ -865,9 +906,8 @@ function ProjectCard({ project }: { project: ProjectRow }) {
   const hasAnyImage =
     !!project.thumbnailUrl || project.additionalPhotoIds.length > 0;
   const thumbs = project.fileThumbnails;
-  const creatorSeed = project.creatorUsername || project.creatorDisplayName || "";
   return (
-    <Link href={`/projects/${project.slug}`}>
+    <Link href={`/projects/${project.slug}`} className={FILE_CARD_LINK_CLASS}>
       <Card className={FILE_CARD_SHELL_CLASS}>
         <div className={FILE_CARD_WELL_CLASS}>
           {hasAnyImage ? (
@@ -927,30 +967,15 @@ function ProjectCard({ project }: { project: ProjectRow }) {
           <h3 className={FILE_CARD_TITLE_CLASS}>
             {project.name}
           </h3>
-          <p className="mt-0.5 flex items-center gap-1.5 truncate text-xs text-muted-foreground">
-            {project.creatorAvatarUrl &&
-            (project.creatorAvatarUrl.startsWith("http://") ||
-              project.creatorAvatarUrl.startsWith("https://")) ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={project.creatorAvatarUrl}
-                alt=""
-                className="h-3.5 w-3.5 shrink-0 rounded-full object-cover"
-              />
-            ) : (
-              <span
-                className="flex h-3.5 w-3.5 shrink-0 rounded-full"
-                style={{ background: getAvatarGradient(creatorSeed) }}
-              />
-            )}
-            <span className="truncate">
-              {project.creatorDisplayName || project.creatorUsername || "Unknown"}
-            </span>
-          </p>
-          <p className="mt-0.5 text-xs text-muted-foreground">
+          <FileCardCreator
+            username={project.creatorUsername}
+            displayName={project.creatorDisplayName}
+            avatarUrl={project.creatorAvatarUrl}
+          />
+          <p className="mt-1 text-xs text-subtle-foreground tabular-nums">
             {project.fileCount === 0
               ? "Project"
-              : `${project.fileCount} ${project.fileCount === 1 ? "file" : "files"}`}
+              : `Project · ${project.fileCount} ${project.fileCount === 1 ? "file" : "files"}`}
           </p>
         </CardContent>
       </Card>
@@ -969,16 +994,16 @@ interface CollectionRow {
 
 function CollectionCard({ collection }: { collection: CollectionRow }) {
   return (
-    <Link href={`/collections/${collection.slug}`}>
+    <Link href={`/collections/${collection.slug}`} className={FILE_CARD_LINK_CLASS}>
       <Card className={FILE_CARD_SHELL_CLASS}>
-        <div className={`flex items-center justify-center text-xs text-muted-foreground/60 ${FILE_CARD_WELL_CLASS}`}>
-          Collection
+        <div className={`flex items-center justify-center text-subtle-foreground ${FILE_CARD_WELL_CLASS}`}>
+          <FolderOpenIcon size={28} />
         </div>
         <CardContent className={FILE_CARD_BODY_CLASS}>
           <h3 className={FILE_CARD_TITLE_CLASS}>
             {collection.name}
           </h3>
-          <p className="mt-0.5 truncate text-xs text-muted-foreground">
+          <p className="mt-0.5 truncate text-[13px] leading-[18px] text-muted-foreground tabular-nums">
             {collection.fileCount}{" "}
             {collection.fileCount === 1 ? "file" : "files"}
             {(collection.creatorDisplayName || collection.creatorUsername) &&
@@ -1000,28 +1025,39 @@ interface UserRow {
   avatarUrl: string | null;
 }
 
-function UserCard({ user }: { user: UserRow }) {
-  if (!user.username) return null;
+/**
+ * Creators as list rows (the rulebook's row anatomy: 40px avatar, name,
+ * handle), laid out in columns. They used to be floating shadowed
+ * bubbles that read as buttons rather than people.
+ */
+function CreatorList({ users }: { users: UserRow[] }) {
   return (
-    <Link
-      href={`/${user.username}`}
-      className={`group flex items-center gap-2.5 overflow-hidden p-1.5 pr-3 transition-colors ${BUBBLE_SHADOW}`}
-      style={{ borderRadius: "24px 12px 12px 24px" }}
-    >
-      <UserAvatar
-        seed={user.username}
-        imageUrl={user.avatarUrl}
-        displayName={user.displayName || user.username}
-        className="h-9 w-9 shrink-0 text-base"
-      />
-      <div className="min-w-0">
-        <p className="truncate text-sm font-medium leading-tight transition-colors group-hover:text-primary">
-          {user.displayName || user.username}
-        </p>
-        <p className="truncate text-xs text-muted-foreground">
-          @{user.username}
-        </p>
-      </div>
-    </Link>
+    <ul className="-mx-3 grid grid-cols-1 gap-x-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+      {users.map((u) =>
+        u.username ? (
+          <li key={u.id}>
+            <Link
+              href={`/${u.username}`}
+              className="flex items-center gap-3 rounded-xl px-3 py-2.5 transition-colors duration-150 outline-none hover:bg-muted/70 focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              <UserAvatar
+                seed={u.username}
+                imageUrl={u.avatarUrl}
+                displayName={u.displayName || u.username}
+                className="size-10 shrink-0 text-base"
+              />
+              <div className="min-w-0">
+                <p className="truncate text-sm leading-5 font-medium">
+                  {u.displayName || u.username}
+                </p>
+                <p className="truncate text-[13px] leading-[18px] text-muted-foreground">
+                  @{u.username}
+                </p>
+              </div>
+            </Link>
+          </li>
+        ) : null
+      )}
+    </ul>
   );
 }

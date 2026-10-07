@@ -22,7 +22,6 @@ import { currentAssetsByFileId } from "@/lib/files/current-version";
 import { notUnsavedStudioDraft } from "@/lib/studio-drafts";
 import { loadProjectBySlug } from "./loader";
 import { generateDownloadUrl } from "@/lib/storage";
-import { Card, CardContent } from "@/components/ui/card";
 import { ExpandableDescription } from "@/components/ui/expandable-description";
 import { Button } from "@/components/ui/button";
 import { Download } from "@/components/icons/download";
@@ -44,7 +43,8 @@ import {
   CircuitGallery,
   type CircuitTile,
 } from "@/components/circuits/circuit-gallery";
-import { LicenseBadge } from "@/components/licenses/license-badge";
+import { getLicenseMeta } from "@/lib/licenses";
+import { DetailList, DetailRow } from "@/components/files/detail-list";
 import { getCategoryLabel } from "@/lib/categories";
 import { SourceCodeCard } from "@/components/projects/source-code-card";
 import { CardImageCarousel } from "@/components/photos/card-image-carousel";
@@ -492,7 +492,7 @@ export default async function ProjectDetailPage(props: {
               />
             </div>
           )}
-          <div className="grid gap-3 grid-cols-2 sm:grid-cols-3">
+          <div className="grid grid-cols-2 gap-x-3 gap-y-6 sm:grid-cols-3 sm:gap-x-4">
             {bundledFileCards.map((file) => (
               <FileCard
                 key={file.id}
@@ -639,39 +639,20 @@ export default async function ProjectDetailPage(props: {
     .map((f) => f.thumbnailUrl)
     .filter((u): u is string => !!u);
 
-  // Purchase block for paid projects — rendered inline below the
-  // gallery. Free projects omit this entirely (price is shown in the
-  // header metadata line instead).
-  const renderPurchasePanel = () => {
-    if (project.price <= 0) return null;
-    return (
-      <>
-        {isOwner && !project.ownerOnboarded && <PayoutSetupWarning />}
-        {!canDownload && (
-          <PurchaseButton
-            projectId={project.id}
-            priceCents={project.price}
-            className="w-full"
-          />
-        )}
-      </>
-    );
-  };
-
   // Author byline (avatar + name) — rendered in the mobile header and
   // again in the desktop sidebar. Same reasoning as the panel above.
   const renderByline = () => (
     <Link
       href={`/${project.username}`}
-      className="flex w-fit items-center gap-1.5 hover:underline"
+      className="-my-1 -ml-1 flex w-fit items-center gap-2 rounded-full py-1 pr-2 pl-1 text-sm transition-colors hover:bg-muted"
     >
       <UserAvatar
         seed={project.username || project.userId}
         imageUrl={project.avatarUrl}
         displayName={project.displayName || project.username}
-        className="h-5 w-5"
+        className="size-6 text-[11px]"
       />
-      <span className="text-sm text-muted-foreground">
+      <span className="font-medium">
         {project.displayName || project.username}
       </span>
     </Link>
@@ -723,15 +704,27 @@ export default async function ProjectDetailPage(props: {
     </>
   );
 
+  const licenseMeta = getLicenseMeta(project.license);
+  const categoryLabel = project.category
+    ? getCategoryLabel(project.category)
+    : null;
+  const paidAndLocked = project.price > 0 && !canDownload;
+  const discussionEmpty = comments.length === 0 && buildsWithUrls.length === 0;
+  // Owners don't see an empty Discussion invitation on their own
+  // project: there is nothing to invite themselves to.
+  const showDiscussion = !(discussionEmpty && isOwner);
+  const mediaClass =
+    "relative aspect-[4/3] w-full overflow-hidden rounded-2xl bg-muted/60";
+
   return (
-    <div className="mx-auto max-w-4xl px-4 py-8">
+    <div className="mz-enter mx-auto w-full max-w-6xl px-4 pt-6 pb-16 sm:pt-10">
       {jsonLd && (
         <script
           type="application/ld+json"
           dangerouslySetInnerHTML={{ __html: safeJsonLdScript(jsonLd) }}
         />
       )}
-      <div className="flex flex-col gap-8">
+      <div className="flex flex-col gap-6">
         {/* Admin-only bar — visibility status + owner controls, above
             all page content. Collaborators see the status only. */}
         {canWrite && (
@@ -742,12 +735,13 @@ export default async function ProjectDetailPage(props: {
           </OwnerBar>
         )}
 
-        {/* Hero — gallery left, project info right on md+ */}
-        <div className="flex flex-col gap-6 md:grid md:grid-cols-[3fr_2fr] md:items-start md:gap-8">
-          {/* Gallery */}
-          <div>
+        {/* Same skeleton as the file page: media left, decision column
+            right and sticky from md; phones stack media, decision, then
+            the long-form content. */}
+        <div className="grid grid-cols-1 gap-x-8 gap-y-8 md:grid-cols-[minmax(0,1fr)_19rem] md:grid-rows-[auto_1fr] lg:grid-cols-[minmax(0,1fr)_22rem] lg:gap-x-10">
+          <div className="md:col-start-1 md:row-start-1">
             {galleryImages.length > 0 ? (
-              <div className="relative aspect-[4/3] w-full overflow-hidden rounded-2xl border border-border bg-gradient-to-br from-muted/40 to-muted/10">
+              <div className={mediaClass}>
                 <CardImageCarousel
                   images={galleryImages}
                   alt={project.name}
@@ -755,13 +749,13 @@ export default async function ProjectDetailPage(props: {
                 />
               </div>
             ) : project.thumbnailUrl ? (
-              <div className="relative aspect-[4/3] w-full overflow-hidden rounded-2xl border border-border bg-gradient-to-br from-muted/40 to-muted/10">
+              <div className={mediaClass}>
                 <Image
                   src={project.thumbnailUrl}
                   alt={project.name}
                   fill
                   priority
-                  sizes="(max-width: 768px) 100vw, 60vw"
+                  sizes="(max-width: 1024px) 100vw, 60vw"
                   // Private/draft project covers are session-gated;
                   // optimizer fetch has no Clerk cookies (CON-23).
                   unoptimized={isSessionGatedImageSrc(project.thumbnailUrl)}
@@ -769,11 +763,13 @@ export default async function ProjectDetailPage(props: {
                 />
               </div>
             ) : fileThumbs.length > 0 ? (
-              <div className="relative aspect-[4/3] w-full overflow-hidden rounded-2xl border border-border bg-gradient-to-br from-muted/40 to-muted/10">
+              <div className={mediaClass}>
                 <FileThumbnailStack thumbnails={fileThumbs} />
               </div>
             ) : (
-              <div className="aspect-[4/3] w-full overflow-hidden rounded-2xl">
+              // Nothing to show: a shorter well, so an imageless project
+              // doesn't open on a screenful of placeholder.
+              <div className="aspect-[2/1] w-full overflow-hidden rounded-2xl">
                 <ProjectCoverFallback
                   addCoverHref={canWrite ? "#project-photos" : undefined}
                 />
@@ -781,96 +777,159 @@ export default async function ProjectDetailPage(props: {
             )}
           </div>
 
-          {/* Project info + actions */}
-          <div className="flex flex-col gap-4">
-            <div>
-              <h1 className="text-2xl font-semibold">{project.name}</h1>
-              <div className="mt-2">{renderByline()}</div>
-              {project.category && getCategoryLabel(project.category) && (
-                <div className="mt-3">
-                  <Link
-                    href={`/files?category=${project.category}`}
-                    className="inline-flex items-center rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
-                  >
-                    {getCategoryLabel(project.category)}
-                  </Link>
-                </div>
-              )}
+          <aside className="flex flex-col gap-6 md:sticky md:top-8 nav:top-24 md:col-start-2 md:row-span-2 md:row-start-1 md:self-start">
+            <div className="flex flex-col gap-3">
+              <h1 className="text-2xl leading-7 font-semibold text-balance">
+                {project.name}
+              </h1>
+              {renderByline()}
             </div>
 
-            {renderPurchasePanel()}
+            {project.price > 0 && (
+              <div className="flex flex-col gap-1">
+                <p className="text-2xl leading-7 font-semibold tabular-nums">
+                  ${(project.price / 100).toFixed(2)}
+                </p>
+                <p className="text-[13px] leading-[18px] text-muted-foreground">
+                  {canDownload
+                    ? isOwner
+                      ? "Your listing. Buyers download after paying."
+                      : "You own this project."
+                    : "One-time purchase. Every file in the project, any time after."}
+                </p>
+                {isOwner && !project.ownerOnboarded && (
+                  <div className="mt-2">
+                    <PayoutSetupWarning />
+                  </div>
+                )}
+              </div>
+            )}
 
-            {/* Primary action row — same treatment as the file detail page
-                (`app/(app)/files/[slug]/page.tsx`): tallest size in the
-                system, filled on both, Print keeping `default` so it still
-                wins the row. The glyphs match that page and the nav's Print
-                entry; `Factory` is reserved for the manufacturer/vendor
-                concept (vendor picker, production payment), not this CTA. */}
-            {bundledFiles.length > 0 && (
-              <div className="flex gap-2.5">
-                <Button
-                  variant="secondary"
-                  size="xl"
-                  className="min-w-0 flex-1 font-semibold"
-                  render={<Link href="#project-files" />}
-                >
-                  <Download size={18} />
-                  Download
-                </Button>
-                <Button
-                  size="xl"
-                  className="min-w-0 flex-1 font-semibold"
-                  render={<Link href={`/print?project=${project.slug}`} />}
-                >
-                  <Print size={18} />
-                  Print
-                </Button>
+            {/* One primary per view, natural width, secondary first —
+                same rules as the file page. Print the whole project is
+                the main thing; "Files" jumps to the per-file downloads. */}
+            {(bundledFiles.length > 0 || paidAndLocked) && (
+              <div className="flex flex-wrap items-start gap-2">
+                {bundledFiles.length > 0 && !paidAndLocked && (
+                  <Button
+                    variant="secondary"
+                    size="lg"
+                    render={<Link href="#project-files" />}
+                  >
+                    <Download size={16} />
+                    Files
+                  </Button>
+                )}
+                {bundledFiles.length > 0 && (
+                  <Button
+                    variant={paidAndLocked ? "secondary" : "default"}
+                    size="lg"
+                    render={<Link href={`/print?project=${project.slug}`} />}
+                  >
+                    <Print size={16} />
+                    Get it printed
+                  </Button>
+                )}
+                {paidAndLocked && (
+                  <PurchaseButton
+                    projectId={project.id}
+                    priceCents={project.price}
+                    label="Buy project"
+                    size="lg"
+                  />
+                )}
               </div>
             )}
             {canWrite && bundledFiles.length === 0 && (
-              <AddProjectFilesDialog
-                projectId={project.id}
-                availableFiles={availableFilesToAdd}
-              />
+              <div>
+                <AddProjectFilesDialog
+                  projectId={project.id}
+                  availableFiles={availableFilesToAdd}
+                />
+              </div>
             )}
-          </div>
-        </div>
 
-        {/* Content below the hero */}
-        <div className="space-y-6">
-          {project.description && (
-            <ExpandableDescription source={project.description} />
-          )}
+            <DetailList>
+              {bundledFiles.length > 0 && (
+                <DetailRow label="Files">
+                  <span className="tabular-nums">{bundledFiles.length}</span>
+                </DetailRow>
+              )}
+              {bomItems.length > 0 && (
+                <DetailRow label="Components">
+                  <span className="tabular-nums">{bomItems.length}</span>
+                </DetailRow>
+              )}
+              {categoryLabel && (
+                <DetailRow label="Category">
+                  <Link
+                    href={`/files?category=${project.category}`}
+                    className="truncate underline-offset-4 hover:underline"
+                  >
+                    {categoryLabel}
+                  </Link>
+                </DetailRow>
+              )}
+              {licenseMeta && (
+                <DetailRow label="License">
+                  <a
+                    href={licenseMeta.url}
+                    target="_blank"
+                    rel="noreferrer noopener"
+                    title={licenseMeta.summary}
+                    className="truncate underline-offset-4 hover:underline"
+                  >
+                    {licenseMeta.shortName}
+                    <span className="text-muted-foreground"> · {licenseMeta.name}</span>
+                  </a>
+                </DetailRow>
+              )}
+            </DetailList>
 
-          {canWrite && (
-            <div id="project-photos" className="scroll-mt-24 space-y-2">
-              <PhotosFeed
-                photos={curatorPhotos}
-                targetType="project"
-                targetId={project.id}
-                ownerId={project.userId}
-                viewerId={userId}
-                uploadAs="creator"
-              />
-            </div>
-          )}
+            {project.repoUrl && <SourceCodeCard repoUrl={project.repoUrl} />}
+          </aside>
 
-          {project.repoUrl && <SourceCodeCard repoUrl={project.repoUrl} />}
+          <div className="flex min-w-0 flex-col gap-10 md:col-start-1 md:row-start-2">
+            {project.description && (
+              <section className="flex flex-col gap-2">
+                <h2 className="text-base leading-6 font-semibold">About</h2>
+                <ExpandableDescription source={project.description} />
+              </section>
+            )}
 
-          <div id="project-files">
-            <ProjectTabs tabs={tabs} />
-          </div>
+            {canWrite && (
+              <section
+                id="project-photos"
+                className="flex scroll-mt-24 flex-col gap-3"
+              >
+                <h2 className="text-base leading-6 font-semibold">Photos</h2>
+                <PhotosFeed
+                  photos={curatorPhotos}
+                  targetType="project"
+                  targetId={project.id}
+                  ownerId={project.userId}
+                  viewerId={userId}
+                  uploadAs="creator"
+                />
+              </section>
+            )}
 
-          {(() => {
-            const discussionEmpty =
-              comments.length === 0 && buildsWithUrls.length === 0;
-            // Owners don't see an empty Discussion invitation on
-            // their own project — nothing to invite themselves to.
-            if (discussionEmpty && isOwner) return null;
+            {tabs.length > 0 && (
+              <div id="project-files" className="scroll-mt-24">
+                <ProjectTabs tabs={tabs} />
+              </div>
+            )}
 
-            if (discussionEmpty) {
-              // Banner alone — no "Discussion" heading when empty.
-              return (
+            {showDiscussion && (
+              <section className="flex flex-col gap-4">
+                <h2 className="flex items-baseline gap-2 text-base leading-6 font-semibold">
+                  Discussion
+                  {!discussionEmpty && (
+                    <span className="text-sm font-normal text-subtle-foreground tabular-nums">
+                      {comments.length + buildsWithUrls.length}
+                    </span>
+                  )}
+                </h2>
                 <CommentsSection
                   target="project"
                   targetId={project.id}
@@ -882,31 +941,8 @@ export default async function ProjectDetailPage(props: {
                   signInRedirect={`/projects/${slug}`}
                   acceptPhoto={!!userId && canPostBuild}
                 />
-              );
-            }
-
-            return (
-              <Card className="bg-muted/50">
-                <CardContent className="space-y-5">
-                  <h2 className="text-base font-semibold">Discussion</h2>
-                  <CommentsSection
-                    target="project"
-                    targetId={project.id}
-                    comments={comments}
-                    photoPosts={buildsWithUrls}
-                    ownerId={project.userId}
-                    viewerId={userId}
-                    isSignedIn={!!userId}
-                    signInRedirect={`/projects/${slug}`}
-                    acceptPhoto={!!userId && canPostBuild}
-                  />
-                </CardContent>
-              </Card>
-            );
-          })()}
-
-          <div className="flex justify-center pt-2">
-            <LicenseBadge license={project.license} />
+              </section>
+            )}
           </div>
         </div>
       </div>

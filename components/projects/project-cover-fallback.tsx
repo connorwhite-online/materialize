@@ -24,7 +24,7 @@ export function ProjectCoverFallback({
   return (
     <div
       className={cn(
-        "flex h-full w-full flex-col items-center justify-center gap-3 bg-gradient-to-br from-muted to-muted/50",
+        "flex h-full w-full flex-col items-center justify-center gap-3 bg-muted",
         className
       )}
       role="img"
@@ -32,7 +32,7 @@ export function ProjectCoverFallback({
     >
       <Logomark
         height={size === "lg" ? 44 : 22}
-        className="text-muted-foreground/30"
+        className="text-foreground/[0.12]"
       />
       {addCoverHref && (
         <Link

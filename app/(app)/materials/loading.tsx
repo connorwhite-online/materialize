@@ -1,80 +1,56 @@
 import { Skeleton } from "@/components/ui/skeleton";
-import { Card, CardContent } from "@/components/ui/card";
+import { Page } from "@/components/ui/page";
 
 // Width presets so skeleton name bars don't look uniform.
 const NAME_WIDTHS = ["w-28", "w-36", "w-24", "w-32", "w-40", "w-28", "w-32", "w-24"];
-const DESC_WIDTHS_A = ["w-full", "w-11/12", "w-full", "w-4/5", "w-11/12", "w-full", "w-10/12", "w-full"];
-const DESC_WIDTHS_B = ["w-3/4", "w-2/3", "w-5/6", "w-3/5", "w-4/5", "w-2/3", "w-3/4", "w-1/2"];
+const DESC_WIDTHS = ["w-3/4", "w-2/3", "w-5/6", "w-3/5", "w-4/5", "w-2/3", "w-3/4", "w-1/2"];
+const CHIP_WIDTHS = ["w-14", "w-36", "w-24", "w-28", "w-32", "w-24", "w-28"];
 
 function MaterialCardSkeleton({ i }: { i: number }) {
   return (
-    <Card className="gap-0 p-1 overflow-hidden">
-      <Skeleton className="aspect-[4/3] w-full rounded-lg" />
-      <CardContent className="p-3">
+    <div>
+      <Skeleton className="aspect-[4/3] w-full rounded-xl" />
+      <div className="px-0.5 pt-2.5">
         <Skeleton className={`h-3.5 ${NAME_WIDTHS[i % NAME_WIDTHS.length]}`} />
-        <div className="mt-1.5 space-y-1">
-          <Skeleton className={`h-2.5 ${DESC_WIDTHS_A[i % DESC_WIDTHS_A.length]}`} />
-          <Skeleton className={`h-2.5 ${DESC_WIDTHS_B[i % DESC_WIDTHS_B.length]}`} />
-        </div>
-        <div className="mt-3 flex gap-1">
-          <Skeleton className="h-4 w-12 rounded-md" />
-          <Skeleton className="h-4 w-16 rounded-md" />
-          <Skeleton className="h-4 w-14 rounded-md" />
-        </div>
-      </CardContent>
-    </Card>
+        <Skeleton className="mt-2 h-2.5 w-full" />
+        <Skeleton className={`mt-1 h-2.5 ${DESC_WIDTHS[i % DESC_WIDTHS.length]}`} />
+      </div>
+    </div>
   );
 }
 
 /**
  * Mirrors app/(app)/materials/page.tsx + CatalogBrowser layout:
- *   - page title + subtitle
- *   - Select trigger (group filter dropdown)
- *   - "Popular" section header + 8-card grid
- *   - One collapsed group section below
+ * title + subtitle, search field, family chip row, then the Popular
+ * section's grid.
  */
 export default function MaterialsLoading() {
   return (
-    <div className="mx-auto max-w-7xl px-4 py-8">
-      {/* Page heading */}
-      <div className="mb-8">
-        <Skeleton className="h-8 w-32" />
-        <Skeleton className="mt-2 h-4 w-96 max-w-full" />
+    <Page width="wide" className="gap-6">
+      <div>
+        <Skeleton className="h-7 w-32" />
+        <Skeleton className="mt-1.5 h-4 w-96 max-w-full" />
       </div>
 
-      <div className="space-y-6">
-        {/* Group filter — Select trigger, matches min-w-48 */}
-        <Skeleton className="h-9 w-48 rounded-md" />
-
-        <div className="space-y-4">
-          {/* Popular section */}
-          <section>
-            <div className="flex items-center justify-between gap-2">
-              <div className="flex items-center gap-2">
-                <Skeleton className="h-3.5 w-3.5 rounded-sm" />
-                <Skeleton className="h-3.5 w-16" />
-              </div>
-              <Skeleton className="h-3 w-20" />
-            </div>
-            <div className="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-              {Array.from({ length: 8 }).map((_, i) => (
-                <MaterialCardSkeleton key={i} i={i} />
-              ))}
-            </div>
-          </section>
-
-          {/* One additional group section (collapsed header only) */}
-          <section>
-            <div className="flex items-center justify-between gap-2">
-              <div className="flex items-center gap-2">
-                <Skeleton className="h-3.5 w-3.5 rounded-sm" />
-                <Skeleton className="h-3.5 w-28" />
-              </div>
-              <Skeleton className="h-3 w-16" />
-            </div>
-          </section>
+      <div className="flex flex-col gap-10">
+        <div className="flex flex-col gap-3">
+          <Skeleton className="h-10 w-full max-w-xl rounded-full" />
+          <div className="flex gap-2 overflow-hidden py-1">
+            {CHIP_WIDTHS.map((w, i) => (
+              <Skeleton key={i} className={`h-8 shrink-0 rounded-full ${w}`} />
+            ))}
+          </div>
         </div>
+
+        <section className="flex flex-col gap-4">
+          <Skeleton className="h-4 w-20" />
+          <div className="grid grid-cols-2 gap-x-3 gap-y-6 sm:gap-x-4 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+            {Array.from({ length: 10 }).map((_, i) => (
+              <MaterialCardSkeleton key={i} i={i} />
+            ))}
+          </div>
+        </section>
       </div>
-    </div>
+    </Page>
   );
 }

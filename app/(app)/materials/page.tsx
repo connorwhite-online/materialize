@@ -7,6 +7,8 @@ import { CatalogBrowser } from "@/components/materials/catalog-browser";
 import type { BrowseMaterialGroup } from "@/components/materials/catalog-material-card";
 import { logError } from "@/lib/logger";
 import { safeJsonLdScript } from "@/lib/seo/json-ld";
+import { EmptyState, Page, PageHeader } from "@/components/ui/page";
+import { WarningIcon } from "@/components/icons/oai";
 
 // The root layout applies a `%s · Materialize` title template, so this
 // must NOT restate the brand — it previously read "Materials |
@@ -79,21 +81,29 @@ export default async function MaterialsPage() {
   };
 
   return (
-    <div className="mx-auto max-w-7xl px-4 py-8">
+    <Page width="wide" className="gap-6">
       <script
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: safeJsonLdScript(jsonLd) }}
       />
-      <div className="mb-8">
-        <h1 className="text-2xl font-semibold">Materials</h1>
-        <p className="mt-1 text-muted-foreground">
-          {unavailable
-            ? "Our material catalog is temporarily unavailable. Please check back in a moment."
-            : `Browse ${totalMaterials} 3D printing materials across ${groups.length} families. Each with unique properties for your project.`}
-        </p>
-      </div>
+      <PageHeader
+        title="Materials"
+        description={
+          unavailable
+            ? undefined
+            : `${totalMaterials} materials across ${groups.length} families, from everyday plastics to titanium. Open one for its properties, finishes and a quote.`
+        }
+      />
 
-      {!unavailable && <CatalogBrowser groups={browseGroups} />}
-    </div>
+      {unavailable ? (
+        <EmptyState
+          icon={<WarningIcon />}
+          title="The catalog is unavailable right now"
+          description="Our print partner's material list didn't load. Check back in a moment."
+        />
+      ) : (
+        <CatalogBrowser groups={browseGroups} />
+      )}
+    </Page>
   );
 }

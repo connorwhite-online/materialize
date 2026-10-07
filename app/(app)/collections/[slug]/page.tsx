@@ -14,9 +14,8 @@ import { auth } from "@clerk/nextjs/server";
 import { isOrgMember } from "@/lib/authorization";
 import { OwnerBar } from "@/components/ui/owner-bar";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { EmptyState } from "@/components/ui/page";
+import { EmptyState, Page } from "@/components/ui/page";
 import { CollectionSettingsMenu } from "@/components/profile/collection-settings-menu";
-import { getLicenseMeta } from "@/lib/licenses";
 import {
   FileCard,
   FileCardPriceBadge,
@@ -193,47 +192,51 @@ export default async function CollectionPage(props: {
     })),
   ].sort((a, b) => a.sortOrder - b.sortOrder);
 
+  const creatorName = collection.creatorDisplayName || collection.creatorUsername;
+
   return (
-    <div className="mx-auto max-w-7xl px-4 py-8">
+    <Page width="wide" className="gap-8">
       {/* Admin-only bar — visibility status + owner controls. */}
       {isOwner && (
-        <div className="mb-6">
-          <OwnerBar
-            visibility={collection.visibility === "public" ? "public" : "private"}
-          >
-            <CollectionSettingsMenu
-              collectionId={collection.id}
-              name={collection.name}
-              description={collection.description}
-              visibility={
-                collection.visibility === "public" ? "public" : "private"
-              }
-            />
-          </OwnerBar>
-        </div>
+        <OwnerBar
+          visibility={collection.visibility === "public" ? "public" : "private"}
+        >
+          <CollectionSettingsMenu
+            collectionId={collection.id}
+            name={collection.name}
+            description={collection.description}
+            visibility={
+              collection.visibility === "public" ? "public" : "private"
+            }
+          />
+        </OwnerBar>
       )}
-      <div className="mb-8">
-        <h1 className="text-2xl leading-tight font-semibold tracking-tight text-balance">
+      <header className="flex flex-col gap-2">
+        <p className="text-[13px] leading-[18px] text-muted-foreground">
+          Collection by{" "}
+          <Link
+            href={`/${collection.creatorUsername}`}
+            className="font-medium text-foreground underline-offset-4 hover:underline"
+          >
+            {creatorName}
+          </Link>
+          <span className="tabular-nums">
+            {" · "}
+            {items.length} {items.length === 1 ? "item" : "items"}
+          </span>
+        </p>
+        <h1 className="text-2xl leading-7 font-semibold text-balance">
           {collection.name}
         </h1>
         {collection.description && (
-          <p className="mt-2 text-muted-foreground">{collection.description}</p>
+          <p className="max-w-prose text-sm leading-6 text-pretty text-muted-foreground">
+            {collection.description}
+          </p>
         )}
-        <p className="mt-2 text-sm text-muted-foreground">
-          by{" "}
-          <Link
-            href={`/${collection.creatorUsername}`}
-            className="hover:underline"
-          >
-            {collection.creatorDisplayName || collection.creatorUsername}
-          </Link>
-          {" · "}
-          {items.length} {items.length === 1 ? "item" : "items"}
-        </p>
-      </div>
+      </header>
 
       {itemsTruncated && (
-        <Alert variant="warning" className="mb-6">
+        <Alert variant="warning">
           <AlertDescription>
           Showing the first {COLLECTION_MAX_ITEMS}{" "}
           {fileRowsTruncated && projectRowsTruncated
@@ -257,14 +260,14 @@ export default async function CollectionPage(props: {
           }
         />
       ) : (
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+        <div className="grid grid-cols-2 gap-x-3 gap-y-6 sm:grid-cols-3 sm:gap-x-4 lg:grid-cols-4 xl:grid-cols-5">
           {items.map((item) => {
-            const license =
-              getLicenseMeta(item.license)?.shortName ?? item.license;
+            // Files need no kind label (they are the default thing on
+            // the shelf); projects say so, with their size.
             const subtitle =
               item.kind === "project"
-                ? `${item.fileCount} ${item.fileCount === 1 ? "file" : "files"} · ${license}`
-                : license;
+                ? `Project · ${item.fileCount} ${item.fileCount === 1 ? "file" : "files"}`
+                : null;
             return (
               <FileCard
                 key={`${item.kind}-${item.id}`}
@@ -275,7 +278,7 @@ export default async function CollectionPage(props: {
                 }
                 title={item.name}
                 thumbnailUrl={item.thumbnailUrl}
-                placeholder={item.kind === "file" ? "3D Preview" : "Project"}
+                placeholder={item.kind === "file" ? "No preview" : "Project"}
                 overlay={<FileCardPriceBadge priceCents={item.price} />}
                 subtitle={subtitle}
               />
@@ -283,6 +286,6 @@ export default async function CollectionPage(props: {
           })}
         </div>
       )}
-    </div>
+    </Page>
   );
 }

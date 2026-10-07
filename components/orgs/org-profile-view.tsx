@@ -14,10 +14,8 @@ import { notUnsavedStudioDraft } from "@/lib/studio-drafts";
 import { isOrgMember } from "@/lib/authorization";
 import { loadOrgByHandle } from "@/app/(app)/[handle]/loader";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
-import { Separator } from "@/components/ui/separator";
-import { Badge } from "@/components/ui/badge";
-import { EmptyState } from "@/components/ui/page";
+import { EmptyState, Page } from "@/components/ui/page";
+import { FileCard } from "@/components/files/file-card";
 
 const LIBRARY_LIMIT = 60;
 
@@ -103,102 +101,114 @@ export async function OrgProfileView({ handle }: { handle: string }) {
       .limit(LIBRARY_LIMIT),
   ]);
 
+  const badgeFor = (r: { visibility: string | null; status?: string | null }) =>
+    r.visibility !== "public" || (r.status != null && r.status !== "published")
+      ? r.status === "draft"
+        ? "Draft"
+        : "Private"
+      : null;
+
+  const sections: { title: string; items: CardItem[] }[] = [
+    {
+      title: "Files",
+      items: fileRows.map((r) => ({
+        id: r.id,
+        name: r.name,
+        href: `/files/${r.slug}`,
+        thumbnailUrl: r.thumbnailUrl,
+        badge: badgeFor(r),
+      })),
+    },
+    {
+      title: "Projects",
+      items: projectRows.map((r) => ({
+        id: r.id,
+        name: r.name,
+        href: `/projects/${r.slug}`,
+        thumbnailUrl: r.thumbnailUrl,
+        badge: badgeFor(r),
+      })),
+    },
+    {
+      title: "Collections",
+      items: collectionRows.map((r) => ({
+        id: r.id,
+        name: r.name,
+        href: `/collections/${r.slug}`,
+        thumbnailUrl: null,
+        badge: r.visibility !== "public" ? "Private" : null,
+      })),
+    },
+  ];
+  const nonEmpty = sections.filter((sec) => sec.items.length > 0);
+
   return (
-    <div className="mx-auto max-w-7xl px-4 py-8">
-      <div className="flex items-start gap-6">
+    <Page width="wide" className="gap-10">
+      <header className="flex flex-col gap-4 sm:flex-row sm:items-start sm:gap-5">
         {org.imageUrl ? (
           <Image
             src={org.imageUrl}
-            alt={org.name}
-            width={80}
-            height={80}
-            className="h-20 w-20 rounded-2xl border bg-muted object-cover"
+            alt=""
+            width={64}
+            height={64}
+            className="size-16 shrink-0 rounded-2xl bg-muted object-cover"
             unoptimized
           />
         ) : (
-          <div className="flex h-20 w-20 items-center justify-center rounded-2xl border bg-muted text-2xl font-bold">
+          <div
+            aria-hidden
+            className="flex size-16 shrink-0 items-center justify-center rounded-2xl bg-muted text-2xl font-semibold"
+          >
             {org.name.slice(0, 1).toUpperCase()}
           </div>
         )}
-        <div className="flex-1 min-w-0">
-          <div className="flex items-start justify-between gap-4">
-            <div>
-              <h1 className="text-2xl font-semibold">{org.name}</h1>
-              <p className="text-muted-foreground">@{org.slug}</p>
+        <div className="flex min-w-0 flex-1 flex-col gap-2">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="min-w-0">
+              <h1 className="text-2xl leading-7 font-semibold text-balance">
+                {org.name}
+              </h1>
+              <p className="mt-0.5 text-sm text-muted-foreground tabular-nums">
+                @{org.slug} · {memberCount}{" "}
+                {memberCount === 1 ? "member" : "members"}
+              </p>
             </div>
-            <div className="flex items-center gap-2">
-              <Badge variant="secondary">
-                {memberCount} {memberCount === 1 ? "member" : "members"}
-              </Badge>
-              {isAdmin && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  render={<Link href={`/${org.slug}/settings`} />}
-                >
-                  Settings
-                </Button>
-              )}
-            </div>
+            {isAdmin && (
+              <Button
+                variant="secondary"
+                size="sm"
+                render={<Link href={`/${org.slug}/settings`} />}
+              >
+                Settings
+              </Button>
+            )}
           </div>
           {org.bio && (
-            <p className="mt-2 max-w-xl text-sm leading-relaxed">{org.bio}</p>
+            <p className="max-w-prose text-sm leading-6 text-pretty">{org.bio}</p>
           )}
-          {!isMember && (
-            <p className="mt-2 text-xs text-muted-foreground">
-              You&apos;re viewing the public profile. Members see this
-              org&apos;s private files, projects, and collections too.
+          {!isMember && nonEmpty.length > 0 && (
+            <p className="text-[13px] leading-[18px] text-subtle-foreground">
+              Public profile. Members also see this team&apos;s private work.
             </p>
           )}
         </div>
-      </div>
+      </header>
 
-      <Separator className="my-6" />
-
-      <Section
-        title="Files"
-        empty="No files yet."
-        items={fileRows.map((r) => ({
-          id: r.id,
-          name: r.name,
-          href: `/files/${r.slug}`,
-          thumbnailUrl: r.thumbnailUrl,
-          badge:
-            r.visibility !== "public" || r.status !== "published"
-              ? r.status === "draft"
-                ? "Draft"
-                : "Private"
-              : null,
-        }))}
-      />
-      <Section
-        title="Projects"
-        empty="No projects yet."
-        items={projectRows.map((r) => ({
-          id: r.id,
-          name: r.name,
-          href: `/projects/${r.slug}`,
-          thumbnailUrl: r.thumbnailUrl,
-          badge:
-            r.visibility !== "public" || r.status !== "published"
-              ? r.status === "draft"
-                ? "Draft"
-                : "Private"
-              : null,
-        }))}
-      />
-      <Section
-        title="Collections"
-        empty="No collections yet."
-        items={collectionRows.map((r) => ({
-          id: r.id,
-          name: r.name,
-          href: `/collections/${r.slug}`,
-          thumbnailUrl: null,
-          badge: r.visibility !== "public" ? "Private" : null,
-        }))}
-      />
-    </div>
+      {nonEmpty.length === 0 ? (
+        <EmptyState
+          title="Nothing published yet"
+          description={
+            isMember
+              ? "Files, projects and collections you create under this team show up here."
+              : "This team hasn't shared any files, projects or collections."
+          }
+        />
+      ) : (
+        nonEmpty.map((sec) => (
+          <Section key={sec.title} title={sec.title} items={sec.items} />
+        ))
+      )}
+    </Page>
   );
 }
 
@@ -210,58 +220,34 @@ type CardItem = {
   badge: string | null;
 };
 
-function Section({
-  title,
-  items,
-  empty,
-}: {
-  title: string;
-  items: CardItem[];
-  empty: string;
-}) {
-  if (items.length === 0) {
-    return (
-      <div className="mt-8">
-        <h2 className="text-lg font-semibold">{title}</h2>
-        <EmptyState className="mt-3 py-8" title={empty} />
-      </div>
-    );
-  }
+/** One shelf, on the same tile and grid as /files so the two can't drift. */
+function Section({ title, items }: { title: string; items: CardItem[] }) {
   return (
-    <div className="mt-8">
-      <h2 className="text-lg font-semibold">{title}</h2>
-      <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+    <section className="flex flex-col gap-4">
+      <h2 className="flex items-baseline gap-2 text-base leading-6 font-semibold">
+        {title}
+        <span className="text-sm font-normal text-subtle-foreground tabular-nums">
+          {items.length}
+        </span>
+      </h2>
+      <div className="grid grid-cols-2 gap-x-3 gap-y-6 sm:grid-cols-3 sm:gap-x-4 lg:grid-cols-4 xl:grid-cols-5">
         {items.map((item) => (
-          <Link key={item.id} href={item.href} className="group">
-            <Card className="overflow-hidden">
-              <div className="relative aspect-square bg-muted">
-                {item.thumbnailUrl ? (
-                  <Image
-                    src={item.thumbnailUrl}
-                    alt={item.name}
-                    fill
-                    className="object-cover transition-opacity group-hover:opacity-90"
-                    sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 25vw"
-                    unoptimized
-                  />
-                ) : (
-                  <div className="flex h-full w-full items-center justify-center text-3xl text-muted-foreground">
-                    {item.name.slice(0, 1).toUpperCase()}
-                  </div>
-                )}
-                {item.badge && (
-                  <span className="absolute right-2 top-2 rounded-full bg-background/90 px-2 py-0.5 text-xs font-medium shadow-sm">
-                    {item.badge}
-                  </span>
-                )}
-              </div>
-              <CardContent className="p-3">
-                <div className="truncate text-sm font-medium">{item.name}</div>
-              </CardContent>
-            </Card>
-          </Link>
+          <FileCard
+            key={item.id}
+            href={item.href}
+            title={item.name}
+            thumbnailUrl={item.thumbnailUrl}
+            placeholder={title === "Collections" ? "Collection" : "No preview"}
+            overlay={
+              item.badge ? (
+                <span className="absolute top-2 left-2 rounded-full bg-background px-2 py-0.5 text-xs leading-5 font-medium shadow-sm">
+                  {item.badge}
+                </span>
+              ) : null
+            }
+          />
         ))}
       </div>
-    </div>
+    </section>
   );
 }

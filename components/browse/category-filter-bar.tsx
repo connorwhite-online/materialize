@@ -1,62 +1,77 @@
 "use client";
 
-import { useRouter, useSearchParams, usePathname } from "next/navigation";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { useEffect, useRef } from "react";
+import Link from "next/link";
 import { CATEGORIES } from "@/lib/categories";
-
-const ALL = "__all__";
+import { cn } from "@/lib/utils";
 
 /**
- * Category filter for /files — a single Select that drives the
- * `?category=` URL param (preserving any active `?q=` search), mirroring
- * the material-family Select on the Materials page. Server-rendered
- * /files reads the param to filter its queries, so changing the select
- * navigates rather than just flipping client state.
+ * Category chips for /files: one horizontally scrolling row of pills
+ * (Shop / YouTube style) that drives the `?category=` URL param while
+ * preserving any active `?q=` search. Every chip is a real link, so the
+ * shelves are crawlable and middle-click opens them in a tab; the page
+ * server-renders from the param, so nothing here holds state.
+ *
+ * It replaced a lone "All categories" Select: a dropdown hides the
+ * taxonomy behind a click, and the taxonomy is the thing browsing is
+ * for. On mount the active chip is scrolled into view, so a deep link
+ * to a late category doesn't land with its own chip off-screen.
  */
-export function CategoryFilterBar() {
-  const router = useRouter();
-  const searchParams = useSearchParams();
-  const pathname = usePathname();
-  const active = searchParams.get("category") ?? ALL;
+export function CategoryFilterBar({
+  active,
+  query,
+}: {
+  /** Active category slug, or "" for all. */
+  active: string;
+  /** Active text query, carried through so a chip refines the search. */
+  query?: string;
+}) {
+  const activeRef = useRef<HTMLAnchorElement | null>(null);
 
-  const onChange = (value: string | null) => {
-    const params = new URLSearchParams(searchParams);
-    if (!value || value === ALL) params.delete("category");
-    else params.set("category", value);
+  useEffect(() => {
+    const el = activeRef.current;
+    if (!el || !active) return;
+    el.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }, [active]);
+
+  const hrefFor = (category: string) => {
+    const params = new URLSearchParams();
+    if (query) params.set("q", query);
+    if (category) params.set("category", category);
     const qs = params.toString();
-    router.push(qs ? `${pathname}?${qs}` : pathname);
+    return qs ? `/files?${qs}` : "/files";
   };
 
+  const chips = [{ id: "", label: "All" }, ...CATEGORIES];
+
   return (
-    <Select value={active} onValueChange={onChange}>
-      <SelectTrigger
-        size="sm"
-        className="min-w-48"
-        aria-label="Filter by category"
-      >
-        <SelectValue>
-          {(value) =>
-            value === ALL || value == null
-              ? "All categories"
-              : (CATEGORIES.find((c) => c.id === value)?.label ??
-                "All categories")
-          }
-        </SelectValue>
-      </SelectTrigger>
-      <SelectContent>
-        <SelectItem value={ALL}>All categories</SelectItem>
-        {CATEGORIES.map((c) => (
-          <SelectItem key={c.id} value={c.id}>
-            {c.label}
-          </SelectItem>
-        ))}
-      </SelectContent>
-    </Select>
+    <nav
+      aria-label="Categories"
+      className="-mx-4 [mask-image:linear-gradient(to_right,transparent,black_16px,black_calc(100%-32px),transparent)] sm:mx-0 sm:[mask-image:linear-gradient(to_right,black_calc(100%-48px),transparent)]"
+    >
+      <ul className="flex gap-2 overflow-x-auto px-4 py-1 [scrollbar-width:none] sm:px-0 [&::-webkit-scrollbar]:hidden">
+        {chips.map((c) => {
+          const isActive = c.id === active;
+          return (
+            <li key={c.id || "all"} className="shrink-0">
+              <Link
+                ref={isActive ? activeRef : undefined}
+                href={hrefFor(c.id)}
+                aria-current={isActive ? "page" : undefined}
+                scroll={false}
+                className={cn(
+                  "inline-flex h-8 items-center rounded-full px-3.5 text-sm whitespace-nowrap transition-colors duration-150 outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background",
+                  isActive
+                    ? "bg-foreground font-medium text-background"
+                    : "bg-secondary text-foreground hover:bg-foreground/[0.09]"
+                )}
+              >
+                {c.label}
+              </Link>
+            </li>
+          );
+        })}
+      </ul>
+    </nav>
   );
 }

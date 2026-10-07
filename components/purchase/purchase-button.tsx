@@ -10,6 +10,8 @@ interface Props {
   priceCents: number;
   label?: string;
   className?: string;
+  /** Button size; `lg` when it is the page's one primary action. */
+  size?: "default" | "lg";
 }
 
 /**
@@ -25,6 +27,7 @@ export function PurchaseButton({
   priceCents,
   label,
   className,
+  size = "default",
 }: Props) {
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
@@ -47,17 +50,13 @@ export function PurchaseButton({
 
   return (
     <div className={className}>
-      <Button
-        className="w-full"
-        onClick={handleClick}
-        disabled={pending}
-      >
-        {pending
-          ? "Opening checkout…"
-          : label ?? `Purchase · $${(priceCents / 100).toFixed(2)}`}
+      <Button size={size} onClick={handleClick} loading={pending}>
+        {label ?? `Buy · $${(priceCents / 100).toFixed(2)}`}
       </Button>
       {error && (
-        <p className="mt-2 text-xs text-destructive">{error}</p>
+        <p role="alert" className="mt-2 text-[13px] leading-[18px] text-destructive">
+          {error}
+        </p>
       )}
     </div>
   );

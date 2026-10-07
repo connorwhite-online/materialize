@@ -2,7 +2,7 @@
 
 import { useState, useRef } from "react";
 import { useRouter } from "next/navigation";
-import { Button } from "@/components/ui/button";
+import { SearchIcon } from "@/components/icons/oai";
 
 interface BrowseSearchBarProps {
   defaultValue?: string;
@@ -34,12 +34,12 @@ function CircleXIcon({ className }: { className?: string }) {
 }
 
 /**
- * Static search bar for /files. Mirrors the surface treatment of the
- * anon home bottom bar (rounded-3xl, muted backdrop, depth-sunken)
- * but lives inline at the top of the layout — no fixed positioning,
- * no expand-on-focus, no live results panel. The browse page itself
- * server-renders the results below this bar from the `?q=` param,
- * so the bar's only job is to submit the form.
+ * Search field for /files. A plain GET form: the page server-renders
+ * results from `?q=`, so the field's only job is to submit. Enter (or
+ * the keyboard's Search key, via `enterKeyHint`) submits; there is no
+ * separate Search button, which read as a second primary action beside
+ * the header's Print button. The clear button resets to the unfiltered
+ * grid but keeps the category, the same way the chips keep the query.
  */
 export function BrowseSearchBar({ defaultValue = "", category }: BrowseSearchBarProps) {
   const [value, setValue] = useState(defaultValue);
@@ -49,43 +49,41 @@ export function BrowseSearchBar({ defaultValue = "", category }: BrowseSearchBar
   const handleClear = () => {
     setValue("");
     inputRef.current?.focus();
-    router.push("/files");
+    router.push(category ? `/files?category=${encodeURIComponent(category)}` : "/files");
   };
 
-
   return (
-    <form
-      method="GET"
-      action="/files"
-      className="w-full max-w-2xl rounded-3xl border border-input bg-muted/70 backdrop-blur-xl dark:bg-input/40 depth-sunken p-1 focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-2"
-    >
+    <form method="GET" action="/files" role="search" className="w-full max-w-xl">
       {category ? (
         <input type="hidden" name="category" value={category} />
       ) : null}
-      <div className="flex h-[38px] items-center gap-1 px-1">
+      <div className="relative">
+        <SearchIcon
+          aria-hidden="true"
+          className="pointer-events-none absolute top-1/2 left-3.5 size-4 -translate-y-1/2 text-subtle-foreground"
+        />
         <input
           ref={inputRef}
           type="search"
           name="q"
           value={value}
           onChange={(e) => setValue(e.target.value)}
+          enterKeyHint="search"
+          autoComplete="off"
           aria-label="Search files, creators, and projects"
-          placeholder="Search files, creators, projects..."
-          className="flex-1 bg-transparent px-3 py-1 field-text md:text-sm placeholder:text-muted-foreground/60 focus:outline-none [&::-webkit-search-cancel-button]:hidden [&::-webkit-search-decoration]:hidden"
+          placeholder="Search files, creators, projects"
+          className="h-10 w-full min-w-0 rounded-full border border-input bg-background pr-10 pl-10 field-text outline-none transition-[border-color,box-shadow] duration-150 ease-out placeholder:text-subtle-foreground hover:border-foreground/25 focus-visible:border-ring focus-visible:shadow-input-focus md:text-sm [&::-webkit-search-cancel-button]:hidden [&::-webkit-search-decoration]:hidden"
         />
         {value && (
           <button
             type="button"
             onClick={handleClear}
             aria-label="Clear search"
-            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-muted-foreground/60 transition-colors hover:text-foreground"
+            className="absolute top-1/2 right-2 flex size-7 -translate-y-1/2 items-center justify-center rounded-full text-subtle-foreground transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
           >
-            <CircleXIcon className="h-5 w-5" />
+            <CircleXIcon className="size-4" />
           </button>
         )}
-        <Button type="submit" size="sm">
-          Search
-        </Button>
       </div>
     </form>
   );

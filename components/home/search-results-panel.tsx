@@ -241,7 +241,7 @@ function CollectionCard({
       onClick={onNavigate}
       className="group flex w-28 shrink-0 flex-col gap-1.5"
     >
-      <div className="flex aspect-square w-full items-center justify-center rounded-lg border border-border bg-muted/60 text-[10px] text-muted-foreground/60">
+      <div className="flex aspect-square w-full items-center justify-center rounded-xl bg-muted text-[10px] text-subtle-foreground ring-1 ring-border/60 ring-inset">
         Collection
       </div>
       <div className="min-w-0 px-0.5">
@@ -343,7 +343,7 @@ function SearchResultsSkeleton() {
         <div className="flex gap-2 px-2 pb-1">
           {Array.from({ length: 4 }).map((_, i) => (
             <div key={i} className="flex w-28 shrink-0 flex-col gap-1.5">
-              <Skeleton className="aspect-square w-full rounded-lg" />
+              <Skeleton className="aspect-square w-full rounded-xl" />
               <Skeleton className="h-2.5 w-20 mx-0.5" />
               <Skeleton className="h-2 w-14 mx-0.5" />
             </div>

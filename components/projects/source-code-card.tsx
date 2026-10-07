@@ -18,10 +18,10 @@ function repoLabel(url: string): string {
 }
 
 /**
- * Compact card linking out to a project's source repository. Sits
- * below the description and above the content tabs on the project
- * page. The GitHub mark lives in a tinted square so the card reads as
- * a single tappable affordance on mobile.
+ * Row linking out to a project's source repository, in the project
+ * page's decision column. Rulebook row anatomy (icon badge, title,
+ * meta, chevron) rather than a bordered card: it is a link, not an
+ * object.
  */
 export function SourceCodeCard({ repoUrl }: { repoUrl: string }) {
   return (
@@ -29,14 +29,14 @@ export function SourceCodeCard({ repoUrl }: { repoUrl: string }) {
       href={repoUrl}
       target="_blank"
       rel="noopener noreferrer"
-      className="group flex items-center gap-3 rounded-xl border border-border bg-card p-2 ring-1 ring-foreground/10 transition-colors hover:border-foreground/20 hover:bg-muted/40"
+      className="group -mx-3 flex items-center gap-3 rounded-xl px-3 py-2.5 transition-colors duration-150 outline-none hover:bg-muted/70 focus-visible:ring-2 focus-visible:ring-ring"
     >
-      <span className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-foreground text-background">
+      <span className="flex size-10 shrink-0 items-center justify-center rounded-[10px] bg-muted text-foreground">
         <Github size={20} />
       </span>
       <span className="min-w-0 flex-1">
         <span className="block text-sm font-medium">Source code</span>
-        <span className="block truncate text-xs text-muted-foreground">
+        <span className="block truncate text-[13px] leading-[18px] text-muted-foreground">
           {repoLabel(repoUrl)}
         </span>
       </span>

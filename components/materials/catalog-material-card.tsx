@@ -1,6 +1,5 @@
 import Link from "next/link";
 import Image from "next/image";
-import { Card, CardContent } from "@/components/ui/card";
 
 /**
  * Narrow DTO for the materials browse page (PERF-17). CraftCloud's
@@ -38,41 +37,41 @@ interface CatalogMaterialCardProps {
 }
 
 /**
- * Marketing-style card for the materials browse page. Renders
- * CraftCloud's `featuredImage` at top, the material name, and a
- * two-line description. Tags are surfaced on the detail page only —
- * the browse grid is dense enough that a tag row was crowding the
- * scan.
+ * Tile for the materials browse grid: CraftCloud's `featuredImage`, the
+ * material name and a two-line description. Same borderless tile as the
+ * file cards on /files (media on the soft gray surface, text under it),
+ * so the two browse surfaces read as one system. Tags are surfaced on
+ * the detail page only; the grid is dense enough without them.
  */
 export function CatalogMaterialCard({
   material,
 }: CatalogMaterialCardProps) {
   return (
-    <Link href={`/materials/${material.slug}`} className="block min-w-0">
-      <Card className="group gap-0 overflow-hidden p-1 transition-[color,box-shadow,border-color] duration-200 hover:border-primary/30 hover:shadow-[0_2px_4px_-2px_rgba(0,0,0,0.08),0_10px_24px_-8px_rgba(0,0,0,0.14),0_20px_44px_-14px_rgba(0,0,0,0.10)]">
-        <div className="relative aspect-[4/3] w-full shrink-0 overflow-hidden rounded-lg border border-border bg-gradient-to-br from-muted/40 to-muted/10">
-          {material.featuredImage && (
-            <Image
-              src={resolveCatalogImage(material.featuredImage)}
-              alt={material.name}
-              fill
-              sizes="(min-width: 1536px) 16vw, (min-width: 1280px) 20vw, (min-width: 1024px) 25vw, (min-width: 768px) 33vw, 50vw"
-              className="object-cover transition-transform duration-500 group-hover:scale-[1.03]"
-            />
-          )}
-        </div>
-
-        <CardContent className="p-2">
-          <h3 className="truncate text-xs font-semibold leading-snug transition-colors group-hover:text-primary sm:text-sm">
-            {material.name}
-          </h3>
-          {material.descriptionShort && (
-            <p className="mt-1 line-clamp-2 text-[0.6875rem] leading-snug text-muted-foreground sm:text-xs sm:leading-relaxed">
-              {material.descriptionShort}
-            </p>
-          )}
-        </CardContent>
-      </Card>
+    <Link
+      href={`/materials/${material.slug}`}
+      className="group block min-w-0 rounded-xl outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+    >
+      <div className="relative aspect-[4/3] w-full overflow-hidden rounded-xl bg-muted ring-1 ring-border/60 ring-inset">
+        {material.featuredImage && (
+          <Image
+            src={resolveCatalogImage(material.featuredImage)}
+            alt=""
+            fill
+            sizes="(min-width: 1280px) 20vw, (min-width: 1024px) 25vw, (min-width: 768px) 33vw, 50vw"
+            className="object-cover transition-transform duration-200 ease-out group-hover:scale-[1.03]"
+          />
+        )}
+      </div>
+      <div className="px-0.5 pt-2.5">
+        <h3 className="truncate text-sm leading-5 font-medium">
+          {material.name}
+        </h3>
+        {material.descriptionShort && (
+          <p className="mt-0.5 line-clamp-2 text-[13px] leading-[18px] text-muted-foreground">
+            {material.descriptionShort}
+          </p>
+        )}
+      </div>
     </Link>
   );
 }

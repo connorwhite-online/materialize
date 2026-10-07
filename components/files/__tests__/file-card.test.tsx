@@ -109,10 +109,7 @@ describe("FileCard", () => {
     const card = container.querySelector("[data-slot='file-card']");
     expect(card?.className).toContain(FILE_CARD_SHELL_CLASS);
     expect(card?.firstElementChild?.className).toContain(
-      "aspect-square overflow-hidden rounded-lg border border-border"
-    );
-    expect(card?.firstElementChild?.className).toContain(
-      "bg-gradient-to-br from-muted to-muted/50"
+      "aspect-square overflow-hidden rounded-xl bg-muted"
     );
   });
 

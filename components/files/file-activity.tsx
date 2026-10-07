@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
 import {
   Tabs,
@@ -8,8 +9,7 @@ import {
   TabsContent,
 } from "@/components/ui/tabs";
 import { UserAvatar } from "@/components/auth/user-avatar";
-import { Badge } from "@/components/ui/badge";
-import { Card } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 import { timeAgo } from "@/lib/utils/time";
 
 export type ActivityUser = {
@@ -42,83 +42,122 @@ const STATUS_LABEL: Record<string, string> = {
   received: "Delivered",
 };
 
-function UserCell({ user }: { user: ActivityUser }) {
+/** Rows shown before "Show all": enough to prove life, not a ledger. */
+const PREVIEW_ROWS = 5;
+
+function Avatar({ user }: { user: ActivityUser }) {
   const name = user.displayName || user.username || "Anonymous";
   // Fall back to a stable anon seed so all unsigned-in downloads share
   // one gradient rather than each producing a random one. The gradient
   // is deterministic from the seed — see `getAvatarGradient`.
   const seed = user.username || user.id || "anonymous";
-  const inner = (
-    <div className="flex items-center gap-2.5 min-w-0">
-      <UserAvatar
-        seed={seed}
-        imageUrl={user.avatarUrl}
-        displayName={name}
-        className="h-6 w-6 text-[10px]"
-      />
-      <span className="text-sm font-medium truncate">{name}</span>
-    </div>
+  return (
+    <UserAvatar
+      seed={seed}
+      imageUrl={user.avatarUrl}
+      displayName={name}
+      className="size-8 shrink-0 text-[11px]"
+    />
   );
+}
+
+function Name({ user }: { user: ActivityUser }) {
+  const name = user.displayName || user.username || "Anonymous";
   return user.username ? (
     <Link
       href={`/${user.username}`}
-      className="hover:opacity-80 transition-opacity min-w-0"
+      className="truncate text-sm leading-5 font-medium underline-offset-4 hover:underline"
     >
-      {inner}
+      {name}
     </Link>
   ) : (
-    <div className="min-w-0">{inner}</div>
+    <span className="truncate text-sm leading-5 font-medium">{name}</span>
   );
 }
 
-function EmptyState({ children }: { children: React.ReactNode }) {
-  return (
-    <div className="px-4 py-10 text-center text-sm text-muted-foreground">
-      {children}
-    </div>
-  );
-}
+const ROW_CLASS = "flex items-center gap-3 py-2.5";
 
 function PrintRow({ row }: { row: PrintActivity }) {
   const statusLabel = STATUS_LABEL[row.status] ?? row.status;
+  const detail = [row.materialLabel, row.vendorName && `via ${row.vendorName}`]
+    .filter(Boolean)
+    .join(" · ");
   return (
-    <div className="flex items-center gap-3 px-4 py-2.5 border-b border-border/60 last:border-b-0">
-      <div className="flex-1 min-w-0">
-        <UserCell user={row.user} />
-      </div>
-      <div className="hidden sm:flex items-center gap-1.5 text-xs text-muted-foreground min-w-0">
-        {row.materialLabel && (
-          <Badge variant="secondary" className="text-[10px] truncate max-w-[160px]">
-            {row.materialLabel}
-          </Badge>
-        )}
-        {row.vendorName && (
-          <span className="truncate max-w-[120px]">via {row.vendorName}</span>
+    <li className={ROW_CLASS}>
+      <Avatar user={row.user} />
+      <div className="flex min-w-0 flex-1 flex-col">
+        <Name user={row.user} />
+        {detail && (
+          <span className="truncate text-[13px] leading-[18px] text-muted-foreground">
+            {detail}
+          </span>
         )}
       </div>
-      <Badge variant="outline" className="text-[10px] shrink-0">
-        {statusLabel}
-      </Badge>
-      <span className="text-xs text-muted-foreground shrink-0 tabular-nums w-14 text-right">
-        {timeAgo(row.createdAt)}
-      </span>
-    </div>
+      <div className="flex shrink-0 flex-col items-end">
+        <span className="text-[13px] leading-5">{statusLabel}</span>
+        <span className="text-xs leading-[18px] text-subtle-foreground tabular-nums">
+          {timeAgo(row.createdAt)}
+        </span>
+      </div>
+    </li>
   );
 }
 
 function DownloadRow({ row }: { row: DownloadActivity }) {
   return (
-    <div className="flex items-center gap-3 px-4 py-2.5 border-b border-border/60 last:border-b-0">
-      <div className="flex-1 min-w-0">
-        <UserCell user={row.user} />
+    <li className={ROW_CLASS}>
+      <Avatar user={row.user} />
+      <div className="flex min-w-0 flex-1 flex-col">
+        <Name user={row.user} />
       </div>
-      <span className="text-xs text-muted-foreground shrink-0 tabular-nums w-14 text-right">
+      <span className="shrink-0 text-xs text-subtle-foreground tabular-nums">
         {timeAgo(row.createdAt)}
       </span>
+    </li>
+  );
+}
+
+function RowList<T extends { id: string }>({
+  rows,
+  empty,
+  render,
+}: {
+  rows: T[];
+  empty: string;
+  render: (row: T) => React.ReactNode;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  if (rows.length === 0) {
+    return (
+      <p className="py-6 text-sm text-muted-foreground">{empty}</p>
+    );
+  }
+  const shown = expanded ? rows : rows.slice(0, PREVIEW_ROWS);
+  return (
+    <div className="flex flex-col items-start">
+      <ul className="w-full divide-y divide-border">{shown.map(render)}</ul>
+      {rows.length > PREVIEW_ROWS && (
+        <Button
+          variant="ghost"
+          size="sm"
+          className="-ml-3 mt-1 text-muted-foreground"
+          onClick={() => setExpanded((v) => !v)}
+          aria-expanded={expanded}
+        >
+          {expanded ? "Show less" : `Show all ${rows.length}`}
+        </Button>
+      )}
     </div>
   );
 }
 
+/**
+ * Who printed and downloaded this file. A plain section (title, pill
+ * tabs, hairline rows), not a tinted card: it is a list of people, and
+ * the rows themselves carry the structure. Material and vendor sit
+ * under the name instead of in a badge column, so they survive on a
+ * phone rather than being hidden there.
+ */
 export function FileActivity({
   prints,
   downloads,
@@ -127,10 +166,10 @@ export function FileActivity({
   downloads: DownloadActivity[];
 }) {
   return (
-    <Card className="gap-0 py-0 overflow-hidden bg-muted/50">
+    <section className="flex flex-col gap-3">
       <Tabs defaultValue="prints" className="gap-0">
-        <div className="px-4 pt-4 pb-3 border-b border-border/60 flex items-center justify-between gap-3">
-          <h2 className="text-base font-semibold">Activity</h2>
+        <div className="flex flex-wrap items-center justify-between gap-3 pb-1">
+          <h2 className="text-base leading-6 font-semibold">Activity</h2>
           <TabsList>
             <TabsTrigger value="prints">
               Printed
@@ -147,28 +186,20 @@ export function FileActivity({
           </TabsList>
         </div>
         <TabsContent value="prints" className="mt-0">
-          {prints.length === 0 ? (
-            <EmptyState>No prints yet.</EmptyState>
-          ) : (
-            <div>
-              {prints.map((row) => (
-                <PrintRow key={row.id} row={row} />
-              ))}
-            </div>
-          )}
+          <RowList
+            rows={prints}
+            empty="No prints yet."
+            render={(row) => <PrintRow key={row.id} row={row} />}
+          />
         </TabsContent>
         <TabsContent value="downloads" className="mt-0">
-          {downloads.length === 0 ? (
-            <EmptyState>No downloads yet.</EmptyState>
-          ) : (
-            <div>
-              {downloads.map((row) => (
-                <DownloadRow key={row.id} row={row} />
-              ))}
-            </div>
-          )}
+          <RowList
+            rows={downloads}
+            empty="No downloads yet."
+            render={(row) => <DownloadRow key={row.id} row={row} />}
+          />
         </TabsContent>
       </Tabs>
-    </Card>
+    </section>
   );
 }

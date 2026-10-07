@@ -173,9 +173,7 @@ export function CommentForm({
     : placeholder;
 
   const canSubmit = !pending && (body.trim().length > 0 || !!attachedFile);
-  const submitLabel = pending
-    ? "Posting…"
-    : parentId
+  const submitLabel = parentId
       ? "Reply"
       : attachedFile
         ? "Post photo"
@@ -203,7 +201,7 @@ export function CommentForm({
       />
 
       {previewUrl && (
-        <div className="relative inline-block overflow-hidden rounded-lg border border-border">
+        <div className="relative inline-block overflow-hidden rounded-xl ring-1 ring-border">
           <img
             src={previewUrl}
             alt="Attached photo preview"
@@ -213,14 +211,18 @@ export function CommentForm({
             type="button"
             onClick={clearAttachment}
             aria-label="Remove attached photo"
-            className="absolute right-1 top-1 inline-flex h-6 w-6 items-center justify-center rounded-full bg-destructive/20 text-destructive ring-1 ring-destructive/30 backdrop-blur-md transition-colors hover:bg-destructive/35 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-destructive cursor-pointer"
+            className="absolute top-1.5 right-1.5 inline-flex size-6 cursor-pointer items-center justify-center rounded-full bg-background text-foreground shadow-sm ring-1 ring-border transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
           >
             <X size={14} />
           </button>
         </div>
       )}
 
-      {error && <p className="text-xs text-destructive">{error}</p>}
+      {error && (
+        <p role="alert" className="text-[13px] leading-[18px] text-destructive">
+          {error}
+        </p>
+      )}
 
       <div className="flex items-center justify-end gap-2">
         {acceptPhoto && (
@@ -243,7 +245,7 @@ export function CommentForm({
               aria-label="Attach photo"
               title="Attach a photo"
               className={cn(
-                "inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                "inline-flex size-8 cursor-pointer items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
                 "mr-auto",
                 attachedFile && "text-foreground"
               )}
@@ -262,7 +264,12 @@ export function CommentForm({
             Cancel
           </Button>
         )}
-        <Button size="sm" onClick={submit} disabled={!canSubmit}>
+        <Button
+          size="sm"
+          onClick={submit}
+          loading={pending}
+          disabled={!canSubmit}
+        >
           {submitLabel}
         </Button>
       </div>

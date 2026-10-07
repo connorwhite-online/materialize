@@ -10,8 +10,12 @@ import { cn } from "@/lib/utils";
 
 /**
  * Shared file-card chrome. Visual source of truth is the /files
- * discover grid — inset square well, title + meta under the thumb,
- * hover border. Every file surface (discover, library, project
+ * discover grid — a borderless square media tile on the soft gray
+ * surface with title + meta set under it (Shop / App Store style).
+ * There is no outer box: the tile itself is the object, and a ring
+ * around a ring around the image read as two cards nested.
+ *
+ * Every file surface (discover, library, project
  * pickers, home recents, typeahead, collection items) renders
  * through this component so the tiles cannot drift.
  *
@@ -19,26 +23,34 @@ import { cn } from "@/lib/utils";
  * import the shell/well class constants below so their chrome
  * stays locked to the same numbers.
  */
+// Overrides Card's ring, fill, radius and vertical padding: the shell is
+// only a layout column. `p-0`/`gap-0` keep the tile flush with the grid.
 export const FILE_CARD_SHELL_CLASS =
-  "group gap-0 p-1 overflow-hidden transition-colors hover:border-primary/30";
+  "group gap-0 p-0 overflow-visible rounded-none bg-transparent ring-0";
 
+// Inset hairline (ring-inset) rather than a border so white-background
+// captures still have an edge on the white canvas without adding a box.
 export const FILE_CARD_WELL_CLASS =
-  "relative aspect-square overflow-hidden rounded-lg border border-border bg-gradient-to-br from-muted to-muted/50";
+  "relative aspect-square overflow-hidden rounded-xl bg-muted ring-1 ring-inset ring-border/60 transition-[box-shadow] duration-150";
 
-export const FILE_CARD_BODY_CLASS = "p-2.5";
+export const FILE_CARD_BODY_CLASS = "px-0.5 pt-2.5 pb-1";
 
-export const FILE_CARD_BODY_COMPACT_CLASS = "px-2 py-2";
+export const FILE_CARD_BODY_COMPACT_CLASS = "px-0.5 pt-1.5 pb-1";
 
 export const FILE_CARD_TITLE_CLASS =
-  "truncate text-sm font-medium group-hover:text-primary transition-colors";
+  "truncate text-sm leading-5 font-medium";
 
 export const FILE_CARD_TITLE_COMPACT_CLASS =
-  "truncate text-xs font-medium group-hover:text-primary transition-colors";
+  "truncate text-xs font-medium";
 
-const FILE_CARD_SELECTED_CLASS = "border-primary ring-2 ring-primary/40";
+/** Focus ring for the link/button wrapping a tile; the shell has no box of its own. */
+export const FILE_CARD_LINK_CLASS =
+  "block rounded-xl outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background";
+
+const FILE_CARD_SELECTED_WELL_CLASS = "ring-2 ring-foreground ring-inset";
 
 const MEDIA_HOVER_CLASS =
-  "transition-transform duration-300 group-hover:scale-105";
+  "transition-transform duration-200 ease-out group-hover:scale-[1.03]";
 
 export function fileCardPhotoUrls(
   fileId: string,
@@ -109,7 +121,7 @@ export function fileCardPurchasedSubtitle(
 export function FileCardPriceBadge({ priceCents }: { priceCents: number }) {
   if (priceCents <= 0) return null;
   return (
-    <span className="absolute left-2 top-2 rounded-full bg-background/90 px-2 py-1 text-xs font-medium tabular-nums backdrop-blur-sm">
+    <span className="absolute top-2 left-2 rounded-full bg-background px-2 py-0.5 text-xs leading-5 font-medium tabular-nums shadow-sm">
       ${(priceCents / 100).toFixed(2)}
     </span>
   );
@@ -130,7 +142,7 @@ export function FileCardCreator({
     !!avatarUrl &&
     (avatarUrl.startsWith("http://") || avatarUrl.startsWith("https://"));
   return (
-    <p className="mt-0.5 flex items-center gap-1.5 truncate text-xs text-muted-foreground">
+    <p className="mt-0.5 flex min-w-0 items-center gap-1.5 truncate text-[13px] leading-[18px] text-muted-foreground">
       {remoteAvatar ? (
         // eslint-disable-next-line @next/next/no-img-element
         <img
@@ -151,13 +163,13 @@ export function FileCardCreator({
 
 export function FileCardDownloads({ count }: { count: number }) {
   return (
-    <div className="mt-1.5 flex items-center">
+    <div className="mt-1 flex items-center">
       <span
-        className="inline-flex items-center gap-1 text-[10px] text-muted-foreground tabular-nums"
+        className="inline-flex items-center gap-1 text-xs text-subtle-foreground tabular-nums"
         aria-label={`${count} downloads`}
         title={`${count} downloads`}
       >
-        <Download size={11} />
+        <Download size={12} />
         {formatCompactCount(count)}
       </span>
     </div>
@@ -245,13 +257,16 @@ export function FileCard({
     <Card
       data-slot="file-card"
       data-selected={selected ? "true" : undefined}
-      className={cn(FILE_CARD_SHELL_CLASS, selected && FILE_CARD_SELECTED_CLASS)}
+      className={FILE_CARD_SHELL_CLASS}
     >
-      <div ref={wellRef} className={FILE_CARD_WELL_CLASS}>
+      <div
+        ref={wellRef}
+        className={cn(FILE_CARD_WELL_CLASS, selected && FILE_CARD_SELECTED_WELL_CLASS)}
+      >
         {media}
         {overlay}
         {selected && (
-          <span className="pointer-events-none absolute right-1.5 top-1.5 inline-flex h-5 w-5 items-center justify-center rounded-full bg-primary text-[11px] font-semibold text-primary-foreground">
+          <span className="pointer-events-none absolute top-2 right-2 inline-flex size-5 items-center justify-center rounded-full bg-foreground text-[11px] font-semibold text-background">
             ✓
           </span>
         )}
@@ -276,7 +291,7 @@ export function FileCard({
       <Link
         href={href}
         onClick={onNavigate ?? onClick}
-        className={cn("block", compact && "w-28 shrink-0", className)}
+        className={cn(FILE_CARD_LINK_CLASS, compact && "w-28 shrink-0", className)}
       >
         {card}
       </Link>
@@ -289,7 +304,7 @@ export function FileCard({
         type="button"
         onClick={onClick}
         aria-pressed={selected}
-        className={cn("block w-full text-left", compact && "w-28 shrink-0", className)}
+        className={cn(FILE_CARD_LINK_CLASS, "w-full text-left", compact && "w-28 shrink-0", className)}
       >
         {card}
       </button>

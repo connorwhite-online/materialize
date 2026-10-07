@@ -2,14 +2,10 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Separator } from "@/components/ui/separator";
-import { ChevronRight } from "@/components/icons/chevron-right";
-import { Layers } from "@/components/icons/layers";
+import { ChevronLeft } from "@/components/icons/chevron-left";
 import { Print } from "@/components/icons/print";
-import { Sparkles } from "@/components/icons/sparkles";
 import {
   findMaterialBySlug,
   type CatalogMaterial,
@@ -126,15 +122,24 @@ export default async function MaterialDetailPage(props: {
     ].filter(Boolean),
   };
 
+  const hasMechanical =
+    hasNumber(material.tensileStrengthMax) ||
+    hasNumber(material.tensileModulusMax) ||
+    hasNumber(material.flexuralStrengthMax) ||
+    hasNumber(material.density);
+  const hasThermal =
+    hasNumber(material.heatDeflectionTemp66PSIMax) ||
+    hasNumber(material.heatDeflectionTemp264PSIMax);
+
   return (
-    <div className="mx-auto max-w-5xl px-4 py-8">
+    <div className="mz-enter mx-auto flex w-full max-w-6xl flex-col gap-12 px-4 pt-6 pb-16 sm:pt-10">
       <script
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: safeJsonLdScript(jsonLd) }}
       />
-      {/* Hero */}
-      <div className="grid grid-cols-1 gap-8 md:grid-cols-2">
-        <div className="relative aspect-square overflow-hidden rounded-xl border border-border bg-muted/30">
+      {/* Hero: the material left, the decision right (one CTA). */}
+      <div className="grid grid-cols-1 gap-8 md:grid-cols-2 lg:gap-12">
+        <div className="relative aspect-[4/3] overflow-hidden rounded-2xl bg-muted md:aspect-square">
           {material.featuredImage && (
             <Image
               src={resolveCatalogImage(material.featuredImage, 900)}
@@ -147,233 +152,194 @@ export default async function MaterialDetailPage(props: {
           )}
         </div>
 
-        <div>
-          <h1 className="text-3xl font-semibold">{material.name}</h1>
-
-          <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1.5">
-            <div className="flex items-center gap-1.5">
-              <Layers size={14} className="shrink-0 text-muted-foreground" />
-              <Badge variant="outline">{group.name}</Badge>
-            </div>
+        <div className="flex flex-col items-start gap-5 md:py-2">
+          <div className="flex flex-col items-start gap-2">
+            <Link
+              href="/materials"
+              className="-ml-2 inline-flex h-7 items-center gap-1 rounded-lg pr-2 pl-1.5 text-[13px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            >
+              <ChevronLeft size={14} />
+              {group.name}
+            </Link>
+            <h1 className="text-2xl leading-7 font-semibold text-balance sm:text-[28px] sm:leading-8">
+              {material.name}
+            </h1>
             {tags.length > 0 && (
-              <div className="flex flex-wrap items-center gap-1.5">
-                <Sparkles
-                  size={14}
-                  className="shrink-0 text-muted-foreground"
-                />
-                {tags.slice(0, 4).map((t) => (
-                  <Badge key={t.id} variant="secondary" className="text-[10px]">
-                    {t.name}
-                  </Badge>
+              <ul className="mt-1 flex flex-wrap gap-1.5" aria-label="Properties">
+                {tags.slice(0, 5).map((t) => (
+                  <li key={t.id}>
+                    <Badge variant="secondary">{t.name}</Badge>
+                  </li>
                 ))}
-              </div>
+              </ul>
             )}
           </div>
 
           {material.description && (
-            <p className="mt-3 text-sm leading-relaxed text-muted-foreground">
+            <p className="max-w-prose text-sm leading-6 text-pretty text-muted-foreground">
               {material.description}
             </p>
           )}
 
-          {/* This page's one job is to start a print, so the CTA carries the
-              same weight as the Download/Print row on file + project detail
-              (`size="xl"`, the Print glyph, semibold). */}
-          <div className="mt-6">
+          {/* This page's one job is to start a print: one primary, lg,
+              natural width, with the next step spelled out under it. */}
+          <div className="flex flex-col items-start gap-2">
             <Button
-              size="xl"
-              className="font-semibold"
+              size="lg"
               render={<Link href={`/print?material=${material.id}`} />}
             >
-              <Print size={18} />
+              <Print size={16} />
               Print with {material.name}
             </Button>
+            <p className="text-[13px] leading-[18px] text-muted-foreground">
+              Upload a model next for instant quotes from print shops.
+            </p>
           </div>
         </div>
       </div>
 
-      <div className="mt-12 grid grid-cols-1 gap-6 md:grid-cols-2">
-        {/* Mechanical properties */}
-        {(hasNumber(material.tensileStrengthMax) ||
-          hasNumber(material.tensileModulusMax) ||
-          hasNumber(material.flexuralStrengthMax) ||
-          hasNumber(material.density)) && (
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">Mechanical Properties</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-2 text-sm">
-              <RangeRow
-                label="Tensile strength"
-                min={material.tensileStrengthMin}
-                max={material.tensileStrengthMax}
-                unit="MPa"
-              />
-              <RangeRow
-                label="Tensile modulus"
-                min={material.tensileModulusMin}
-                max={material.tensileModulusMax}
-                unit="MPa"
-              />
-              <RangeRow
-                label="Elongation"
-                min={material.tensileElongationMin}
-                max={material.tensileElongationMax}
-                unit="%"
-              />
-              <RangeRow
-                label="Flexural strength"
-                min={material.flexuralStrengthMin}
-                max={material.flexuralStrengthMax}
-                unit="MPa"
-              />
-              <RangeRow
-                label="Flexural modulus"
-                min={material.flexuralModulusMin}
-                max={material.flexuralModulusMax}
-                unit="MPa"
-              />
-              {hasNumber(material.density) && (
-                <Row label="Density" value={`${material.density} g/cm³`} />
-              )}
-            </CardContent>
-          </Card>
+      {/* Specs: unboxed sections of label/value rows. */}
+      <div className="grid grid-cols-1 gap-x-12 gap-y-10 md:grid-cols-2 lg:grid-cols-3">
+        {hasMechanical && (
+          <SpecSection title="Mechanical">
+            <RangeRow
+              label="Tensile strength"
+              min={material.tensileStrengthMin}
+              max={material.tensileStrengthMax}
+              unit="MPa"
+            />
+            <RangeRow
+              label="Tensile modulus"
+              min={material.tensileModulusMin}
+              max={material.tensileModulusMax}
+              unit="MPa"
+            />
+            <RangeRow
+              label="Elongation"
+              min={material.tensileElongationMin}
+              max={material.tensileElongationMax}
+              unit="%"
+            />
+            <RangeRow
+              label="Flexural strength"
+              min={material.flexuralStrengthMin}
+              max={material.flexuralStrengthMax}
+              unit="MPa"
+            />
+            <RangeRow
+              label="Flexural modulus"
+              min={material.flexuralModulusMin}
+              max={material.flexuralModulusMax}
+              unit="MPa"
+            />
+            {hasNumber(material.density) && (
+              <Row label="Density" value={`${formatNumber(material.density)} g/cm³`} />
+            )}
+          </SpecSection>
         )}
 
-        {/* Thermal */}
-        {(hasNumber(material.heatDeflectionTemp66PSIMax) ||
-          hasNumber(material.heatDeflectionTemp264PSIMax)) && (
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">Thermal</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-2 text-sm">
-              <RangeRow
-                label="Heat deflection at 66 PSI"
-                min={material.heatDeflectionTemp66PSIMin}
-                max={material.heatDeflectionTemp66PSIMax}
-                unit="°C"
-              />
-              <RangeRow
-                label="Heat deflection at 264 PSI"
-                min={material.heatDeflectionTemp264PSIMin}
-                max={material.heatDeflectionTemp264PSIMax}
-                unit="°C"
-              />
-            </CardContent>
-          </Card>
+        {hasThermal && (
+          <SpecSection title="Thermal">
+            <RangeRow
+              label="Heat deflection, 66 PSI"
+              min={material.heatDeflectionTemp66PSIMin}
+              max={material.heatDeflectionTemp66PSIMax}
+              unit="°C"
+            />
+            <RangeRow
+              label="Heat deflection, 264 PSI"
+              min={material.heatDeflectionTemp264PSIMin}
+              max={material.heatDeflectionTemp264PSIMax}
+              unit="°C"
+            />
+          </SpecSection>
         )}
 
-        {/* Print constraints */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Print Constraints</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3 text-sm">
-            {material.maximumPrintingDimensions && (
-              <div>
-                <p className="text-xs text-muted-foreground">
-                  Maximum build volume
-                </p>
-                <p className="mt-0.5 font-mono">
-                  {material.maximumPrintingDimensions[0]} ×{" "}
-                  {material.maximumPrintingDimensions[1]} ×{" "}
-                  {material.maximumPrintingDimensions[2]} mm
-                </p>
-              </div>
-            )}
-            {hasNumber(material.defaultLayerHeight) && (
-              <Row
-                label="Default layer height"
-                value={`${material.defaultLayerHeight} mm`}
-              />
-            )}
-            {hasNumber(material.defaultInfill) && (
-              <Row label="Default infill" value={`${material.defaultInfill}%`} />
-            )}
-            {hasNumber(material.embossingMin) && (
-              <Row
-                label="Min embossing"
-                value={`${material.embossingMin} mm`}
-              />
-            )}
-            {hasNumber(material.engravingMin) && (
-              <Row
-                label="Min engraving"
-                value={`${material.engravingMin} mm`}
-              />
-            )}
-            {hasNumber(material.accuracy) && (
-              <Row label="Accuracy" value={`± ${material.accuracy} mm`} />
-            )}
-            {material.warpingRisk && (
-              <Row label="Warping risk" value={capitalize(material.warpingRisk)} />
-            )}
-            {typeof material.interlockingParts === "boolean" && (
-              <Row
-                label="Interlocking parts"
-                value={material.interlockingParts ? "Supported" : "Not supported"}
-              />
-            )}
-          </CardContent>
-        </Card>
+        <SpecSection title="Printing">
+          {material.maximumPrintingDimensions && (
+            <Row
+              label="Max build volume"
+              value={`${material.maximumPrintingDimensions
+                .map((n) => formatNumber(n))
+                .join(" × ")} mm`}
+            />
+          )}
+          {hasNumber(material.defaultLayerHeight) && (
+            <Row label="Layer height" value={`${material.defaultLayerHeight} mm`} />
+          )}
+          {hasNumber(material.defaultInfill) && (
+            <Row label="Infill" value={`${material.defaultInfill}%`} />
+          )}
+          {hasNumber(material.accuracy) && (
+            <Row label="Accuracy" value={`± ${material.accuracy} mm`} />
+          )}
+          {hasNumber(material.embossingMin) && (
+            <Row label="Min embossing" value={`${material.embossingMin} mm`} />
+          )}
+          {hasNumber(material.engravingMin) && (
+            <Row label="Min engraving" value={`${material.engravingMin} mm`} />
+          )}
+          {material.warpingRisk && (
+            <Row label="Warping risk" value={humanize(material.warpingRisk)} />
+          )}
+          {typeof material.interlockingParts === "boolean" && (
+            <Row
+              label="Interlocking parts"
+              value={material.interlockingParts ? "Supported" : "Not supported"}
+            />
+          )}
+        </SpecSection>
       </div>
 
-      {/* Available finishes */}
       {material.finishGroups.length > 0 && (
-        <div className="mt-12">
-          <h2 className="text-lg font-semibold">Available finishes</h2>
-          <p className="mt-1 text-xs text-muted-foreground">
-            Each finish can be combined with the available colors at checkout.
-          </p>
-          <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <section className="flex flex-col gap-4">
+          <div>
+            <h2 className="text-base leading-6 font-semibold">Finishes</h2>
+            <p className="mt-0.5 text-[13px] leading-[18px] text-muted-foreground">
+              You pick a finish and color when you order.
+            </p>
+          </div>
+          <div className="grid grid-cols-2 gap-x-3 gap-y-6 sm:gap-x-4 md:grid-cols-3 lg:grid-cols-4">
             {material.finishGroups.map((fg) => {
               const colorCount = new Set(
                 fg.materialConfigs.map((c) => c.color)
               ).size;
               return (
-                <Card key={fg.id} className="gap-0 py-0 overflow-hidden">
-                  {fg.featuredImage && (
-                    <div className="relative aspect-square w-full bg-muted/40">
+                <div key={fg.id} className="min-w-0">
+                  <div className="relative aspect-[4/3] w-full overflow-hidden rounded-xl bg-muted ring-1 ring-border/60 ring-inset">
+                    {fg.featuredImage && (
                       <Image
                         src={resolveCatalogImage(fg.featuredImage, 480)}
                         alt={fg.name}
                         fill
-                        sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 33vw"
+                        sizes="(max-width: 768px) 50vw, (max-width: 1024px) 33vw, 25vw"
                         className="object-cover"
                       />
-                    </div>
-                  )}
-                  <CardContent className="p-4">
-                    <div className="flex items-center justify-between">
-                      <h3 className="text-sm font-medium">{fg.name}</h3>
-                      <span className="text-[11px] text-muted-foreground">
-                        {colorCount}{" "}
-                        {colorCount === 1 ? "color" : "colors"}
-                      </span>
+                    )}
+                  </div>
+                  <div className="px-0.5 pt-2.5">
+                    <div className="flex items-baseline justify-between gap-2">
+                      <h3 className="truncate text-sm leading-5 font-medium">
+                        {fg.name}
+                      </h3>
+                      {colorCount > 0 && (
+                        <span className="shrink-0 text-xs text-subtle-foreground tabular-nums">
+                          {colorCount} {colorCount === 1 ? "color" : "colors"}
+                        </span>
+                      )}
                     </div>
                     {fg.descriptionShort && (
-                      <p className="mt-1 line-clamp-3 text-xs text-muted-foreground">
+                      <p className="mt-0.5 line-clamp-2 text-[13px] leading-[18px] text-muted-foreground">
                         {fg.descriptionShort}
                       </p>
                     )}
-                  </CardContent>
-                </Card>
+                  </div>
+                </div>
               );
             })}
           </div>
-        </div>
+        </section>
       )}
-
-      <div className="mt-10">
-        <Link
-          href="/materials"
-          className="inline-flex items-center gap-1 rounded-lg px-3 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
-        >
-          <ChevronRight size={14} className="rotate-180" />
-          All materials
-        </Link>
-      </div>
     </div>
   );
 }
@@ -384,15 +350,37 @@ function hasNumber(v: number | null | undefined): v is number {
   return typeof v === "number" && !Number.isNaN(v);
 }
 
-function capitalize(s: string) {
-  return s.length === 0 ? s : s[0].toUpperCase() + s.slice(1);
+/** CraftCloud enums arrive as e.g. "over_140_mm": make them read as words. */
+function humanize(s: string) {
+  const words = s.replace(/_/g, " ").trim();
+  return words.length === 0 ? words : words[0].toUpperCase() + words.slice(1);
+}
+
+/** 180000 → "180,000" so large moduli are readable at a glance. */
+function formatNumber(n: number) {
+  return n.toLocaleString("en-US", { maximumFractionDigits: 2 });
+}
+
+function SpecSection({
+  title,
+  children,
+}: {
+  title: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <section className="flex flex-col gap-2">
+      <h2 className="text-base leading-6 font-semibold">{title}</h2>
+      <dl className="flex flex-col border-t border-border text-sm">{children}</dl>
+    </section>
+  );
 }
 
 function Row({ label, value }: { label: string; value: string }) {
   return (
-    <div className="flex items-baseline justify-between gap-4">
-      <span className="text-muted-foreground">{label}</span>
-      <span className="font-mono text-xs">{value}</span>
+    <div className="flex items-baseline justify-between gap-4 border-b border-border py-2.5">
+      <dt className="text-muted-foreground">{label}</dt>
+      <dd className="text-right tabular-nums">{value}</dd>
     </div>
   );
 }
@@ -412,8 +400,8 @@ function RangeRow({
   const hasMax = hasNumber(max);
   if (!hasMin && !hasMax) return null;
   const display = hasMin && hasMax && min !== max
-    ? `${min}–${max} ${unit}`
-    : `${hasMax ? max : min} ${unit}`;
+    ? `${formatNumber(min)}–${formatNumber(max)} ${unit}`
+    : `${formatNumber((hasMax ? max : min) as number)} ${unit}`;
   return <Row label={label} value={display} />;
 }
 

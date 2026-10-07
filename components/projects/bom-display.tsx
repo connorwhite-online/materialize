@@ -9,14 +9,13 @@ export type BomDisplayItem = {
 
 /**
  * Read-only Bill of Materials list on the project detail page.
- * Renders nothing for an empty list. The header (title + count) is
- * supplied by the wrapping <CollapsibleSection> on the page —
- * this component only owns the row layout.
+ * Renders nothing for an empty list. Hairline rows with the quantity
+ * in a soft chip first, so "how many" scans down one column.
  */
 export function BomDisplay({ items }: { items: BomDisplayItem[] }) {
   if (items.length === 0) return null;
   return (
-    <div className="overflow-hidden rounded-xl border border-border bg-muted/40 divide-y divide-border/60">
+    <div className="divide-y divide-border border-y border-border">
       {items.map((item) => (
         <BomRow key={item.id} item={item} />
       ))}
@@ -27,19 +26,19 @@ export function BomDisplay({ items }: { items: BomDisplayItem[] }) {
 function BomRow({ item }: { item: BomDisplayItem }) {
   const qty = formatQuantity(item.quantity, item.unit);
   const inner = (
-    <div className="flex items-baseline gap-4 px-4 py-3">
-      <span className="shrink-0 font-mono text-xs text-muted-foreground tabular-nums">
+    <div className="flex items-center gap-3 py-2.5">
+      <span className="flex h-7 min-w-10 shrink-0 items-center justify-center rounded-lg bg-muted px-2 text-[13px] font-medium tabular-nums">
         {qty}
       </span>
       <div className="flex-1 min-w-0">
-        <p className="text-sm font-medium">
+        <p className="text-sm leading-5 font-medium underline-offset-4 group-hover:underline">
           {item.name}
           {item.sourceUrl && (
-            <span className="ml-1 text-xs text-muted-foreground">↗</span>
+            <span aria-hidden className="ml-1 text-xs text-muted-foreground">↗</span>
           )}
         </p>
         {item.notes && (
-          <p className="mt-0.5 text-xs text-muted-foreground line-clamp-2">
+          <p className="text-[13px] leading-[18px] text-muted-foreground line-clamp-2">
             {item.notes}
           </p>
         )}
@@ -52,7 +51,7 @@ function BomRow({ item }: { item: BomDisplayItem }) {
         href={item.sourceUrl}
         target="_blank"
         rel="noreferrer noopener"
-        className="block transition-colors hover:bg-muted/60"
+        className="group block"
       >
         {inner}
       </a>
