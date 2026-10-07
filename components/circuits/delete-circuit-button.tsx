@@ -63,7 +63,7 @@ export function DeleteCircuitButton({ circuitId }: Props) {
           </DialogHeader>
           <DialogFooter>
             <Button
-              variant="ghost"
+              variant="secondary"
               onClick={() => setOpen(false)}
               disabled={pending}
             >

@@ -13,7 +13,8 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { Field } from "@/components/ui/field";
+import { Plus } from "@/components/icons/plus";
 import { addProjectCircuitWokwi } from "@/app/actions/circuits";
 
 interface Props {
@@ -57,12 +58,13 @@ export function AddWokwiDialog({ projectId }: Props) {
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger
         render={
-          <Button variant="outline" size="sm">
-            + Wokwi link
+          <Button variant="secondary" size="sm">
+            <Plus size={14} />
+            Wokwi link
           </Button>
         }
       />
-      <DialogContent className="max-w-md">
+      <DialogContent>
         <DialogHeader>
           <DialogTitle>Embed a Wokwi simulation</DialogTitle>
           <DialogDescription>
@@ -70,9 +72,8 @@ export function AddWokwiDialog({ projectId }: Props) {
             to interact with the simulation directly from this page.
           </DialogDescription>
         </DialogHeader>
-        <div className="space-y-4">
-          <div>
-            <Label htmlFor="wokwi-url">Project URL</Label>
+        <div className="flex flex-col gap-5">
+          <Field label="Project URL" htmlFor="wokwi-url">
             <Input
               id="wokwi-url"
               type="url"
@@ -82,28 +83,31 @@ export function AddWokwiDialog({ projectId }: Props) {
               placeholder="https://wokwi.com/projects/123456789"
               autoFocus
             />
-          </div>
-          <div>
-            <Label htmlFor="wokwi-caption">Caption (optional)</Label>
+          </Field>
+          <Field label="Caption" htmlFor="wokwi-caption" optional>
             <Input
               id="wokwi-caption"
               value={caption}
               onChange={(e) => setCaption(e.target.value)}
               placeholder="Main simulation"
             />
-          </div>
-          {error && <p className="text-xs text-destructive">{error}</p>}
+          </Field>
+          {error && (
+            <p role="alert" className="text-[13px] leading-[18px] text-destructive">
+              {error}
+            </p>
+          )}
         </div>
         <DialogFooter>
           <Button
-            variant="ghost"
+            variant="secondary"
             onClick={() => setOpen(false)}
             disabled={pending}
           >
             Cancel
           </Button>
-          <Button onClick={submit} disabled={pending || !url.trim()}>
-            {pending ? "Adding…" : "Add"}
+          <Button onClick={submit} loading={pending} disabled={!url.trim()}>
+            Add
           </Button>
         </DialogFooter>
       </DialogContent>

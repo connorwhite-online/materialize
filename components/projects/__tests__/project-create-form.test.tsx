@@ -15,11 +15,17 @@ describe("ProjectCreateForm", () => {
   it("exposes visibility and does not require files to submit", () => {
     render(<ProjectCreateForm ownedFiles={[]} />);
 
-    expect(screen.getByText("Project details")).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Details" })).toBeTruthy();
     expect(screen.getByLabelText("Name")).toBeTruthy();
-    expect(screen.getByLabelText("Visibility")).toBeTruthy();
+    // Visibility is a pair of radio cards, not a select.
+    expect(screen.getByRole("group", { name: "Visibility" })).toBeTruthy();
     expect(
-      screen.getByText(/create the project now and add files after/i)
+      (screen.getByRole("radio", { name: /Public/ }) as HTMLInputElement)
+        .checked
+    ).toBe(true);
+    expect(screen.getByRole("radio", { name: /Private/ })).toBeTruthy();
+    expect(
+      screen.getByText(/create the project now and add files to it later/i)
     ).toBeTruthy();
     expect(
       screen.getByRole("button", { name: "Create project" })

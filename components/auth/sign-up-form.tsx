@@ -150,7 +150,7 @@ export function SignUpForm({
 
         <Button
           type="submit"
-          size="xl"
+          size="lg"
           className="w-full"
           disabled={loading || username.length < MIN_USERNAME_LENGTH}
         >
@@ -238,7 +238,7 @@ export function SignUpForm({
 
         <Button
           type="submit"
-          size="xl"
+          size="lg"
           className="w-full"
           disabled={loading || !value}
         >

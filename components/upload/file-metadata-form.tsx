@@ -11,23 +11,15 @@ import {
 } from "./run-create-listing";
 import { DuplicateUploadDialog } from "./duplicate-upload-dialog";
 import { MATERIALS } from "@/lib/materials";
-import {
-  DESIGN_TAG_OPTIONS,
-  DESIGN_TAG_LABELS,
-  MAX_PRICE_CENTS,
-} from "@/lib/validations/file";
+import { MAX_PRICE_CENTS } from "@/lib/validations/file";
 import { CategorySelect } from "@/components/categories/category-select";
-import {
-  LICENSES,
-  LICENSE_ORDER,
-  DEFAULT_LICENSE,
-  type LicenseId,
-} from "@/lib/licenses";
+import { DEFAULT_LICENSE, type LicenseId } from "@/lib/licenses";
 import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { Field, FormActions } from "@/components/ui/field";
+import { SegmentedControl } from "@/components/ui/segmented-control";
 import { Textarea } from "@/components/ui/textarea";
-import { Switch } from "@/components/ui/switch";
 import {
   Select,
   SelectContent,
@@ -36,11 +28,14 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+  DesignTagChips,
+  FormError,
+  FormSection,
+  LicenseField,
+  PriceInput,
+  SaleField,
+  VisibilityField,
+} from "./form-fields";
 import dynamic from "next/dynamic";
 import { OwnerPicker } from "@/components/orgs/owner-picker";
 
@@ -58,7 +53,7 @@ const UploadPreview = dynamic(
   {
     ssr: false,
     loading: () => <div className="h-full w-full" aria-hidden />,
-  }
+  },
 );
 
 interface FileMetadataFormProps {
@@ -78,6 +73,20 @@ interface FileMetadataFormProps {
    * in that bundle.
    */
   initialProjectId?: string;
+}
+
+function nameFromFileName(fileName: string) {
+  const base = fileName
+    .replace(/\.[^.]+$/, "")
+    .replace(/[_\-.]+/g, " ")
+    .trim();
+  if (!base) return "";
+  return base.charAt(0).toUpperCase() + base.slice(1);
+}
+
+function formatBytes(bytes: number) {
+  if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }
 
 function formatDim(n: number) {
@@ -119,9 +128,9 @@ export function FileMetadataForm({
   const [sellEnabled, setSellEnabled] = useState(false);
   const [printRecOpen, setPrintRecOpen] = useState(false);
   const [fileUnit, setFileUnit] = useState<"mm" | "cm" | "in">("mm");
-  const [dimensions, setDimensions] = useState<
-    [number, number, number] | null
-  >(null);
+  const [dimensions, setDimensions] = useState<[number, number, number] | null>(
+    null,
+  );
 
   // Collections
   const [userCollections, setUserCollections] = useState<
@@ -135,7 +144,7 @@ export function FileMetadataForm({
     Array<{ id: string; name: string }>
   >([]);
   const [projectChoice, setProjectChoice] = useState<string>(
-    initialProjectId ?? "none"
+    initialProjectId ?? "none",
   );
 
   // Submit state
@@ -144,10 +153,14 @@ export function FileMetadataForm({
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [duplicateMatch, setDuplicateMatch] =
     useState<DuplicateUploadMatch | null>(null);
-  const [errors, setErrors] = useState<Record<string, string[] | undefined> | null>(
-    null
-  );
+  const [errors, setErrors] = useState<Record<
+    string,
+    string[] | undefined
+  > | null>(null);
   const isSubmitting = phase !== "idle";
+  // Start the name from the file name ("cable_clip-v2.stl" → "Cable
+  // clip v2") so the one required field is usually already right.
+  const defaultName = nameFromFileName(file.name);
 
   useEffect(() => {
     let cancelled = false;
@@ -164,7 +177,7 @@ export function FileMetadataForm({
 
   const toggleDesignTag = (tag: string) => {
     setSelectedDesignTags((prev) =>
-      prev.includes(tag) ? prev.filter((t) => t !== tag) : [...prev, tag]
+      prev.includes(tag) ? prev.filter((t) => t !== tag) : [...prev, tag],
     );
   };
 
@@ -220,171 +233,136 @@ export function FileMetadataForm({
   })();
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-6">
-      {/* 3D Preview at the top */}
-      <Card className="overflow-hidden py-0">
-        <div className="aspect-[4/3] w-full bg-gradient-to-br from-muted/40 to-muted/10">
+    <form onSubmit={handleSubmit} className="flex min-w-0 flex-col gap-8">
+      {/* The object first: preview, file name, measured size and the
+          unit it was modelled in. */}
+      <div className="flex min-w-0 flex-col gap-3">
+        <div className="aspect-[4/3] w-full overflow-hidden rounded-2xl bg-muted sm:aspect-[16/9]">
           <UploadPreview
             file={file}
             format={format}
             onDimensionsComputed={setDimensions}
           />
         </div>
-        <div className="flex items-center gap-3 border-t border-border px-4 py-2.5 text-sm">
+        <div className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-2">
           <div className="min-w-0 flex-1">
-            <div className="truncate font-medium">{file.name}</div>
-            <div className="mt-0.5 text-xs text-muted-foreground">
+            <p className="truncate text-sm leading-5 font-medium">
+              {file.name}
+            </p>
+            <p className="text-[13px] leading-[18px] text-muted-foreground tabular-nums">
               {dimensions
                 ? `${formatDim(dimensions[0])} × ${formatDim(dimensions[1])} × ${formatDim(dimensions[2])} ${fileUnit}`
-                : "Measuring..."}
-            </div>
-          </div>
-          <Select
-            value={fileUnit}
-            onValueChange={(v) =>
-              setFileUnit((v as "mm" | "cm" | "in") ?? "mm")
-            }
-          >
-            <SelectTrigger size="sm" className="shrink-0">
-              <SelectValue>
-                {(value) => {
-                  if (value === "cm") return "cm";
-                  if (value === "in") return "inches";
-                  return "mm";
-                }}
-              </SelectValue>
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="mm">Millimeters</SelectItem>
-              <SelectItem value="cm">Centimeters</SelectItem>
-              <SelectItem value="in">Inches</SelectItem>
-            </SelectContent>
-          </Select>
-          <span className="shrink-0 text-xs text-muted-foreground">
-            {(file.size / 1024 / 1024).toFixed(1)} MB
-          </span>
-        </div>
-      </Card>
-
-      {/* Basic info */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Details</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          {/* "Create as" selector — picks personal vs. an org owner.
-              Renders only when the user has org memberships; falls
-              through to a hidden personal value otherwise. */}
-          <OwnerPicker label="Create as" />
-
-          <div>
-            <Label htmlFor="name">Name</Label>
-            <Input id="name" name="name" required placeholder="My 3D Model" />
-            {errors?.name && errors.name[0] && (
-              <p className="mt-1 text-xs text-destructive">{errors.name[0]}</p>
-            )}
-          </div>
-
-          <div>
-            <Label htmlFor="description">Description</Label>
-            <Textarea
-              id="description"
-              name="description"
-              rows={4}
-              placeholder="Describe your 3D model..."
-            />
-          </div>
-
-          <div>
-            <Label htmlFor="tags">Tags</Label>
-            <Input
-              id="tags"
-              name="tags"
-              placeholder="miniature, tabletop, gaming (comma separated)"
-            />
-            <p className="mt-1 text-xs text-muted-foreground">
-              Help people find this file in search.
+                : "Measuring…"}
+              <span aria-hidden> · </span>
+              {formatBytes(file.size)}
             </p>
           </div>
+          <div className="flex items-center gap-2">
+            <span
+              id="file-unit-label"
+              className="text-[13px] text-muted-foreground"
+            >
+              Units
+            </span>
+            <SegmentedControl
+              items={[
+                { value: "mm", label: "mm" },
+                { value: "cm", label: "cm" },
+                { value: "in", label: "in" },
+              ]}
+              value={fileUnit}
+              onValueChange={(v) => setFileUnit(v)}
+              listClassName="w-auto"
+            />
+          </div>
+        </div>
+      </div>
 
-          <div>
-            <Label htmlFor="category-trigger">Category</Label>
+      <FormSection title="Details">
+        {/* "Create as" selector — picks personal vs. an org owner.
+            Renders only when the user has org memberships; falls
+            through to a hidden personal value otherwise. */}
+        <OwnerPicker label="Create as" />
+
+        <Field label="Name" htmlFor="name" error={errors?.name?.[0]}>
+          <Input
+            id="name"
+            name="name"
+            required
+            defaultValue={defaultName}
+            placeholder="Cable clip"
+            aria-invalid={errors?.name?.[0] ? true : undefined}
+          />
+        </Field>
+
+        <Field label="Description" htmlFor="description" optional>
+          <Textarea
+            id="description"
+            name="description"
+            rows={3}
+            placeholder="What it is, what it fits, how to print it."
+          />
+        </Field>
+
+        <div className="grid min-w-0 gap-5 sm:grid-cols-2">
+          <Field
+            label="Category"
+            htmlFor="category-trigger"
+            hint="Where it shows up when people browse."
+          >
             <CategorySelect
               id="category-trigger"
               value={category}
               onValueChange={setCategory}
             />
-            <p className="mt-1 text-xs text-muted-foreground">
-              Pick the closest shelf so this shows up when people browse.
-            </p>
-          </div>
+          </Field>
+          <Field
+            label="Tags"
+            htmlFor="tags"
+            optional
+            hint="Comma separated. Helps search."
+          >
+            <Input id="tags" name="tags" placeholder="desk, cable, clip" />
+          </Field>
+        </div>
+      </FormSection>
 
-          <div>
-            <Label htmlFor="license-trigger">License</Label>
-            <Select
-              value={license}
-              onValueChange={(v) => v && setLicense(v as LicenseId)}
-            >
-              <SelectTrigger id="license-trigger" className="w-full">
-                <SelectValue>
-                  {(value) => {
-                    const meta = LICENSES[value as LicenseId];
-                    return meta
-                      ? `${meta.shortName} — ${meta.name}`
-                      : "Select a license";
-                  }}
-                </SelectValue>
-              </SelectTrigger>
-              <SelectContent>
-                {LICENSE_ORDER.map((id) => {
-                  const meta = LICENSES[id];
-                  return (
-                    <SelectItem key={id} value={id}>
-                      <div className="flex flex-col gap-0.5">
-                        <span>
-                          {meta.shortName} — {meta.name}
-                        </span>
-                        <span className="whitespace-normal text-[11px] text-muted-foreground leading-tight">
-                          {meta.summary}
-                        </span>
-                      </div>
-                    </SelectItem>
-                  );
-                })}
-              </SelectContent>
-            </Select>
-            <p className="mt-1 text-[11px] text-muted-foreground">
-              Controls what people can do with the files after download.
-            </p>
-          </div>
+      <FormSection title="Sharing">
+        <VisibilityField value={visibility} onChange={setVisibility} />
+        <LicenseField
+          id="license-trigger"
+          value={license}
+          onChange={setLicense}
+        />
+        <SaleField
+          id="sell-toggle"
+          enabled={sellEnabled}
+          onEnabledChange={setSellEnabled}
+        >
+          <Field
+            label="Price"
+            htmlFor="price"
+            hint="USD. Set 0 to make it free."
+            className="max-w-[12rem]"
+          >
+            <PriceInput
+              id="price"
+              name="price"
+              max={MAX_PRICE_CENTS / 100}
+              defaultValue="0"
+            />
+          </Field>
+        </SaleField>
+      </FormSection>
 
-          <div>
-            <Label htmlFor="visibility-trigger">Visibility</Label>
-            <Select
-              value={visibility}
-              onValueChange={(v) =>
-                v && setVisibility(v as "public" | "private")
-              }
-            >
-              <SelectTrigger id="visibility-trigger" className="w-full">
-                <SelectValue>
-                  {(value) => (value === "private" ? "Private" : "Public")}
-                </SelectValue>
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="public">Public</SelectItem>
-                <SelectItem value="private">Private</SelectItem>
-              </SelectContent>
-            </Select>
-            <p className="mt-1 text-xs text-muted-foreground">
-              {visibility === "public"
-                ? "Appears in browse and search."
-                : "Hidden from browse and search. Only you can see it."}
-            </p>
-          </div>
-
-          <div>
-            <Label htmlFor="collection-trigger">Collection</Label>
+      <FormSection title="Organize">
+        <div
+          className={cn(
+            "grid min-w-0 gap-5",
+            userProjects.length > 0 && "sm:grid-cols-2",
+          )}
+        >
+          <Field label="Collection" htmlFor="collection-trigger" optional>
             <Select
               value={collectionChoice}
               onValueChange={(v) => v && setCollectionChoice(v)}
@@ -392,21 +370,21 @@ export function FileMetadataForm({
               <SelectTrigger id="collection-trigger" className="w-full">
                 <SelectValue>
                   {(value) => {
-                    if (!value || value === "none") return "No collection";
-                    if (value === "__new__") return "+ Create new collection";
+                    if (!value || value === "none") return "None";
+                    if (value === "__new__") return "New collection…";
                     const found = userCollections.find((c) => c.id === value);
-                    return found?.name ?? "No collection";
+                    return found?.name ?? "None";
                   }}
                 </SelectValue>
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="none">No collection</SelectItem>
+                <SelectItem value="none">None</SelectItem>
                 {userCollections.map((c) => (
                   <SelectItem key={c.id} value={c.id}>
                     {c.name}
                   </SelectItem>
                 ))}
-                <SelectItem value="__new__">+ Create new collection</SelectItem>
+                <SelectItem value="__new__">New collection…</SelectItem>
               </SelectContent>
             </Select>
             <AnimatePresence initial={false}>
@@ -418,22 +396,27 @@ export function FileMetadataForm({
                   transition={expandTransition}
                   className="overflow-hidden"
                 >
-                  <div className="pt-3">
+                  <div className="pt-2">
                     <Input
                       value={newCollectionName}
                       onChange={(e) => setNewCollectionName(e.target.value)}
                       placeholder="Collection name"
+                      aria-label="New collection name"
                       autoFocus
                     />
                   </div>
                 </motion.div>
               )}
             </AnimatePresence>
-          </div>
+          </Field>
 
           {userProjects.length > 0 && (
-            <div>
-              <Label htmlFor="project-trigger">Project</Label>
+            <Field
+              label="Project"
+              htmlFor="project-trigger"
+              optional
+              hint="Bundle it into a set you sell together."
+            >
               <Select
                 value={projectChoice}
                 onValueChange={(v) => v && setProjectChoice(v)}
@@ -441,14 +424,14 @@ export function FileMetadataForm({
                 <SelectTrigger id="project-trigger" className="w-full">
                   <SelectValue>
                     {(value) => {
-                      if (!value || value === "none") return "No project";
+                      if (!value || value === "none") return "None";
                       const found = userProjects.find((p) => p.id === value);
-                      return found?.name ?? "No project";
+                      return found?.name ?? "None";
                     }}
                   </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="none">No project</SelectItem>
+                  <SelectItem value="none">None</SelectItem>
                   {userProjects.map((p) => (
                     <SelectItem key={p.id} value={p.id}>
                       {p.name}
@@ -456,97 +439,49 @@ export function FileMetadataForm({
                   ))}
                 </SelectContent>
               </Select>
-              <p className="mt-1 text-xs text-muted-foreground">
-                Bundle this file into a project to sell it as part of a set.
-              </p>
-            </div>
+            </Field>
           )}
-        </CardContent>
-      </Card>
+        </div>
+      </FormSection>
 
-      {/* Sell toggle — the big decision */}
-      <Card>
-        <CardHeader>
-          <div className="flex items-start justify-between gap-4">
-            <div className="flex-1">
-              <CardTitle className="text-base">List for sale</CardTitle>
-              <p className="mt-0.5 text-xs text-muted-foreground">
-                Make this file available to purchase or download publicly.
-              </p>
-            </div>
-            <Switch checked={sellEnabled} onCheckedChange={setSellEnabled} />
-          </div>
-        </CardHeader>
-        <AnimatePresence initial={false}>
-          {sellEnabled && (
-            <motion.div
-              initial={{ height: 0, opacity: 0 }}
-              animate={{ height: "auto", opacity: 1 }}
-              exit={{ height: 0, opacity: 0 }}
-              transition={expandTransition}
-              className="overflow-hidden"
-            >
-              <CardContent>
-                <div>
-                  <Label htmlFor="price">Price (USD)</Label>
-                  <Input
-                    id="price"
-                    name="price"
-                    type="number"
-                    min="0"
-                    max={MAX_PRICE_CENTS / 100}
-                    step="0.01"
-                    defaultValue="0"
-                  />
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    Set to 0 for free download
-                  </p>
-                </div>
-              </CardContent>
-            </motion.div>
-          )}
-        </AnimatePresence>
-      </Card>
-
-      {/* Print recommendations — optional, collapsed by default */}
-      <Card>
+      {/* Print recommendations — optional, collapsed by default. A
+          disclosure row rather than a card that is secretly a button. */}
+      <section className="flex min-w-0 flex-col">
         <button
           type="button"
           onClick={() => setPrintRecOpen((v) => !v)}
-          className="cursor-pointer text-left"
+          aria-expanded={printRecOpen}
+          aria-controls="print-recs"
+          className="-mx-3 flex cursor-pointer items-center justify-between gap-4 rounded-xl px-3 py-2.5 text-left transition-colors duration-150 hover:bg-muted/70 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
         >
-          <CardHeader>
-            <div className="flex items-start justify-between gap-4">
-              <div className="flex-1">
-                <CardTitle className="text-base">
-                  Print Recommendations
-                </CardTitle>
-                <p className="mt-0.5 text-xs text-muted-foreground">
-                  Optional. Help printers choose the right material.
-                </p>
-              </div>
-              <motion.div
-                animate={{ rotate: printRecOpen ? 180 : 0 }}
-                transition={expandTransition}
-                className="text-muted-foreground"
-              >
-                <ChevronDownIcon />
-              </motion.div>
-            </div>
-          </CardHeader>
+          <span className="min-w-0">
+            <span className="block text-base leading-6 font-semibold">
+              Printing
+            </span>
+            <span className="block text-[13px] leading-[18px] text-muted-foreground">
+              Optional. Suggest a material so buyers order the right print.
+            </span>
+          </span>
+          <motion.span
+            animate={{ rotate: printRecOpen ? 180 : 0 }}
+            transition={expandTransition}
+            className="text-muted-foreground"
+          >
+            <ChevronDownIcon />
+          </motion.span>
         </button>
         <AnimatePresence initial={false}>
           {printRecOpen && (
             <motion.div
+              id="print-recs"
               initial={{ height: 0, opacity: 0 }}
               animate={{ height: "auto", opacity: 1 }}
               exit={{ height: 0, opacity: 0 }}
               transition={expandTransition}
               className="overflow-hidden"
             >
-              <CardContent className="space-y-4">
-                <div>
-                  <Label htmlFor="material-trigger">Recommended Material</Label>
+              <div className="flex flex-col gap-5 pt-4">
+                <Field label="Recommended material" htmlFor="material-trigger">
                   <Select
                     value={recommendedMaterial}
                     onValueChange={(v) => setRecommendedMaterial(v ?? "")}
@@ -568,70 +503,43 @@ export function FileMetadataForm({
                       ))}
                     </SelectContent>
                   </Select>
-                </div>
+                </Field>
 
-                <div>
-                  <Label>This part needs to be...</Label>
-                  <div className="mt-2 flex flex-wrap gap-2">
-                    {DESIGN_TAG_OPTIONS.map((tag) => (
-                      <button
-                        key={tag}
-                        type="button"
-                        onClick={() => toggleDesignTag(tag)}
-                        className={`inline-flex cursor-pointer items-center rounded-md border px-3 py-1.5 text-xs font-medium transition-colors ${
-                          selectedDesignTags.includes(tag)
-                            ? "border-primary bg-primary/10 text-primary"
-                            : "border-border text-muted-foreground hover:border-primary/30"
-                        }`}
-                      >
-                        {DESIGN_TAG_LABELS[tag]}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              </CardContent>
+                <DesignTagChips
+                  selected={selectedDesignTags}
+                  onToggle={toggleDesignTag}
+                />
+              </div>
             </motion.div>
           )}
         </AnimatePresence>
-      </Card>
+      </section>
 
-      {/* Inline error */}
-      {submitError && (
-        <p className="text-sm text-destructive">{submitError}</p>
-      )}
-
-      {/* Actions */}
-      <div className="flex gap-3">
-        {onCancel ? (
-          <Button
-            type="button"
-            variant="outline"
-            size="lg"
-            className="flex-1"
-            onClick={onCancel}
-            disabled={isSubmitting}
-          >
-            Cancel
+      <div className="flex flex-col gap-3">
+        <FormError>{submitError}</FormError>
+        <FormActions>
+          {onCancel ? (
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={onCancel}
+              disabled={isSubmitting}
+            >
+              Cancel
+            </Button>
+          ) : (
+            <Button
+              type="button"
+              variant="secondary"
+              render={<Link href="/" />}
+            >
+              Cancel
+            </Button>
+          )}
+          <Button type="submit" loading={isSubmitting}>
+            {submitLabel}
           </Button>
-        ) : (
-          <Button
-            type="button"
-            variant="outline"
-            size="lg"
-            className="flex-1"
-            render={<Link href="/" />}
-          >
-            Cancel
-          </Button>
-        )}
-        <Button
-          type="submit"
-          disabled={isSubmitting}
-          size="lg"
-          className="flex-1"
-        >
-          {submitLabel}
-        </Button>
+        </FormActions>
       </div>
       {duplicateMatch && (
         <DuplicateUploadDialog

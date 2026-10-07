@@ -4,14 +4,10 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { AnimatedWordmark } from "@/components/brand/logo";
+import { Field } from "@/components/ui/field";
+import { AuthHeading, AuthPage } from "@/components/auth/auth-shell";
 import { setUsername } from "@/app/actions/onboarding";
-import {
-  MAX_USERNAME_LENGTH,
-  MIN_USERNAME_LENGTH,
-} from "@/lib/handles/limits";
+import { MAX_USERNAME_LENGTH, MIN_USERNAME_LENGTH } from "@/lib/handles/limits";
 
 export default function OnboardingPage() {
   const router = useRouter();
@@ -35,57 +31,57 @@ export default function OnboardingPage() {
   };
 
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center px-4">
-      <AnimatedWordmark
-        title="Materialize"
-        animateOnMount
-        className="mb-8 text-foreground [--mz-h:14px] sm:[--mz-h:16px]"
+    <AuthPage>
+      <AuthHeading
+        title="Pick a username"
+        description="This is how people find you and your files."
       />
-
-      <Card className="w-full max-w-sm">
-        <CardHeader className="text-center">
-          <CardTitle className="text-xl">Pick a username</CardTitle>
-          <p className="text-sm text-muted-foreground mt-1">
-            This is how others will find you
-          </p>
-        </CardHeader>
-        <CardContent>
-          <form onSubmit={handleSubmit} className="space-y-5">
-            <div>
-              <Label htmlFor="username">Username</Label>
-              <Input
-                id="username"
-                value={username}
-                onChange={(e) =>
-                  setUsernameValue(
-                    e.target.value.toLowerCase().replace(/[^a-z0-9_-]/g, "")
-                  )
-                }
-                placeholder="yourname"
-                required
-                minLength={MIN_USERNAME_LENGTH}
-                maxLength={MAX_USERNAME_LENGTH}
-                autoFocus
-              />
-              <p className="mt-2 text-xs text-muted-foreground">
-                Letters, numbers, underscores, hyphens
-              </p>
-            </div>
-
-            {error && <p className="text-xs text-destructive">{error}</p>}
-
-            <Button
-              type="submit"
-              size="lg"
-              className="w-full"
-              loading={loading}
-              disabled={username.length < MIN_USERNAME_LENGTH}
+      <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+        <Field
+          label="Username"
+          htmlFor="username"
+          hint={`Letters, numbers, underscores and hyphens. At least ${MIN_USERNAME_LENGTH} characters.`}
+          error={error || undefined}
+        >
+          <div className="relative">
+            <span
+              aria-hidden
+              className="pointer-events-none absolute inset-y-0 left-3 flex items-center text-base text-subtle-foreground md:text-sm"
             >
-              {loading ? "Setting up…" : "Continue"}
-            </Button>
-          </form>
-        </CardContent>
-      </Card>
-    </div>
+              @
+            </span>
+            <Input
+              id="username"
+              value={username}
+              onChange={(e) =>
+                setUsernameValue(
+                  e.target.value.toLowerCase().replace(/[^a-z0-9_-]/g, ""),
+                )
+              }
+              placeholder="yourname"
+              required
+              minLength={MIN_USERNAME_LENGTH}
+              maxLength={MAX_USERNAME_LENGTH}
+              autoComplete="username"
+              autoCapitalize="none"
+              spellCheck={false}
+              autoFocus
+              aria-invalid={error ? true : undefined}
+              className="pl-7"
+            />
+          </div>
+        </Field>
+
+        <Button
+          type="submit"
+          size="lg"
+          className="w-full"
+          loading={loading}
+          disabled={username.length < MIN_USERNAME_LENGTH}
+        >
+          Continue
+        </Button>
+      </form>
+    </AuthPage>
   );
 }

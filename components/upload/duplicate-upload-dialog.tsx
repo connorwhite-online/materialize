@@ -16,7 +16,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { Field } from "@/components/ui/field";
 import { Textarea } from "@/components/ui/textarea";
 
 const MAX_PHOTOS = 5;
@@ -32,7 +32,7 @@ export function DuplicateUploadDialog({
   const [reason, setReason] = useState("");
   const [photos, setPhotos] = useState<File[]>([]);
   const [uploadedPhotoKeys, setUploadedPhotoKeys] = useState<string[] | null>(
-    null
+    null,
   );
   const [submitting, setSubmitting] = useState(false);
   const [done, setDone] = useState(false);
@@ -68,8 +68,8 @@ export function DuplicateUploadDialog({
         (
           await Promise.all(
             photos.map((photo) =>
-              uploadPhotoToR2(photo, { purpose: "ownership_claim" })
-            )
+              uploadPhotoToR2(photo, { purpose: "ownership_claim" }),
+            ),
           )
         ).map((result) => result.storageKey);
       setUploadedPhotoKeys(photoKeys);
@@ -88,7 +88,7 @@ export function DuplicateUploadDialog({
       setError(
         cause instanceof Error
           ? cause.message
-          : "Could not upload your evidence."
+          : "Could not upload your evidence.",
       );
     } finally {
       setSubmitting(false);
@@ -111,14 +111,14 @@ export function DuplicateUploadDialog({
 
         {!done && (
           <>
-            <div className="overflow-hidden rounded-xl border bg-muted/20">
+            <div className="overflow-hidden rounded-2xl ring-1 ring-border">
               {match.file.thumbnailUrl && (
                 // The URL is persisted listing data and may point to R2/CDN.
                 // eslint-disable-next-line @next/next/no-img-element
                 <img
                   src={match.file.thumbnailUrl}
                   alt=""
-                  className="aspect-video w-full object-cover"
+                  className="aspect-video w-full bg-muted object-cover"
                 />
               )}
               <div className="flex items-center gap-3 p-3">
@@ -129,10 +129,10 @@ export function DuplicateUploadDialog({
                   <AvatarFallback>{ownerInitial}</AvatarFallback>
                 </Avatar>
                 <div className="min-w-0">
-                  <p className="truncate font-medium">
+                  <p className="truncate text-sm leading-5 font-medium">
                     {match.file.name || "Existing private file"}
                   </p>
-                  <p className="truncate text-xs text-muted-foreground">
+                  <p className="truncate text-[13px] leading-[18px] text-muted-foreground">
                     Owned by {ownerName}
                   </p>
                 </div>
@@ -140,24 +140,31 @@ export function DuplicateUploadDialog({
             </div>
 
             {claiming && (
-              <div className="space-y-4 rounded-xl border p-3">
-                <div className="space-y-1.5">
-                  <Label htmlFor="ownership-claim-reason">
-                    Tell us how you created this file
-                  </Label>
+              <div className="flex flex-col gap-5">
+                <Field
+                  label="How did you make this file?"
+                  htmlFor="ownership-claim-reason"
+                >
                   <Textarea
                     id="ownership-claim-reason"
                     value={reason}
                     onChange={(event) => setReason(event.target.value)}
                     rows={4}
                     maxLength={2000}
-                    placeholder="Include when and how you made it, plus any source or publication details that can help us verify ownership."
+                    autoFocus
+                    placeholder="When and how you made it, plus anywhere you published it."
                   />
-                </div>
-                <div className="space-y-1.5">
-                  <Label htmlFor="ownership-claim-photos">
-                    Photographic evidence (optional)
-                  </Label>
+                </Field>
+                <Field
+                  label="Photos"
+                  htmlFor="ownership-claim-photos"
+                  optional
+                  hint={
+                    photos.length > 0
+                      ? `${photos.length} photo${photos.length === 1 ? "" : "s"} selected. Your model upload is already attached.`
+                      : `Up to ${MAX_PHOTOS} JPG, PNG or WebP photos. Your model upload is already attached.`
+                  }
+                >
                   <Input
                     id="ownership-claim-photos"
                     type="file"
@@ -165,31 +172,25 @@ export function DuplicateUploadDialog({
                     multiple
                     onChange={selectPhotos}
                   />
-                  <p className="text-xs text-muted-foreground">
-                    Up to {MAX_PHOTOS} JPG, PNG, or WEBP photos. Your original
-                    model upload is already attached.
-                  </p>
-                  {photos.length > 0 && (
-                    <p className="text-xs">
-                      {photos.length} photo{photos.length === 1 ? "" : "s"} selected
-                    </p>
-                  )}
-                </div>
+                </Field>
               </div>
             )}
 
             {error && (
-              <p role="alert" className="text-sm text-destructive">
+              <p
+                role="alert"
+                className="text-[13px] leading-[18px] text-destructive"
+              >
                 {error}
               </p>
             )}
 
-            <DialogFooter className="sm:justify-between">
+            <DialogFooter>
               {claiming ? (
                 <>
                   <Button
                     type="button"
-                    variant="ghost"
+                    variant="secondary"
                     disabled={submitting}
                     onClick={() => setClaiming(false)}
                   >
@@ -197,10 +198,11 @@ export function DuplicateUploadDialog({
                   </Button>
                   <Button
                     type="button"
-                    disabled={submitting}
+                    loading={submitting}
+                    disabled={reason.trim().length === 0}
                     onClick={submitClaim}
                   >
-                    {submitting ? "Submitting…" : "Submit ownership claim"}
+                    Submit claim
                   </Button>
                 </>
               ) : (
@@ -208,17 +210,20 @@ export function DuplicateUploadDialog({
                   <Button
                     type="button"
                     variant="ghost"
+                    className="mr-auto"
                     onClick={() => setClaiming(true)}
                   >
                     This is my file
                   </Button>
                   {match.file.slug ? (
-                    <Button render={<Link href={`/files/${match.file.slug}`} />}>
-                      Go to this file
+                    <Button
+                      render={<Link href={`/files/${match.file.slug}`} />}
+                    >
+                      View file
                     </Button>
                   ) : (
-                    <Button type="button" disabled>
-                      File is private
+                    <Button type="button" variant="secondary" onClick={onClose}>
+                      Close
                     </Button>
                   )}
                 </>

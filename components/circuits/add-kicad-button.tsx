@@ -3,6 +3,7 @@
 import { useState, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
+import { Plus } from "@/components/icons/plus";
 import { addProjectCircuitKicad } from "@/app/actions/circuits";
 import {
   uploadCircuitToR2,
@@ -68,12 +69,13 @@ export function AddKiCadButton({ projectId }: Props) {
   return (
     <div className="inline-block">
       <Button
-        variant="outline"
+        variant="secondary"
         size="sm"
         onClick={() => inputRef.current?.click()}
-        disabled={uploading}
+        loading={uploading}
       >
-        {uploading ? "Uploading…" : "+ KiCad file"}
+        {!uploading && <Plus size={14} />}
+        KiCad file
       </Button>
       <input
         ref={inputRef}
@@ -86,7 +88,11 @@ export function AddKiCadButton({ projectId }: Props) {
           e.target.value = "";
         }}
       />
-      {error && <p className="mt-1 text-xs text-destructive">{error}</p>}
+      {error && (
+        <p role="alert" className="mt-1.5 text-[13px] leading-[18px] text-destructive">
+          {error}
+        </p>
+      )}
     </div>
   );
 }

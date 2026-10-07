@@ -7,8 +7,9 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { AnimatedWordmark } from "@/components/brand/logo";
+import { Logomark } from "@/components/brand/logo";
 import { SignInForm } from "./sign-in-form";
+import { AuthLegal } from "./auth-shell";
 
 type Mode = "sign-in" | "sign-up";
 
@@ -57,18 +58,14 @@ export function AuthModalProvider({ children }: { children: React.ReactNode }) {
           setOpen(nextOpen);
         }}
       >
-        <DialogContent className="gap-3 rounded-3xl pb-0 sm:max-w-sm">
-          <DialogHeader className="items-start pb-2">
-            <AnimatedWordmark
-              title="Materialize"
-              animateOnMount
-              height={13}
-              className="text-foreground"
-            />
-            <DialogTitle className="sr-only">Sign in</DialogTitle>
+        <DialogContent className="gap-0 rounded-3xl px-6 pt-8 pb-6 sm:max-w-[25rem]">
+          <DialogHeader className="mb-6 items-center">
+            <Logomark height={24} className="text-foreground" />
+            <DialogTitle className="sr-only">Log in or sign up</DialogTitle>
           </DialogHeader>
 
-          <SignInForm onSuccess={closeAuth} />
+          <SignInForm onSuccess={closeAuth} socialFirst headingAs="h2" />
+          <AuthLegal className="mt-6" />
         </DialogContent>
       </Dialog>
     </AuthModalContext.Provider>

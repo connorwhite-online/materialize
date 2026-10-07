@@ -13,8 +13,8 @@ const collectionPage = readFileSync(
 
 describe("create pages", () => {
   it("both create screens are pages that share the icon header", () => {
-    expect(projectPage).toContain("CreateFormHeader");
-    expect(collectionPage).toContain("CreateFormHeader");
+    expect(projectPage).toContain("PageHeader");
+    expect(collectionPage).toContain("PageHeader");
     expect(projectPage).toContain("LayersIcon");
     expect(collectionPage).toContain("FolderOpenIcon");
     expect(projectPage).not.toMatch(/Dialog/);

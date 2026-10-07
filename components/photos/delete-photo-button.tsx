@@ -91,7 +91,7 @@ export function DeletePhotoButton({
           </DialogHeader>
           <DialogFooter>
             <Button
-              variant="ghost"
+              variant="secondary"
               onClick={() => setOpen(false)}
               disabled={pending}
             >

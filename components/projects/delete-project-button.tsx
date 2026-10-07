@@ -13,7 +13,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { Field } from "@/components/ui/field";
 import { deleteProject } from "@/app/actions/projects";
 
 interface DeleteProjectButtonProps {
@@ -24,7 +24,7 @@ interface DeleteProjectButtonProps {
   redirectTo: string;
   /**
    * Optional custom trigger element. Lets the call site swap in an
-   * icon button or any other shape; defaults to a full-width outline
+   * icon button or any other shape; defaults to an outline
    * button labeled "Delete project".
    */
   trigger?: React.ReactNode;
@@ -77,13 +77,13 @@ export function DeleteProjectButton({
           trigger ? (
             (trigger as React.ReactElement)
           ) : (
-            <Button variant="outline" className="w-full text-destructive">
+            <Button variant="outline" className="text-destructive">
               Delete project
             </Button>
           )
         }
       />
-      <DialogContent className="max-w-md">
+      <DialogContent>
         <DialogHeader>
           <DialogTitle>
             {hasBuyers ? "Archive this project?" : "Delete this project?"}
@@ -93,8 +93,8 @@ export function DeleteProjectButton({
               <>
                 {buyerCount} {buyerCount === 1 ? "person has" : "people have"}{" "}
                 purchased this project. We&apos;ll stop selling it and hide it,
-                but their purchased copies stay downloadable. This
-                can&apos;t be undone.
+                but their purchased copies stay downloadable. This can&apos;t be
+                undone.
               </>
             ) : (
               <>
@@ -105,47 +105,56 @@ export function DeleteProjectButton({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-2">
-          <Label htmlFor="confirm-name" className="text-xs">
-            Type{" "}
-            <span className="font-mono font-medium text-foreground">
-              {projectName}
-            </span>{" "}
-            to confirm
-          </Label>
-          <Input
-            id="confirm-name"
-            value={typed}
-            onChange={(e) => setTyped(e.target.value)}
-            autoComplete="off"
-            spellCheck={false}
-          />
-        </div>
-
-        {error && <p className="text-sm text-destructive">{error}</p>}
-
-        <DialogFooter>
-          <Button
-            variant="ghost"
-            onClick={() => setOpen(false)}
-            disabled={pending}
+        <form
+          className="flex flex-col gap-5"
+          onSubmit={(e) => {
+            e.preventDefault();
+            handleConfirm();
+          }}
+        >
+          <Field
+            label={
+              <span>
+                Type{" "}
+                <span className="font-mono text-[13px] font-medium">
+                  {projectName}
+                </span>{" "}
+                to confirm
+              </span>
+            }
+            htmlFor="confirm-name"
+            error={error ?? undefined}
           >
-            Cancel
-          </Button>
-          <Button
-            variant="destructive"
-            onClick={handleConfirm}
-            disabled={!matches || pending}
-          >
-            {pending
-              ? hasBuyers
-                ? "Archiving…"
-                : "Deleting…"
-              : hasBuyers
-                ? "Archive permanently"
-                : "Delete permanently"}
-          </Button>
-        </DialogFooter>
+            <Input
+              id="confirm-name"
+              value={typed}
+              onChange={(e) => setTyped(e.target.value)}
+              autoComplete="off"
+              autoCapitalize="none"
+              spellCheck={false}
+              autoFocus
+            />
+          </Field>
+
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => setOpen(false)}
+              disabled={pending}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="submit"
+              variant="destructive"
+              loading={pending}
+              disabled={!matches}
+            >
+              {hasBuyers ? "Archive permanently" : "Delete permanently"}
+            </Button>
+          </DialogFooter>
+        </form>
       </DialogContent>
     </Dialog>
   );

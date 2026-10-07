@@ -5,7 +5,7 @@ import { db } from "@/lib/db";
 import { files } from "@/lib/db/schema";
 import { and, eq, desc } from "drizzle-orm";
 import { notUnsavedStudioDraft } from "@/lib/studio-drafts";
-import { CreateFormHeader } from "@/components/create-form-header";
+import { Page, PageHeader } from "@/components/ui/page";
 import { ProjectCreateForm } from "@/components/projects/project-create-form";
 
 export default async function NewProjectPage() {
@@ -25,13 +25,13 @@ export default async function NewProjectPage() {
     .orderBy(desc(files.createdAt));
 
   return (
-    <div className="mx-auto max-w-3xl px-4 py-8">
-      <CreateFormHeader
-        icon={<LayersIcon className="size-7" />}
+    <Page width="narrow">
+      <PageHeader
+        icon={<LayersIcon />}
         title="New project"
-        description="Bundle files into a sellable project — start empty if you want and add files later."
+        description="Bundle files into a set people can print, download or buy together."
       />
       <ProjectCreateForm ownedFiles={ownedFiles} />
-    </div>
+    </Page>
   );
 }

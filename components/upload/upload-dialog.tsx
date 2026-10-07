@@ -4,6 +4,8 @@ import { useCallback, useState } from "react";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
+  DialogHeader,
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
@@ -48,7 +50,7 @@ export function UploadDialog({
       if (!isControlled) setInternalOpen(next);
       onOpenChange?.(next);
     },
-    [isControlled, onOpenChange]
+    [isControlled, onOpenChange],
   );
 
   const [picked, setPicked] = useState<PickedFile | null>(null);
@@ -68,7 +70,14 @@ export function UploadDialog({
         className="max-h-[90vh] w-full max-w-2xl overflow-y-auto sm:max-w-2xl"
         showCloseButton
       >
-        <DialogTitle>{picked ? "New file" : "Upload a file"}</DialogTitle>
+        <DialogHeader className="min-w-0">
+          <DialogTitle>{picked ? "New file" : "Upload a file"}</DialogTitle>
+          <DialogDescription>
+            {picked
+              ? "Name it and choose who can see it. You can change all of this later."
+              : "Add a model to your library. You can sell it, share it or keep it private."}
+          </DialogDescription>
+        </DialogHeader>
         {!picked ? (
           <FileUploader
             onFileSelected={(file, format) => setPicked({ file, format })}

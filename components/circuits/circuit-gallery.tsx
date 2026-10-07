@@ -171,8 +171,8 @@ function KindPlaceholder({ kind }: { kind: CircuitTile["kind"] }) {
               ? "Fritzing"
               : "Diagram";
   return (
-    <div className="absolute inset-0 flex flex-col items-center justify-center gap-1 bg-gradient-to-br from-zinc-100 to-zinc-200 px-3 text-center dark:from-zinc-800 dark:to-zinc-900">
-      <div className="font-mono text-xs font-semibold uppercase tracking-wider text-foreground/70">
+    <div className="absolute inset-0 flex flex-col items-center justify-center gap-1 bg-muted px-3 text-center">
+      <div className="font-mono text-xs font-medium text-foreground/70">
         {label}
       </div>
       <div className="text-[10px] text-muted-foreground">Tap to view</div>

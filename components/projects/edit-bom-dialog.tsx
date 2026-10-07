@@ -37,7 +37,7 @@ export function EditBomDialog({ projectId, initial, trigger }: Props) {
           trigger ? (
             (trigger as React.ReactElement)
           ) : (
-            <Button variant="outline" className="w-full">
+            <Button variant="secondary">
               {initial.length > 0
                 ? `Edit BOM (${initial.length})`
                 : "Add a Bill of Materials"}
@@ -45,13 +45,12 @@ export function EditBomDialog({ projectId, initial, trigger }: Props) {
           )
         }
       />
-      <DialogContent className="flex max-h-[90vh] w-full max-w-2xl flex-col overflow-hidden sm:max-w-2xl">
+      <DialogContent className="flex max-h-[90vh] w-full flex-col overflow-hidden sm:max-w-2xl">
         <DialogHeader className="shrink-0 border-b border-border pb-4">
           <DialogTitle>Bill of Materials</DialogTitle>
           <DialogDescription>
-            List the additional parts a builder needs to complete this
-            project — screws, electronics, magnets, anything beyond the
-            printed parts.
+            List the additional parts a builder needs to complete this project —
+            screws, electronics, magnets, anything beyond the printed parts.
           </DialogDescription>
         </DialogHeader>
         <div className="flex-1 overflow-y-auto pt-4">

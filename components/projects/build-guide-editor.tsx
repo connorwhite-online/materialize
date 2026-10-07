@@ -199,11 +199,12 @@ export function BuildGuideEditor({
             <ChevronLeft size={16} />
             Back
           </Button>
-          <span className="min-w-0 flex-1 truncate text-sm font-medium text-muted-foreground">
-            {projectName}
-          </span>
+          <p className="min-w-0 flex-1 truncate text-sm leading-5">
+            <span className="font-medium">Build guide</span>
+            <span className="text-muted-foreground"> · {projectName}</span>
+          </p>
           <div className="flex shrink-0 items-center gap-2">
-            <span className="text-[11px] tabular-nums text-muted-foreground">
+            <span className="text-xs tabular-nums text-muted-foreground">
               {uploading
                 ? "Uploading…"
                 : overLimit
@@ -227,7 +228,10 @@ export function BuildGuideEditor({
           last lines of the guide when scrolled to the end. */}
       <main className="mx-auto max-w-3xl px-4 pb-32 pt-8">
         {error && (
-          <p className="mb-3 text-sm text-destructive" role="alert">
+          <p
+            className="mb-4 rounded-[10px] bg-destructive/10 px-3 py-2 text-[13px] leading-[18px] text-destructive"
+            role="alert"
+          >
             {error}
           </p>
         )}
@@ -251,7 +255,7 @@ export function BuildGuideEditor({
           ref={toolbarWrapRef}
           className="pointer-events-none fixed inset-x-0 bottom-5 z-40 flex justify-center px-4"
         >
-          <div className="pointer-events-auto max-w-full overflow-x-auto rounded-xl border border-border bg-card p-1.5 shadow-lg">
+          <div className="glass-surface shadow-float pointer-events-auto max-w-full overflow-x-auto rounded-2xl p-1.5 ring-1 ring-border/70">
             <EditorToolbar
               editor={editor}
               onUploadImage={uploadImage}
@@ -264,7 +268,7 @@ export function BuildGuideEditor({
 
       {/* Custom discard confirmation — replaces window.confirm on Back. */}
       <Dialog open={confirmLeave} onOpenChange={setConfirmLeave}>
-        <DialogContent className="max-w-sm" showCloseButton={false}>
+        <DialogContent className="sm:max-w-sm" showCloseButton={false}>
           <DialogHeader>
             <DialogTitle>Discard unsaved changes?</DialogTitle>
             <DialogDescription>
@@ -275,7 +279,7 @@ export function BuildGuideEditor({
           <DialogFooter>
             <Button
               type="button"
-              variant="ghost"
+              variant="secondary"
               onClick={() => setConfirmLeave(false)}
             >
               Keep editing

@@ -15,10 +15,11 @@ describe("CollectionCreateForm", () => {
   it("renders the page-form fields, not a dialog", () => {
     render(<CollectionCreateForm />);
 
-    expect(screen.getByText("Collection details")).toBeTruthy();
     expect(screen.getByLabelText("Name")).toBeTruthy();
-    expect(screen.getByLabelText("Description")).toBeTruthy();
-    expect(screen.getByLabelText("Visibility")).toBeTruthy();
+    // "Optional" sits inside the label beside the field name.
+    expect(screen.getByLabelText(/^Description/)).toBeTruthy();
+    expect(screen.getByRole("group", { name: "Visibility" })).toBeTruthy();
+    expect(screen.getByRole("radio", { name: /Private/ })).toBeTruthy();
     expect(screen.getByLabelText("Category")).toBeTruthy();
     expect(
       screen.getByRole("button", { name: "Create collection" })

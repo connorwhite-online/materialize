@@ -1,25 +1,19 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import Link from "next/link";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Field, FieldGroup, FormActions } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { VisibilityField } from "@/components/upload/form-fields";
 import { createCollection } from "@/app/actions/collections";
 import { OwnerPicker } from "@/components/orgs/owner-picker";
 import { CategorySelect } from "@/components/categories/category-select";
 
 /**
  * Page-level create form for a collection. Mirrors
- * {@link ProjectCreateForm}: a Card of fields, owner picker, and a
+ * {@link ProjectCreateForm}: one column of fields, owner picker, and a
  * submit that lets `createCollection` redirect to the new row.
  */
 export function CollectionCreateForm() {
@@ -37,85 +31,63 @@ export function CollectionCreateForm() {
         setErrors(
           typeof result.error === "string"
             ? { name: [result.error] }
-            : result.error
+            : result.error,
         );
       }
     });
   };
 
   return (
-    <form action={handleSubmit} className="space-y-4">
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Collection details</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <OwnerPicker label="Create as" />
+    <form action={handleSubmit} className="flex min-w-0 flex-col gap-8">
+      <FieldGroup className="max-w-xl">
+        <OwnerPicker label="Create as" />
 
-          <div>
-            <Label htmlFor="name">Name</Label>
-            <Input
-              id="name"
-              name="name"
-              required
-              maxLength={100}
-              placeholder="e.g. Desk accessories"
-            />
-            {errors?.name && (
-              <p className="mt-1 text-xs text-destructive">{errors.name[0]}</p>
-            )}
-          </div>
-          <div>
-            <Label htmlFor="description">Description</Label>
-            <Textarea
-              id="description"
-              name="description"
-              rows={3}
-              maxLength={500}
-              placeholder="Optional"
-            />
-            {errors?.description && (
-              <p className="mt-1 text-xs text-destructive">
-                {errors.description[0]}
-              </p>
-            )}
-          </div>
-          <div>
-            <Label htmlFor="visibility-trigger">Visibility</Label>
-            <Select
-              value={visibility}
-              onValueChange={(v) =>
-                v && setVisibility(v as "public" | "private")
-              }
-            >
-              <SelectTrigger id="visibility-trigger" className="w-full">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="public">Public</SelectItem>
-                <SelectItem value="private">Private</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-          <div>
-            <Label htmlFor="collection-category">Category</Label>
-            <CategorySelect
-              id="collection-category"
-              value={category}
-              onValueChange={setCategory}
-            />
-            <p className="mt-1 text-xs text-muted-foreground">
-              Pick the closest shelf so this shows up when people browse.
-            </p>
-          </div>
-        </CardContent>
-      </Card>
+        <Field label="Name" htmlFor="name" error={errors?.name?.[0]}>
+          <Input
+            id="name"
+            name="name"
+            required
+            maxLength={100}
+            placeholder="Desk accessories"
+            aria-invalid={errors?.name ? true : undefined}
+          />
+        </Field>
+        <Field
+          label="Description"
+          htmlFor="description"
+          optional
+          error={errors?.description?.[0]}
+        >
+          <Textarea
+            id="description"
+            name="description"
+            rows={3}
+            maxLength={500}
+            placeholder="What ties these files together."
+          />
+        </Field>
+        <Field
+          label="Category"
+          htmlFor="collection-category"
+          hint="Where it shows up when people browse."
+        >
+          <CategorySelect
+            id="collection-category"
+            value={category}
+            onValueChange={setCategory}
+          />
+        </Field>
+        <VisibilityField value={visibility} onChange={setVisibility} />
+      </FieldGroup>
 
-      <div className="flex justify-end">
-        <Button type="submit" disabled={pending}>
-          {pending ? "Creating…" : "Create collection"}
+      <FormActions className="max-w-xl border-t border-border pt-5">
+        <Button type="button" variant="secondary" render={<Link href="/" />}>
+          Cancel
         </Button>
-      </div>
+        <Button type="submit" loading={pending}>
+          Create collection
+        </Button>
+      </FormActions>
     </form>
   );
 }

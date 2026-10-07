@@ -13,7 +13,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { Field } from "@/components/ui/field";
 import { deleteFileListing } from "@/app/actions/files";
 
 interface DeleteFileButtonProps {
@@ -24,7 +24,7 @@ interface DeleteFileButtonProps {
   redirectTo: string;
   /**
    * Optional custom trigger element. Lets the call site swap in an
-   * icon button or any other shape; defaults to a full-width outline
+   * icon button or any other shape; defaults to an outline
    * button labeled "Delete file".
    */
   trigger?: React.ReactNode;
@@ -86,13 +86,13 @@ export function DeleteFileButton({
           trigger ? (
             (trigger as React.ReactElement)
           ) : (
-            <Button variant="outline" className="w-full text-destructive">
+            <Button variant="outline" className="text-destructive">
               Delete file
             </Button>
           )
         }
       />
-      <DialogContent className="max-w-md">
+      <DialogContent>
         <DialogHeader>
           <DialogTitle>
             {hasBuyers ? "Archive this file?" : "Delete this file?"}
@@ -101,61 +101,72 @@ export function DeleteFileButton({
             {hasBuyers ? (
               <>
                 This file is referenced by {buyerCount} existing{" "}
-                {buyerCount === 1 ? "purchase, cart, or order" : "purchases, carts, or orders"}.
-                We&apos;ll stop selling it and hide it from your library,
-                but those existing references keep working. This
-                can&apos;t be undone.
+                {buyerCount === 1
+                  ? "purchase, cart, or order"
+                  : "purchases, carts, or orders"}
+                . We&apos;ll stop selling it and hide it from your library, but
+                those existing references keep working. This can&apos;t be
+                undone.
               </>
             ) : (
               <>
-                This will permanently delete the listing, every uploaded
-                model file, and every part photo. This can&apos;t be undone.
+                This will permanently delete the listing, every uploaded model
+                file, and every part photo. This can&apos;t be undone.
               </>
             )}
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-2">
-          <Label htmlFor="confirm-name" className="text-xs">
-            Type{" "}
-            <span className="font-mono font-medium text-foreground">
-              {fileName}
-            </span>{" "}
-            to confirm
-          </Label>
-          <Input
-            id="confirm-name"
-            value={typed}
-            onChange={(e) => setTyped(e.target.value)}
-            autoComplete="off"
-            spellCheck={false}
-          />
-        </div>
-
-        {error && <p className="text-sm text-destructive">{error}</p>}
-
-        <DialogFooter>
-          <Button
-            variant="ghost"
-            onClick={() => setOpen(false)}
-            disabled={pending}
+        <form
+          className="flex flex-col gap-5"
+          onSubmit={(e) => {
+            e.preventDefault();
+            handleConfirm();
+          }}
+        >
+          <Field
+            label={
+              <span>
+                Type{" "}
+                <span className="font-mono text-[13px] font-medium">
+                  {fileName}
+                </span>{" "}
+                to confirm
+              </span>
+            }
+            htmlFor="confirm-name"
+            error={error ?? undefined}
           >
-            Cancel
-          </Button>
-          <Button
-            variant="destructive"
-            onClick={handleConfirm}
-            disabled={!matches || pending}
-          >
-            {pending
-              ? hasBuyers
-                ? "Archiving…"
-                : "Deleting…"
-              : hasBuyers
-                ? "Archive permanently"
-                : "Delete permanently"}
-          </Button>
-        </DialogFooter>
+            <Input
+              id="confirm-name"
+              value={typed}
+              onChange={(e) => setTyped(e.target.value)}
+              autoComplete="off"
+              autoCapitalize="none"
+              spellCheck={false}
+              autoFocus
+            />
+          </Field>
+
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => setOpen(false)}
+              disabled={pending}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="submit"
+              variant="destructive"
+              loading={pending}
+              disabled={!matches}
+            >
+              {hasBuyers ? "Archive permanently" : "Delete permanently"}
+            </Button>
+          </DialogFooter>
+        </form>
       </DialogContent>
     </Dialog>
   );

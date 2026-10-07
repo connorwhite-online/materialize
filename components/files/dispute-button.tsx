@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
 import { fileListingDispute } from "@/app/actions/disputes";
 
 /**
@@ -18,7 +19,10 @@ export function DisputeButton({ fileId }: { fileId: string }) {
 
   if (done) {
     return (
-      <p role="status" className="mt-3 text-xs text-muted-foreground">
+      <p
+        role="status"
+        className="mt-3 text-[13px] leading-[18px] text-muted-foreground"
+      >
         Dispute submitted — we&apos;ll review it and follow up by email.
       </p>
     );
@@ -32,7 +36,7 @@ export function DisputeButton({ fileId }: { fileId: string }) {
         className="mt-3"
         onClick={() => setOpen(true)}
       >
-        This is my original work — dispute
+        Dispute this flag
       </Button>
     );
   }
@@ -48,31 +52,36 @@ export function DisputeButton({ fileId }: { fileId: string }) {
 
   return (
     <div className="mt-3 flex flex-col gap-2">
-      <textarea
+      <Textarea
         value={reason}
         onChange={(e) => setReason(e.target.value)}
         rows={3}
         maxLength={2000}
         placeholder="Briefly explain why this is your original work."
         aria-label="Dispute reason"
-        className="w-full rounded-md border border-input bg-background px-3 py-2 field-text sm:text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+        autoFocus
       />
       {error && (
-        <p role="alert" className="text-xs text-destructive">
+        <p role="alert" className="text-[13px] leading-[18px] text-destructive">
           {error}
         </p>
       )}
       <div className="flex gap-2">
-        <Button size="sm" disabled={pending} onClick={submit}>
-          {pending ? "Submitting…" : "Submit dispute"}
-        </Button>
         <Button
-          variant="ghost"
+          variant="secondary"
           size="sm"
           disabled={pending}
           onClick={() => setOpen(false)}
         >
           Cancel
+        </Button>
+        <Button
+          size="sm"
+          loading={pending}
+          disabled={reason.trim().length === 0}
+          onClick={submit}
+        >
+          Submit dispute
         </Button>
       </div>
     </div>

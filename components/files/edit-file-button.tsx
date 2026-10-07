@@ -13,7 +13,7 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { Field } from "@/components/ui/field";
 import { Textarea } from "@/components/ui/textarea";
 import {
   Select,
@@ -24,15 +24,18 @@ import {
 } from "@/components/ui/select";
 import { updateFileListing } from "@/app/actions/files";
 import { MATERIALS } from "@/lib/materials";
+import { MAX_PRICE_CENTS } from "@/lib/validations/file";
 import {
-  DESIGN_TAG_OPTIONS,
-  DESIGN_TAG_LABELS,
-  MAX_PRICE_CENTS,
-} from "@/lib/validations/file";
+  CoverPicker,
+  DesignTagChips,
+  FormError,
+  FormSection,
+  LicenseField,
+  PriceInput,
+  VisibilityField,
+} from "@/components/upload/form-fields";
 import { CategorySelect } from "@/components/categories/category-select";
 import {
-  LICENSES,
-  LICENSE_ORDER,
   DEFAULT_LICENSE,
   getLicenseMeta,
   type LicenseId,
@@ -94,8 +97,8 @@ interface EditFileButtonProps {
   ccFinishGroups?: Record<string, CcFinishGroupOption[]>;
   /**
    * Optional custom trigger element. Lets the call site swap in an
-   * icon button or any other shape; defaults to a full-width outline
-   * button labeled "Edit file".
+   * icon button or any other shape; defaults to a secondary button
+   * labeled "Edit file".
    */
   trigger?: React.ReactNode;
 }
@@ -128,33 +131,33 @@ export function EditFileButton({
   const [tags, setTags] = useState((initial.tags ?? []).join(", "));
   const [category, setCategory] = useState(initial.category ?? "");
   const [priceDollars, setPriceDollars] = useState(
-    (initial.price / 100).toString()
+    (initial.price / 100).toString(),
   );
   const [license, setLicense] = useState<LicenseId>(
-    resolveLicense(initial.license)
+    resolveLicense(initial.license),
   );
   const [visibility, setVisibility] = useState<"public" | "private">(
-    (initial.visibility as "public" | "private") || "public"
+    (initial.visibility as "public" | "private") || "public",
   );
   const [recommendedMaterial, setRecommendedMaterial] = useState(
-    initial.recommendedMaterialId ?? ""
+    initial.recommendedMaterialId ?? "",
   );
   const [recommendedCcMaterial, setRecommendedCcMaterial] = useState(
-    initial.recommendedCcMaterialId ?? ""
+    initial.recommendedCcMaterialId ?? "",
   );
   const [recommendedCcFinishGroup, setRecommendedCcFinishGroup] = useState(
-    initial.recommendedCcFinishGroupId ?? ""
+    initial.recommendedCcFinishGroupId ?? "",
   );
   const [designTags, setDesignTags] = useState<string[]>(
-    initial.designTags ?? []
+    initial.designTags ?? [],
   );
   const [minWallThicknessMm, setMinWallThicknessMm] = useState(
-    initial.minWallThickness ? (initial.minWallThickness / 10).toString() : ""
+    initial.minWallThickness ? (initial.minWallThickness / 10).toString() : "",
   );
   // Empty string = auto thumbnail (no override); otherwise the
   // selected curator photo's id.
   const [coverPhotoId, setCoverPhotoId] = useState<string>(
-    initial.coverPhotoId ?? ""
+    initial.coverPhotoId ?? "",
   );
 
   const reset = () => {
@@ -170,7 +173,9 @@ export function EditFileButton({
     setRecommendedCcFinishGroup(initial.recommendedCcFinishGroupId ?? "");
     setDesignTags(initial.designTags ?? []);
     setMinWallThicknessMm(
-      initial.minWallThickness ? (initial.minWallThickness / 10).toString() : ""
+      initial.minWallThickness
+        ? (initial.minWallThickness / 10).toString()
+        : "",
     );
     setCoverPhotoId(initial.coverPhotoId ?? "");
     setSubmitError(null);
@@ -178,7 +183,7 @@ export function EditFileButton({
 
   const toggleDesignTag = (tag: string) => {
     setDesignTags((prev) =>
-      prev.includes(tag) ? prev.filter((t) => t !== tag) : [...prev, tag]
+      prev.includes(tag) ? prev.filter((t) => t !== tag) : [...prev, tag],
     );
   };
 
@@ -243,373 +248,270 @@ export function EditFileButton({
           trigger ? (
             (trigger as React.ReactElement)
           ) : (
-            <Button variant="outline" className="w-full">
-              Edit file
-            </Button>
+            <Button variant="secondary">Edit file</Button>
           )
         }
       />
-      <DialogContent className="max-h-[90vh] w-full max-w-2xl overflow-y-auto sm:max-w-2xl">
+      <DialogContent className="max-h-[90vh] w-full overflow-y-auto sm:max-w-xl">
         <DialogHeader>
           <DialogTitle>Edit file</DialogTitle>
           <DialogDescription>
-            Update how this file is listed. Changes apply immediately.
+            Changes show on the listing as soon as you save.
           </DialogDescription>
         </DialogHeader>
 
-        <form onSubmit={handleSubmit} className="space-y-5">
-          <div className="space-y-1.5">
-            <Label htmlFor="edit-name" className="text-xs">
-              Name
-            </Label>
-            <Input
-              id="edit-name"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              required
-              maxLength={200}
-            />
-          </div>
-
-          <div className="space-y-1.5">
-            <Label htmlFor="edit-description" className="text-xs">
-              Description
-            </Label>
-            <Textarea
-              id="edit-description"
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              rows={4}
-              maxLength={5000}
-            />
-          </div>
-
-          {photos.length > 0 && (
-            <div className="space-y-1.5">
-              <Label className="text-xs">Cover image</Label>
-              <p className="text-[11px] text-muted-foreground">
-                Pick which photo represents this file in browse and
-                profile views. Default is the auto-captured 3D
-                thumbnail.
-              </p>
-              <div className="flex gap-2 overflow-x-auto pb-1 pt-1">
-                <button
-                  type="button"
-                  onClick={() => setCoverPhotoId("")}
-                  aria-pressed={coverPhotoId === ""}
-                  className={`relative h-16 w-16 shrink-0 overflow-hidden rounded-lg border-2 transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
-                    coverPhotoId === ""
-                      ? "border-primary"
-                      : "border-border hover:border-foreground/30"
-                  }`}
-                >
-                  <img
-                    src={`/api/thumbnails/${fileId}?original=1`}
-                    alt="Auto-captured thumbnail"
-                    className="absolute inset-0 h-full w-full object-cover"
-                  />
-                  <span className="absolute inset-x-0 bottom-0 bg-black/60 py-0.5 text-center text-[9px] font-medium uppercase tracking-wide text-white">
-                    Auto
-                  </span>
-                </button>
-                {photos.map((p) => (
-                  <button
-                    key={p.id}
-                    type="button"
-                    onClick={() => setCoverPhotoId(p.id)}
-                    aria-pressed={coverPhotoId === p.id}
-                    className={`h-16 w-16 shrink-0 overflow-hidden rounded-lg border-2 transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
-                      coverPhotoId === p.id
-                        ? "border-primary"
-                        : "border-border hover:border-foreground/30"
-                    }`}
-                  >
-                    <img
-                      src={p.downloadUrl}
-                      alt=""
-                      className="h-full w-full object-cover"
-                    />
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-
-          <div className="space-y-1.5">
-            <Label htmlFor="edit-tags" className="text-xs">
-              Tags
-            </Label>
-            <Input
-              id="edit-tags"
-              value={tags}
-              onChange={(e) => setTags(e.target.value)}
-              placeholder="miniature, tabletop, gaming"
-            />
-            <p className="text-[11px] text-muted-foreground">
-              Comma-separated. Helps people find this file in search.
-            </p>
-          </div>
-
-          <div className="space-y-1.5">
-            <Label htmlFor="edit-category" className="text-xs">
-              Category
-            </Label>
-            <CategorySelect
-              id="edit-category"
-              value={category}
-              onValueChange={setCategory}
-            />
-            <p className="text-[11px] text-muted-foreground">
-              Where this shows up when people browse by category.
-            </p>
-          </div>
-
-          <div className="space-y-1.5">
-            <Label htmlFor="edit-visibility" className="text-xs">
-              Visibility
-            </Label>
-            <Select
-              value={visibility}
-              onValueChange={(v) => setVisibility(v as "public" | "private")}
-            >
-              <SelectTrigger id="edit-visibility" className="w-full">
-                <SelectValue>
-                  {(value) =>
-                    value === "private" ? "Private" : "Public"
-                  }
-                </SelectValue>
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="public">Public</SelectItem>
-                <SelectItem value="private">Private</SelectItem>
-              </SelectContent>
-            </Select>
-            <p className="text-[11px] text-muted-foreground">
-              {visibility === "public"
-                ? "Appears in browse and search."
-                : hasBuyers
-                  ? "Hidden from browse and search. Existing buyers and active orders keep their access."
-                  : "Hidden from browse and search. Only you can see it."}
-            </p>
-          </div>
-
-          <div className="grid gap-4 sm:grid-cols-2">
-            <div className="space-y-1.5">
-              <Label htmlFor="edit-price" className="text-xs">
-                Price (USD)
-              </Label>
+        <form onSubmit={handleSubmit} className="flex min-w-0 flex-col gap-8">
+          <FormSection title="Details">
+            <Field label="Name" htmlFor="edit-name">
               <Input
-                id="edit-price"
-                type="number"
-                min="0"
-                max={MAX_PRICE_CENTS / 100}
-                step="0.01"
-                value={priceDollars}
-                onChange={(e) => setPriceDollars(e.target.value)}
+                id="edit-name"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                required
+                maxLength={200}
               />
-              <p className="text-[11px] text-muted-foreground">
-                Set to 0 for free download.
-              </p>
-            </div>
+            </Field>
 
-            <div className="space-y-1.5">
-              <Label htmlFor="edit-license" className="text-xs">
-                License
-              </Label>
-              <Select
+            <Field label="Description" htmlFor="edit-description" optional>
+              <Textarea
+                id="edit-description"
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                rows={4}
+                maxLength={5000}
+              />
+            </Field>
+
+            {photos.length > 0 && (
+              <CoverPicker
+                autoSrc={`/api/thumbnails/${fileId}?original=1`}
+                photos={photos}
+                value={coverPhotoId}
+                onChange={setCoverPhotoId}
+                hint="Shown in browse and on your profile. Auto is the 3D preview."
+              />
+            )}
+
+            <div className="grid min-w-0 gap-5 sm:grid-cols-2">
+              <Field label="Category" htmlFor="edit-category">
+                <CategorySelect
+                  id="edit-category"
+                  value={category}
+                  onValueChange={setCategory}
+                />
+              </Field>
+              <Field
+                label="Tags"
+                htmlFor="edit-tags"
+                optional
+                hint="Comma separated."
+              >
+                <Input
+                  id="edit-tags"
+                  value={tags}
+                  onChange={(e) => setTags(e.target.value)}
+                  placeholder="miniature, tabletop"
+                />
+              </Field>
+            </div>
+          </FormSection>
+
+          <FormSection title="Sharing">
+            <VisibilityField
+              name="edit-visibility"
+              value={visibility}
+              onChange={setVisibility}
+              privateDescription={
+                hasBuyers
+                  ? "Hidden from browse. Buyers keep access."
+                  : "Only you can see it."
+              }
+            />
+            <div className="grid min-w-0 gap-5 sm:grid-cols-[minmax(0,1fr)_10rem]">
+              <LicenseField
+                id="edit-license"
                 value={license}
-                onValueChange={(v) => setLicense(v as LicenseId)}
-              >
-                <SelectTrigger id="edit-license" className="w-full">
-                  <SelectValue>
-                    {(value) => {
-                      const meta = LICENSES[value as LicenseId];
-                      return meta
-                        ? `${meta.shortName} — ${meta.name}`
-                        : "Select a license";
-                    }}
-                  </SelectValue>
-                </SelectTrigger>
-                <SelectContent>
-                  {LICENSE_ORDER.map((id) => {
-                    const meta = LICENSES[id];
-                    return (
-                      <SelectItem key={id} value={id}>
-                        <div className="flex flex-col gap-0.5">
-                          <span>
-                            {meta.shortName} — {meta.name}
-                          </span>
-                          <span className="whitespace-normal text-[11px] leading-tight text-muted-foreground">
-                            {meta.summary}
-                          </span>
-                        </div>
-                      </SelectItem>
-                    );
-                  })}
-                </SelectContent>
-              </Select>
+                onChange={setLicense}
+              />
+              <Field label="Price" htmlFor="edit-price" hint="USD. 0 is free.">
+                <PriceInput
+                  id="edit-price"
+                  max={MAX_PRICE_CENTS / 100}
+                  value={priceDollars}
+                  onChange={(e) => setPriceDollars(e.target.value)}
+                />
+              </Field>
             </div>
-          </div>
+          </FormSection>
 
-          {ccMaterials && ccMaterials.length > 0 ? (
-            <div className="space-y-1.5">
-              <Label htmlFor="edit-cc-material" className="text-xs">
-                Recommended print material
-              </Label>
-              <p className="text-[11px] text-muted-foreground">
-                When set, users printing this file skip straight to vendor
-                selection for this material.
-              </p>
-              <Select
-                value={recommendedCcMaterial || "none"}
-                onValueChange={(v) => {
-                  const next = !v || v === "none" ? "" : String(v);
-                  setRecommendedCcMaterial(next);
-                  // Clear finish group when material changes — the previous finish
-                  // group may not exist for the newly selected material.
-                  if (next !== recommendedCcMaterial) setRecommendedCcFinishGroup("");
-                }}
-              >
-                <SelectTrigger id="edit-cc-material" className="w-full">
-                  <SelectValue>
-                    {(value) => {
-                      if (!value || value === "none") return "None — let the buyer decide";
-                      const mat = ccMaterials.find((m) => m.id === value);
-                      return mat ? `${mat.name} (${mat.groupName})` : value;
-                    }}
-                  </SelectValue>
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">None — let the buyer decide</SelectItem>
-                  {ccMaterials.map((m) => (
-                    <SelectItem key={m.id} value={m.id}>
-                      <span>{m.name}</span>
-                      <span className="ml-1.5 text-muted-foreground text-[11px]">{m.groupName}</span>
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              {/* Finish group picker — only shown when a CC material is selected
-                  and the catalog provides finish groups for it. */}
-              {recommendedCcMaterial && ccFinishGroups && (ccFinishGroups[recommendedCcMaterial]?.length ?? 0) > 1 && (
-                <div className="mt-3 space-y-1.5">
-                  <Label htmlFor="edit-cc-finish-group" className="text-xs">
-                    Recommended finish
-                  </Label>
-                  <p className="text-[11px] text-muted-foreground">
-                    Optional. When set, buyers land directly on vendor selection for this finish.
-                  </p>
+          <FormSection
+            title="Printing"
+            description="Optional. Help buyers order the right print."
+          >
+            {ccMaterials && ccMaterials.length > 0 ? (
+              <>
+                <Field
+                  label="Recommended material"
+                  htmlFor="edit-cc-material"
+                  hint="Buyers printing this file skip straight to vendors for it."
+                >
                   <Select
-                    value={recommendedCcFinishGroup || "none"}
-                    onValueChange={(v) =>
-                      setRecommendedCcFinishGroup(!v || v === "none" ? "" : String(v))
-                    }
+                    value={recommendedCcMaterial || "none"}
+                    onValueChange={(v) => {
+                      const next = !v || v === "none" ? "" : String(v);
+                      setRecommendedCcMaterial(next);
+                      // Clear finish group when material changes — the previous finish
+                      // group may not exist for the newly selected material.
+                      if (next !== recommendedCcMaterial)
+                        setRecommendedCcFinishGroup("");
+                    }}
                   >
-                    <SelectTrigger id="edit-cc-finish-group" className="w-full">
+                    <SelectTrigger id="edit-cc-material" className="w-full">
                       <SelectValue>
                         {(value) => {
-                          if (!value || value === "none") return "Any finish — buyer decides";
-                          const fg = ccFinishGroups[recommendedCcMaterial]?.find((f) => f.id === value);
-                          return fg ? fg.name : value;
+                          if (!value || value === "none")
+                            return "None — let the buyer decide";
+                          const mat = ccMaterials.find((m) => m.id === value);
+                          return mat ? `${mat.name} (${mat.groupName})` : value;
                         }}
                       </SelectValue>
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="none">Any finish — buyer decides</SelectItem>
-                      {(ccFinishGroups[recommendedCcMaterial] ?? []).map((fg) => (
-                        <SelectItem key={fg.id} value={fg.id}>
-                          {fg.name}
+                      <SelectItem value="none">
+                        None — let the buyer decide
+                      </SelectItem>
+                      {ccMaterials.map((m) => (
+                        <SelectItem key={m.id} value={m.id}>
+                          <span>{m.name}</span>
+                          <span className="ml-1.5 text-xs text-muted-foreground">
+                            {m.groupName}
+                          </span>
                         </SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
-                </div>
-              )}
-            </div>
-          ) : (
-            <div className="space-y-1.5">
-              <Label htmlFor="edit-material" className="text-xs">
-                Recommended material
-              </Label>
-              <Select
-                value={recommendedMaterial || "none"}
-                onValueChange={(v) =>
-                  setRecommendedMaterial(!v || v === "none" ? "" : String(v))
-                }
-              >
-                <SelectTrigger id="edit-material" className="w-full">
-                  <SelectValue>
-                    {(value) => {
-                      if (!value || value === "none") return "None";
-                      const mat = MATERIALS.find((m) => m.id === value);
-                      return mat ? `${mat.name} (${mat.method})` : value;
-                    }}
-                  </SelectValue>
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">None — let the buyer decide</SelectItem>
-                  {MATERIALS.map((m) => (
-                    <SelectItem key={m.id} value={m.id}>
-                      {m.name} ({m.method})
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          )}
-
-          <div className="space-y-1.5">
-            <Label className="text-xs">This part needs to be…</Label>
-            <div className="flex flex-wrap gap-2">
-              {DESIGN_TAG_OPTIONS.map((tag) => (
-                <button
-                  key={tag}
-                  type="button"
-                  onClick={() => toggleDesignTag(tag)}
-                  className={`inline-flex cursor-pointer items-center rounded-md border px-3 py-1.5 text-xs font-medium transition-colors ${
-                    designTags.includes(tag)
-                      ? "border-primary bg-primary/10 text-primary"
-                      : "border-border text-muted-foreground hover:border-primary/30"
-                  }`}
+                </Field>
+                {/* Finish group picker — only shown when a CC material is selected
+                    and the catalog provides finish groups for it. */}
+                {recommendedCcMaterial &&
+                  ccFinishGroups &&
+                  (ccFinishGroups[recommendedCcMaterial]?.length ?? 0) > 1 && (
+                    <Field
+                      label="Recommended finish"
+                      htmlFor="edit-cc-finish-group"
+                      optional
+                      hint="Buyers land directly on vendors for this finish."
+                    >
+                      <Select
+                        value={recommendedCcFinishGroup || "none"}
+                        onValueChange={(v) =>
+                          setRecommendedCcFinishGroup(
+                            !v || v === "none" ? "" : String(v),
+                          )
+                        }
+                      >
+                        <SelectTrigger
+                          id="edit-cc-finish-group"
+                          className="w-full"
+                        >
+                          <SelectValue>
+                            {(value) => {
+                              if (!value || value === "none")
+                                return "Any finish — buyer decides";
+                              const fg = ccFinishGroups[
+                                recommendedCcMaterial
+                              ]?.find((f) => f.id === value);
+                              return fg ? fg.name : value;
+                            }}
+                          </SelectValue>
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="none">
+                            Any finish — buyer decides
+                          </SelectItem>
+                          {(ccFinishGroups[recommendedCcMaterial] ?? []).map(
+                            (fg) => (
+                              <SelectItem key={fg.id} value={fg.id}>
+                                {fg.name}
+                              </SelectItem>
+                            ),
+                          )}
+                        </SelectContent>
+                      </Select>
+                    </Field>
+                  )}
+              </>
+            ) : (
+              <Field label="Recommended material" htmlFor="edit-material">
+                <Select
+                  value={recommendedMaterial || "none"}
+                  onValueChange={(v) =>
+                    setRecommendedMaterial(!v || v === "none" ? "" : String(v))
+                  }
                 >
-                  {DESIGN_TAG_LABELS[tag]}
-                </button>
-              ))}
-            </div>
-          </div>
+                  <SelectTrigger id="edit-material" className="w-full">
+                    <SelectValue>
+                      {(value) => {
+                        if (!value || value === "none")
+                          return "None — let the buyer decide";
+                        const mat = MATERIALS.find((m) => m.id === value);
+                        return mat ? `${mat.name} (${mat.method})` : value;
+                      }}
+                    </SelectValue>
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">
+                      None — let the buyer decide
+                    </SelectItem>
+                    {MATERIALS.map((m) => (
+                      <SelectItem key={m.id} value={m.id}>
+                        {m.name} ({m.method})
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </Field>
+            )}
 
-          <div className="space-y-1.5">
-            <Label htmlFor="edit-wall" className="text-xs">
-              Min wall thickness (mm)
-            </Label>
-            <Input
-              id="edit-wall"
-              type="number"
-              min="0"
-              step="0.1"
-              value={minWallThicknessMm}
-              onChange={(e) => setMinWallThicknessMm(e.target.value)}
-              placeholder="Optional"
-            />
-          </div>
+            <DesignTagChips selected={designTags} onToggle={toggleDesignTag} />
 
-          {submitError && (
-            <p className="text-sm text-destructive">{submitError}</p>
-          )}
-
-          <DialogFooter>
-            <Button
-              type="button"
-              variant="ghost"
-              onClick={() => setOpen(false)}
-              disabled={pending}
+            <Field
+              label="Min wall thickness"
+              htmlFor="edit-wall"
+              optional
+              hint="In millimetres."
+              className="max-w-[18rem]"
             >
-              Cancel
-            </Button>
-            <Button type="submit" disabled={pending}>
-              {pending ? "Saving…" : "Save changes"}
-            </Button>
-          </DialogFooter>
+              <Input
+                id="edit-wall"
+                type="number"
+                inputMode="decimal"
+                min="0"
+                step="0.1"
+                value={minWallThicknessMm}
+                onChange={(e) => setMinWallThicknessMm(e.target.value)}
+                placeholder="0.8"
+                className="tabular-nums"
+              />
+            </Field>
+          </FormSection>
+
+          <div className="flex flex-col gap-3">
+            <FormError>{submitError}</FormError>
+            <DialogFooter>
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => setOpen(false)}
+                disabled={pending}
+              >
+                Cancel
+              </Button>
+              <Button type="submit" loading={pending}>
+                Save changes
+              </Button>
+            </DialogFooter>
+          </div>
         </form>
       </DialogContent>
     </Dialog>

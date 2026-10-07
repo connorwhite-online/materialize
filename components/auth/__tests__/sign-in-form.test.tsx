@@ -112,4 +112,22 @@ describe("SignInForm", () => {
     ).toBeTruthy();
     expect(signIn.finalize).not.toHaveBeenCalled();
   });
+
+  it("moves to a code step that names the address and can resend", async () => {
+    render(<SignInForm />);
+    fireEvent.change(screen.getByLabelText("Email or username"), {
+      target: { value: "a@b.co" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+
+    expect(await screen.findByText("Check your email")).toBeTruthy();
+    expect(screen.getByText("a@b.co")).toBeTruthy();
+    expect(signIn.emailCode.sendCode).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByRole("button", { name: "Resend code" }));
+    await waitFor(() =>
+      expect(signIn.emailCode.sendCode).toHaveBeenCalledTimes(2)
+    );
+    expect(await screen.findByText("New code sent.")).toBeTruthy();
+  });
 });

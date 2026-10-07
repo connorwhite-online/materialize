@@ -1,28 +1,22 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import Link from "next/link";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Field, FieldGroup, FormActions } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { Switch } from "@/components/ui/switch";
+  FormSection,
+  LicenseField,
+  PriceInput,
+  SaleField,
+  VisibilityField,
+} from "@/components/upload/form-fields";
 import { createProject } from "@/app/actions/projects";
 import { OwnerPicker } from "@/components/orgs/owner-picker";
 import { CategorySelect } from "@/components/categories/category-select";
-import {
-  LICENSES,
-  LICENSE_ORDER,
-  DEFAULT_LICENSE,
-  type LicenseId,
-} from "@/lib/licenses";
+import { DEFAULT_LICENSE, type LicenseId } from "@/lib/licenses";
 import { FileCard } from "@/components/files/file-card";
 
 interface OwnedFile {
@@ -31,11 +25,7 @@ interface OwnedFile {
   thumbnailUrl: string | null;
 }
 
-export function ProjectCreateForm({
-  ownedFiles,
-}: {
-  ownedFiles: OwnedFile[];
-}) {
+export function ProjectCreateForm({ ownedFiles }: { ownedFiles: OwnedFile[] }) {
   const [selected, setSelected] = useState<string[]>([]);
   const [category, setCategory] = useState("");
   const [license, setLicense] = useState<LicenseId>(DEFAULT_LICENSE);
@@ -46,7 +36,7 @@ export function ProjectCreateForm({
 
   const toggle = (id: string) =>
     setSelected((prev) =>
-      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
     );
 
   const handleSubmit = (formData: FormData) => {
@@ -67,203 +57,145 @@ export function ProjectCreateForm({
   };
 
   return (
-    <form action={handleSubmit} className="space-y-4">
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Project details</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
+    <form
+      action={handleSubmit}
+      className="flex w-full max-w-xl min-w-0 flex-col gap-10"
+    >
+      <FormSection title="Details">
+        <FieldGroup className="max-w-none">
           <OwnerPicker label="Create as" />
 
-          <div>
-            <Label htmlFor="name">Name</Label>
-            <Input id="name" name="name" required placeholder="Chess Set" />
-            {errors?.name && (
-              <p className="mt-1 text-xs text-destructive">{errors.name[0]}</p>
-            )}
-          </div>
-          <div>
-            <Label htmlFor="description">Description</Label>
+          <Field label="Name" htmlFor="name" error={errors?.name?.[0]}>
+            <Input
+              id="name"
+              name="name"
+              required
+              placeholder="Chess set"
+              aria-invalid={errors?.name ? true : undefined}
+            />
+          </Field>
+          <Field label="Description" htmlFor="description" optional>
             <Textarea
               id="description"
               name="description"
               rows={3}
               placeholder="A complete 32-piece chess set for printing."
             />
-          </div>
-          <div>
-            <Label htmlFor="tags">Tags</Label>
-            <Input id="tags" name="tags" placeholder="board game, chess" />
-          </div>
-          <div>
-            <Label htmlFor="project-category">Category</Label>
-            <CategorySelect
-              id="project-category"
-              value={category}
-              onValueChange={setCategory}
-            />
-            <p className="mt-1 text-xs text-muted-foreground">
-              Pick the closest shelf so this shows up when people browse.
-            </p>
-          </div>
-          <div>
-            <Label htmlFor="license-trigger">License</Label>
-            <Select
-              value={license}
-              onValueChange={(v) => v && setLicense(v as LicenseId)}
+          </Field>
+          <div className="grid min-w-0 gap-5 sm:grid-cols-2">
+            <Field
+              label="Category"
+              htmlFor="project-category"
+              hint="Where it shows up when people browse."
             >
-              <SelectTrigger id="license-trigger" className="w-full">
-                <SelectValue>
-                  {(value) => {
-                    const meta = LICENSES[value as LicenseId];
-                    return meta
-                      ? `${meta.shortName} — ${meta.name}`
-                      : "Select a license";
-                  }}
-                </SelectValue>
-              </SelectTrigger>
-              <SelectContent>
-                {LICENSE_ORDER.map((id) => {
-                  const meta = LICENSES[id];
-                  return (
-                    <SelectItem key={id} value={id}>
-                      <div className="flex flex-col gap-0.5">
-                        <span>
-                          {meta.shortName} — {meta.name}
-                        </span>
-                        <span className="whitespace-normal text-[11px] leading-tight text-muted-foreground">
-                          {meta.summary}
-                        </span>
-                      </div>
-                    </SelectItem>
-                  );
-                })}
-              </SelectContent>
-            </Select>
-            <p className="mt-1 text-xs text-muted-foreground">
-              Controls what people can do with the files after download.
-            </p>
-          </div>
-          <div>
-            <Label htmlFor="visibility-trigger">Visibility</Label>
-            <Select
-              value={visibility}
-              onValueChange={(v) =>
-                v && setVisibility(v as "public" | "private")
-              }
+              <CategorySelect
+                id="project-category"
+                value={category}
+                onValueChange={setCategory}
+              />
+            </Field>
+            <Field
+              label="Tags"
+              htmlFor="tags"
+              optional
+              hint="Comma separated. Helps search."
             >
-              <SelectTrigger id="visibility-trigger" className="w-full">
-                <SelectValue>
-                  {(value) => (value === "private" ? "Private" : "Public")}
-                </SelectValue>
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="public">Public</SelectItem>
-                <SelectItem value="private">Private</SelectItem>
-              </SelectContent>
-            </Select>
-            <p className="mt-1 text-xs text-muted-foreground">
-              {visibility === "public"
-                ? "Appears in browse and search."
-                : "Hidden from browse and search. Only you can see it."}
-            </p>
+              <Input id="tags" name="tags" placeholder="board game, chess" />
+            </Field>
           </div>
-          <div>
-            <Label htmlFor="repoUrl">Code repository (optional)</Label>
+          <Field
+            label="Code repository"
+            htmlFor="repoUrl"
+            optional
+            hint="Firmware or source for kits with electronics."
+            error={errors?.repoUrl?.[0]}
+          >
             <Input
               id="repoUrl"
               name="repoUrl"
               type="url"
               inputMode="url"
               placeholder="https://github.com/your/repo"
+              aria-invalid={errors?.repoUrl ? true : undefined}
             />
-            <p className="mt-1 text-xs text-muted-foreground">
-              Link the firmware or source repo for builders to clone — useful
-              for kits with custom electronics.
-            </p>
-            {errors?.repoUrl && (
-              <p className="mt-1 text-xs text-destructive">
-                {errors.repoUrl[0]}
-              </p>
-            )}
-          </div>
-        </CardContent>
-      </Card>
+          </Field>
+        </FieldGroup>
+      </FormSection>
 
-      <Card>
-        <CardHeader>
-          <div className="flex items-start justify-between gap-4">
-            <div>
-              <CardTitle className="text-base">List for sale</CardTitle>
-              <p className="mt-0.5 text-xs text-muted-foreground">
-                Make this project available to purchase publicly.
-              </p>
-            </div>
-            <Switch checked={sellEnabled} onCheckedChange={setSellEnabled} />
-          </div>
-        </CardHeader>
-        {sellEnabled && (
-          <CardContent>
-            <div>
-              <Label htmlFor="price">Price (USD)</Label>
-              <Input
-                id="price"
-                name="price"
-                type="number"
-                min="0"
-                step="0.01"
-                defaultValue="0"
+      <FormSection title="Sharing">
+        <FieldGroup className="max-w-none">
+          <VisibilityField value={visibility} onChange={setVisibility} />
+          <LicenseField
+            id="license-trigger"
+            value={license}
+            onChange={setLicense}
+          />
+          <SaleField
+            id="sell-toggle"
+            enabled={sellEnabled}
+            onEnabledChange={setSellEnabled}
+            title="Sell this project"
+            description="Buyers pay once for every file in it. Leave off to share it free."
+          >
+            <Field
+              label="Price"
+              htmlFor="price"
+              hint="USD. Set 0 to make it free."
+              className="max-w-[12rem]"
+            >
+              <PriceInput id="price" name="price" defaultValue="0" />
+            </Field>
+          </SaleField>
+        </FieldGroup>
+      </FormSection>
+
+      <FormSection
+        title="Files"
+        description={
+          ownedFiles.length === 0
+            ? "Optional. Create the project now and add files to it later."
+            : "Optional. Pick files from your library, or add them later."
+        }
+        action={
+          ownedFiles.length > 0 ? (
+            <span className="shrink-0 pt-0.5 text-[13px] text-muted-foreground tabular-nums">
+              {selected.length} selected
+            </span>
+          ) : undefined
+        }
+      >
+        {ownedFiles.length > 0 && (
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+            {ownedFiles.map((f) => (
+              <FileCard
+                key={f.id}
+                title={f.name}
+                thumbnailUrl={f.thumbnailUrl}
+                placeholder="No preview"
+                selected={selected.includes(f.id)}
+                onClick={() => toggle(f.id)}
               />
-              <p className="mt-1 text-xs text-muted-foreground">
-                Set to 0 for free download
-              </p>
-            </div>
-          </CardContent>
+            ))}
+          </div>
         )}
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">
-            Pick files for this project
-          </CardTitle>
-          <p className="text-xs text-muted-foreground">
-            Optional — add files now or later. {selected.length} selected.
+        {errors?.fileIds && (
+          <p
+            role="alert"
+            className="text-[13px] leading-[18px] text-destructive"
+          >
+            {errors.fileIds[0]}
           </p>
-        </CardHeader>
-        <CardContent>
-          {ownedFiles.length === 0 ? (
-            <p className="text-sm text-muted-foreground">
-              You don&apos;t have any files yet. You can create the project
-              now and add files after.
-            </p>
-          ) : (
-            <div className="grid gap-3 grid-cols-2 sm:grid-cols-3 md:grid-cols-4">
-              {ownedFiles.map((f) => (
-                <FileCard
-                  key={f.id}
-                  title={f.name}
-                  thumbnailUrl={f.thumbnailUrl}
-                  placeholder="No preview"
-                  selected={selected.includes(f.id)}
-                  onClick={() => toggle(f.id)}
-                />
-              ))}
-            </div>
-          )}
-          {errors?.fileIds && (
-            <p className="mt-2 text-xs text-destructive">
-              {errors.fileIds[0]}
-            </p>
-          )}
-        </CardContent>
-      </Card>
+        )}
+      </FormSection>
 
-      <div className="flex justify-end">
-        <Button type="submit" disabled={pending}>
-          {pending ? "Creating…" : "Create project"}
+      <FormActions className="border-t border-border pt-5">
+        <Button type="button" variant="secondary" render={<Link href="/" />}>
+          Cancel
         </Button>
-      </div>
+        <Button type="submit" loading={pending}>
+          Create project
+        </Button>
+      </FormActions>
     </form>
   );
 }

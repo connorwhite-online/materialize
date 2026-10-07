@@ -76,7 +76,7 @@ export function AddProjectFilesDialog({
 
   const toggle = (id: string) =>
     setSelected((prev) =>
-      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
     );
 
   const handleAdd = () => {
@@ -108,14 +108,14 @@ export function AddProjectFilesDialog({
       <DialogTrigger
         render={
           trigger ?? (
-            <Button variant="outline" size="sm">
+            <Button variant="secondary" size="sm">
               <Plus size={14} />
               Add files
             </Button>
           )
         }
       />
-      <DialogContent className="max-h-[90vh] w-full max-w-2xl overflow-y-auto sm:max-w-2xl">
+      <DialogContent className="max-h-[90vh] w-full overflow-y-auto sm:max-w-2xl">
         {picked ? (
           <>
             <DialogHeader className="min-w-0">
@@ -136,8 +136,8 @@ export function AddProjectFilesDialog({
             <DialogHeader className="min-w-0">
               <DialogTitle>Add files to this project</DialogTitle>
               <DialogDescription>
-                Upload a new file or pick from your library — buyers get
-                every file in the bundle.
+                Upload a new file or pick from your library — buyers get every
+                file in the bundle.
               </DialogDescription>
             </DialogHeader>
 
@@ -145,55 +145,59 @@ export function AddProjectFilesDialog({
               onFileSelected={(file, format) => setPicked({ file, format })}
             />
 
-            <div className="min-w-0 space-y-2">
-              <p className="text-xs font-medium text-muted-foreground">
-                {availableFiles.length > 0
-                  ? "Or add from your library"
-                  : "Your library"}
-              </p>
-              {availableFiles.length === 0 ? (
-                <p className="text-sm text-muted-foreground">
-                  No other files to add yet — upload one above.
-                </p>
-              ) : (
-                <div className="flex gap-3 overflow-x-auto pb-2">
-                  {availableFiles.map((f) => (
-                    <FileCard
-                      key={f.id}
-                      compact
-                      title={f.name}
-                      thumbnailUrl={f.thumbnailUrl}
-                      placeholder="No preview"
-                      selected={selected.includes(f.id)}
-                      onClick={() => toggle(f.id)}
-                    />
-                  ))}
+            {/* With nothing in the library to pick, the uploader is the
+                only action — no empty section, no disabled "Add files". */}
+            {availableFiles.length > 0 && (
+              <>
+                <div className="min-w-0 space-y-2">
+                  <p className="text-sm leading-5 font-medium">
+                    Or add from your library
+                  </p>
+                  <div className="flex gap-3 overflow-x-auto pb-2">
+                    {availableFiles.map((f) => (
+                      <FileCard
+                        key={f.id}
+                        compact
+                        title={f.name}
+                        thumbnailUrl={f.thumbnailUrl}
+                        placeholder="No preview"
+                        selected={selected.includes(f.id)}
+                        onClick={() => toggle(f.id)}
+                      />
+                    ))}
+                  </div>
+                  {error && (
+                    <p
+                      role="alert"
+                      className="text-[13px] leading-[18px] text-destructive"
+                    >
+                      {error}
+                    </p>
+                  )}
                 </div>
-              )}
-              {error && <p className="text-xs text-destructive">{error}</p>}
-            </div>
 
-            <DialogFooter>
-              <Button
-                type="button"
-                variant="ghost"
-                onClick={() => setOpen(false)}
-                disabled={pending}
-              >
-                Cancel
-              </Button>
-              <Button
-                type="button"
-                onClick={handleAdd}
-                disabled={pending || selected.length === 0}
-              >
-                {pending
-                  ? "Adding…"
-                  : selected.length > 0
-                    ? `Add ${selected.length} ${selected.length === 1 ? "file" : "files"}`
-                    : "Add files"}
-              </Button>
-            </DialogFooter>
+                <DialogFooter>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    onClick={() => setOpen(false)}
+                    disabled={pending}
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    type="button"
+                    onClick={handleAdd}
+                    loading={pending}
+                    disabled={selected.length === 0}
+                  >
+                    {selected.length > 0
+                      ? `Add ${selected.length} ${selected.length === 1 ? "file" : "files"}`
+                      : "Add files"}
+                  </Button>
+                </DialogFooter>
+              </>
+            )}
           </>
         )}
       </DialogContent>

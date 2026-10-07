@@ -56,7 +56,10 @@ export function Field({
         <Label htmlFor={htmlFor} className="justify-between">
           <span>{label}</span>
           {optional && (
-            <span className="text-xs font-normal text-subtle-foreground">
+            <span
+              aria-hidden
+              className="text-xs font-normal text-subtle-foreground"
+            >
               Optional
             </span>
           )}

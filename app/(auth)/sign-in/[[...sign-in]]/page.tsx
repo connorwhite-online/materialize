@@ -3,10 +3,8 @@
 import { useEffect } from "react";
 import { useAuth } from "@clerk/nextjs";
 import { useRouter, useSearchParams } from "next/navigation";
-import Link from "next/link";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { SignInForm } from "@/components/auth/sign-in-form";
-import { AnimatedWordmark } from "@/components/brand/logo";
+import { AuthLegal, AuthPage } from "@/components/auth/auth-shell";
 
 export default function SignInPage() {
   const { isLoaded: authLoaded, isSignedIn } = useAuth();
@@ -24,27 +22,13 @@ export default function SignInPage() {
     }
   }, [authLoaded, isSignedIn, router, redirectUrl]);
 
+  // No card: the column is the form (DESIGN_SYSTEM.md § Space). Same
+  // anatomy as the Vercel / ElevenLabs logins — mark, one heading,
+  // social, email, one primary action, quiet links.
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center px-4">
-      <Link
-        href="/"
-        aria-label="Materialize — home"
-        className="mb-8 text-foreground transition-opacity hover:opacity-80"
-      >
-        <AnimatedWordmark
-          animateOnMount
-          className="[--mz-h:14px] sm:[--mz-h:16px]"
-        />
-      </Link>
-
-      <Card className="w-full max-w-sm">
-        <CardHeader className="text-center">
-          <CardTitle className="text-xl">Sign in</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <SignInForm redirectUrl={redirectUrl} socialFirst />
-        </CardContent>
-      </Card>
-    </div>
+    <AuthPage>
+      <SignInForm redirectUrl={redirectUrl} socialFirst />
+      <AuthLegal className="mt-8" />
+    </AuthPage>
   );
 }
