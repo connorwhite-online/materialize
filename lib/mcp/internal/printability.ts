@@ -8,12 +8,25 @@ import {
   parseMeshTriangles,
   type MeshFormat,
 } from "@/lib/hashing/mesh-fingerprint";
-import { analyzeTriangles, type MeshAnalysis } from "@/lib/dfm/mesh-analysis";
+import {
+  analyzeTriangles,
+  sampleWallThickness,
+  type MeshAnalysis,
+  type WallSample,
+} from "@/lib/dfm/mesh-analysis";
+import {
+  processLimits,
+  withCatalogLimits,
+  type CatalogMaterialLimits,
+  type MaterialWithLimits,
+} from "@/lib/dfm/limits";
 import {
   assessIssues,
   assessMaterials,
+  assessProcesses,
   tipsFor,
   type MaterialFit,
+  type ProcessFit,
   type ModelFacts,
   type PrintIssue,
 } from "@/lib/dfm/printability";
@@ -67,17 +80,27 @@ async function loadModel(
   const { asset } = row;
   const unit = asset.fileUnit as "mm" | "cm" | "in";
   let analysis: MeshAnalysis | null = null;
+  let wall: WallSample | null = null;
   try {
     const bytes = await getObjectBytes(asset.storageKey);
     const triangles = parseMeshTriangles(bytes, asset.format as MeshFormat);
-    if (triangles) analysis = analyzeTriangles(triangles, unit);
+    if (triangles) {
+      analysis = analyzeTriangles(triangles, unit);
+      const closed =
+        analysis.topology !== null &&
+        analysis.topology.openEdges === 0 &&
+        analysis.topology.nonManifoldEdges === 0;
+      if (closed) {
+        wall = sampleWallThickness(triangles, unit, analysis.invertedNormals);
+      }
+    }
   } catch (err) {
     logError("mcp.printability.load", err);
   }
 
   if (analysis) {
     return {
-      facts: { bboxMm: analysis.bboxMm, analysis, declaredUnit: unit },
+      facts: { bboxMm: analysis.bboxMm, analysis, wall, declaredUnit: unit },
       filename: asset.originalFilename,
       coverage: "mesh",
     };
@@ -98,6 +121,42 @@ async function loadModel(
   };
 }
 
+
+/**
+ * CraftCloud's limits for every printing process and for each curated
+ * material, or the editorial numbers when the catalog can't be reached.
+ */
+async function catalogLimits(): Promise<{
+  materials: MaterialWithLimits[];
+  processes: ReturnType<typeof processLimits>;
+  fromCatalog: boolean;
+}> {
+  try {
+    const catalog = await getCraftCloudCatalog();
+    const list = Array.from(catalog.materialById.values());
+    const lookup = (presetId: string): CatalogMaterialLimits | null => {
+      const id = matchCraftCloudMaterialId(
+        presetId,
+        list.map((m) => ({ id: m.id, name: m.name }))
+      );
+      return id ? (catalog.materialById.get(id) ?? null) : null;
+    };
+    const processes = processLimits(list);
+    return {
+      materials: withCatalogLimits(MATERIALS, lookup, processes),
+      processes,
+      fromCatalog: true,
+    };
+  } catch (err) {
+    logError("mcp.printability.catalog", err);
+    return {
+      materials: withCatalogLimits(MATERIALS, () => null),
+      processes: [],
+      fromCatalog: false,
+    };
+  }
+}
+
 const round = (n: number, d = 2) => Number(n.toFixed(d));
 
 export interface PrintabilityResult {
@@ -109,11 +168,22 @@ export interface PrintabilityResult {
     triangles: number | null;
     watertight: boolean | null;
     shells: number | null;
-    estimatedWallThicknessMm: number | null;
+    /** Measured inward from sampled surface points. Null when not measurable. */
+    wallThickness: {
+      method: "ray-cast";
+      samplesMeasured: number;
+      thinnestMm: number;
+      thinEndMm: number;
+      medianMm: number;
+    } | null;
+    /** Volume over surface area: a rough average, used only without a measurement. */
+    averageThicknessMm: number | null;
   };
   issues: PrintIssue[];
   /** True when nothing blocks an order: no `blocker` issues. */
   printable: boolean;
+  /** Per CraftCloud process, judged on CraftCloud's own limits. */
+  processes: ProcessFit[];
   materials: MaterialFit[];
   bestFits: MaterialPick[];
   designTips: Array<{ method: string; tip: string }>;
@@ -136,19 +206,31 @@ export async function checkPrintabilityForUser(input: {
     };
   }
 
+  const limits = await catalogLimits();
   const issues = assessIssues(facts);
-  const materials = assessMaterials(facts);
+  const materials = assessMaterials(facts, limits.materials);
+  const processes = assessProcesses(facts, limits.processes);
   const notes = [
-    "Size limits and minimum walls are process-wide envelopes, not a promise from any one vendor. Final acceptance is the vendor's.",
+    limits.fromCatalog
+      ? "Minimum walls, minimum detail and largest builds are CraftCloud's published figures for each process. A vendor can still reject a part."
+      : "CraftCloud's catalog was unreachable, so limits are our own conservative figures.",
   ];
   if (coverage === "bounding-box") {
     notes.push(
       "Only the size was checked: this format isn't read for holes or wall thickness. Upload an STL, 3MF or OBJ for the full check."
     );
   }
-  if (a?.meanThicknessMm != null) {
+  if (facts.wall) {
     notes.push(
-      "Wall thickness is an estimate from volume and surface area. A low number is a real warning; a high one doesn't prove every wall is thick enough."
+      `Wall thickness was measured at ${facts.wall.samples} points spread over the surface. A feature thinner than the spacing between points can be missed, so a clean result is strong evidence rather than proof.`
+    );
+  } else if (a?.meanThicknessMm != null) {
+    notes.push(
+      "The mesh was too large to measure walls directly, so thickness is a rough average from volume and surface area. A low number is a real warning; a high one doesn't prove every wall is thick enough."
+    );
+  } else if (a) {
+    notes.push(
+      "Walls weren't measured because the mesh isn't closed. Fix the holes and check again."
     );
   }
 
@@ -167,11 +249,21 @@ export async function checkPrintabilityForUser(input: {
         ? a.topology.openEdges === 0 && a.topology.nonManifoldEdges === 0
         : null,
       shells: a?.topology?.shells ?? null,
-      estimatedWallThicknessMm:
+      wallThickness: facts.wall
+        ? {
+            method: "ray-cast",
+            samplesMeasured: facts.wall.samples,
+            thinnestMm: round(facts.wall.minMm),
+            thinEndMm: round(facts.wall.thinMm),
+            medianMm: round(facts.wall.medianMm),
+          }
+        : null,
+      averageThicknessMm:
         a?.meanThicknessMm != null ? round(a.meanThicknessMm) : null,
     },
     issues,
     printable: !issues.some((i) => i.severity === "blocker"),
+    processes,
     materials,
     bestFits: recommendMaterials({ fits: materials, limit: 3 }).picks,
     designTips: tipsFor(materials),
@@ -213,7 +305,7 @@ export async function recommendMaterialsForUser(
         "The file couldn't be measured yet, so the shortlist ignores its size."
       );
     } else {
-      fits = assessMaterials(loaded.facts);
+      fits = assessMaterials(loaded.facts, (await catalogLimits()).materials);
       basedOnFile = loaded.filename;
     }
   }

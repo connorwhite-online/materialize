@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { analyzeTriangles } from "../mesh-analysis";
-import { assessIssues, assessMaterials } from "../printability";
+import { analyzeTriangles, sampleWallThickness } from "../mesh-analysis";
+import { assessIssues, assessMaterials, assessProcesses } from "../printability";
 import { recommendMaterials } from "../recommend";
 
 /** Axis-aligned box [0,x]x[0,y]x[0,z] as 12 outward-facing triangles. */
@@ -123,5 +123,54 @@ describe("recommendMaterials", () => {
     const r = recommendMaterials({ needs: { flexibility: 5, strength: 5, heatResistance: 5 } });
     expect(r.picks).toEqual([]);
     expect(r.ruledOut.length).toBeGreaterThan(0);
+  });
+});
+
+describe("sampleWallThickness", () => {
+  /** A hollow box: outer shell plus an inward-facing inner shell. */
+  function hollowBox(size: number, wall: number): Float64Array {
+    const outer = box(size, size, size);
+    const inner = box(size - 2 * wall, size - 2 * wall, size - 2 * wall);
+    for (let i = 0; i < inner.length; i += 3) {
+      inner[i] += wall; inner[i + 1] += wall; inner[i + 2] += wall;
+    }
+    // Reverse winding so the cavity faces inward.
+    for (let i = 0; i < inner.length; i += 9) {
+      for (let c = 0; c < 3; c++) {
+        const a = inner[i + 3 + c];
+        inner[i + 3 + c] = inner[i + 6 + c];
+        inner[i + 6 + c] = a;
+      }
+    }
+    return new Float64Array([...outer, ...inner]);
+  }
+
+  it("measures a solid cube as its full width", () => {
+    const w = sampleWallThickness(box(20, 20, 20))!;
+    expect(w.medianMm).toBeCloseTo(20, 1);
+  });
+
+  it("measures the wall of a hollow box", () => {
+    const w = sampleWallThickness(hollowBox(30, 1.5))!;
+    expect(w.thinMm).toBeCloseTo(1.5, 1);
+    expect(w.medianMm).toBeCloseTo(1.5, 1);
+  });
+
+  it("is repeatable", () => {
+    const t = hollowBox(30, 1.5);
+    expect(sampleWallThickness(t)!.medianMm).toBe(sampleWallThickness(t)!.medianMm);
+  });
+
+  it("judges walls against the process minimum", () => {
+    const t = hollowBox(30, 0.4);
+    const analysis = analyzeTriangles(t);
+    const wall = sampleWallThickness(t);
+    const facts = { bboxMm: analysis.bboxMm, analysis, wall, declaredUnit: "mm" as const };
+    const fits = assessProcesses(facts, [
+      { process: "SLS", minWallMm: 0.8, minDetailMm: 0.3, maxBuildMm: [700, 380, 580], materialCount: 1 },
+      { process: "High-Detail SLM", minWallMm: 0.2, minDetailMm: 0.1, maxBuildMm: null, materialCount: 1 },
+    ]);
+    expect(fits[0].verdict).toBe("no");
+    expect(fits[1].verdict).toBe("good");
   });
 });

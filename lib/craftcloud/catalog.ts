@@ -59,6 +59,19 @@ export interface CatalogMaterial {
   // Some materials omit it entirely (e.g. material types where build
   // size is vendor-dependent rather than process-bounded).
   maximumPrintingDimensions?: [number, number, number];
+  /**
+   * The processes this material is made with, each carrying CraftCloud's
+   * own design limits (mm). Null/absent for non-printing technologies
+   * (CNC, casting) and a few processes with no published figure.
+   */
+  printingMethods?: Array<{
+    id: string;
+    name: string;
+    fullName?: string;
+    minWallThickness?: number | null;
+    minDetails?: number | null;
+    clearance?: number | null;
+  }>;
   tags?: Array<{ id: string; name: string; originalName?: string }>;
   finishGroups: FinishGroup[];
   // Mechanical / thermal / print properties — ranges where CraftCloud

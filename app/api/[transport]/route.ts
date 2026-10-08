@@ -17,6 +17,7 @@ import {
   recommendMaterialsForUser,
 } from "@/lib/mcp/internal/printability";
 import type { Needs } from "@/lib/dfm/recommend";
+import { designLimits } from "@/lib/craftcloud/design-limits";
 import {
   requestUploadUrlForUser,
   registerUploadForUser,
@@ -431,6 +432,9 @@ const handler = createMcpHandler(
               warpingRisk: material.warpingRisk ?? null,
             },
             buildVolumeMm: material.maximumPrintingDimensions ?? null,
+            // CraftCloud's own minimums per process, in mm. Design to
+            // these: thinner walls fail or get rejected.
+            designLimits: designLimits(material),
             finishes: (material.finishGroups ?? []).map((fg) => ({
               id: fg.id,
               name: fg.name,
@@ -452,7 +456,7 @@ const handler = createMcpHandler(
       {
         title: "Check a model before printing",
         description:
-          "Check an uploaded model for problems that make prints fail, and see which materials it suits. Reports size, holes in the surface, loose pieces, flipped faces, probable unit mistakes, and thin walls, each with how to fix it, plus a good/risky/no verdict per material and design tips for the processes that fit. Run this after upload and before materialize_get_quote, and fix blockers first: a quote for a broken mesh gets rejected by the vendor after you've told the user a price. Wall thickness is an estimate and process limits are conservative envelopes, not a vendor's guarantee.",
+          "Check an uploaded model for problems that make prints fail, and see which materials it suits. Reports size, holes in the surface, loose pieces, flipped faces, probable unit mistakes, and thin walls, each with how to fix it, plus a good/risky/no verdict per material and design tips for the processes that fit. Run this after upload and before materialize_get_quote, and fix blockers first: a quote for a broken mesh gets rejected by the vendor after you've told the user a price. Walls are measured at sample points over the surface and judged against CraftCloud's published minimums for each process; a vendor can still reject a part.",
         inputSchema: {
           fileAssetId: z
             .string()

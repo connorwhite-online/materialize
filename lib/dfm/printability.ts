@@ -19,7 +19,8 @@ import {
   type MaterialMetadata,
   type PrintingMethod,
 } from "@/lib/materials/preset-library";
-import type { MeshAnalysis } from "./mesh-analysis";
+import type { MeshAnalysis, WallSample } from "./mesh-analysis";
+import type { MaterialWithLimits, ProcessLimits } from "./limits";
 
 export type Severity = "blocker" | "warning" | "info";
 
@@ -38,6 +39,17 @@ export interface MaterialFit {
   method: PrintingMethod;
   verdict: Verdict;
   reasons: string[];
+  /** Where the size and wall limits came from. */
+  limitsFrom?: "craftcloud" | "editorial";
+}
+
+export interface ProcessFit {
+  process: string;
+  minWallMm: number;
+  minDetailMm: number | null;
+  maxBuildMm: [number, number, number] | null;
+  verdict: Verdict;
+  reasons: string[];
 }
 
 export interface ModelFacts {
@@ -45,6 +57,8 @@ export interface ModelFacts {
   bboxMm: { x: number; y: number; z: number };
   /** null when the format isn't parsed (STEP, AMF) or the parse failed. */
   analysis: MeshAnalysis | null;
+  /** Measured wall thickness, when the mesh was closed and light enough. */
+  wall?: WallSample | null;
   /** The unit the file was declared in, used to suggest a unit fix. */
   declaredUnit: "mm" | "cm" | "in";
 }
@@ -155,63 +169,121 @@ export function assessIssues(facts: ModelFacts): PrintIssue[] {
   return issues;
 }
 
+/** Share of measured wall samples thinner than `minMm`. */
+function thinShare(wall: WallSample | null | undefined, minMm: number): number {
+  if (!wall) return 0;
+  let lo = 0, hi = wall.sorted.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (wall.sorted[mid] < minMm) lo = mid + 1;
+    else hi = mid;
+  }
+  return lo / wall.sorted.length;
+}
+
 /**
- * Verdict per material. `verdict` is the WORST thing found for that
- * material: `no` means it cannot be made as modelled, `risky` means it
+ * The one judgement both the per-material and per-process views use:
+ * does the part fit the machine, and are its walls thick enough for the
+ * process. `no` means it cannot be made as modelled; `risky` means it
  * probably can with a design change or a vendor's say-so.
  */
-export function assessMaterials(
+function judge(
   facts: ModelFacts,
-  materials: readonly MaterialMetadata[] = MATERIALS
-): MaterialFit[] {
-  const { bboxMm, analysis } = facts;
+  limits: {
+    label: string;
+    minWallMm: number;
+    maxBuildMm: readonly [number, number, number] | null;
+  }
+): { verdict: Verdict; reasons: string[] } {
+  const { bboxMm, analysis, wall } = facts;
   const dims = [bboxMm.x, bboxMm.y, bboxMm.z] as const;
   const thinnestSide = Math.min(...dims);
-  const thickness = analysis?.meanThicknessMm ?? null;
+  const reasons: string[] = [];
+  let verdict: Verdict = "good";
+  const worsen = (v: Verdict) => {
+    verdict = v === "no" || verdict === "no" ? "no" : "risky";
+  };
 
+  if (limits.maxBuildMm && !modelFitsInVolume(dims, limits.maxBuildMm)) {
+    worsen("no");
+    reasons.push(
+      `Too big: needs ${dims.map(fmt).join(" x ")} mm, the largest ${limits.label} build is ${limits.maxBuildMm.join(" x ")} mm (any orientation).`
+    );
+  }
+  const min = limits.minWallMm;
+  if (thinnestSide > 0 && thinnestSide < min * 0.5) {
+    worsen("no");
+    reasons.push(
+      `Too thin: ${fmt(thinnestSide)} mm on its smallest side, and ${limits.label} needs ${min} mm.`
+    );
+  } else if (thinnestSide > 0 && thinnestSide < min) {
+    worsen("risky");
+    reasons.push(
+      `Borderline thin: ${fmt(thinnestSide)} mm on its smallest side against a ${min} mm minimum for ${limits.label}.`
+    );
+  }
+
+  if (wall) {
+    const share = thinShare(wall, min);
+    if (share >= 0.5) {
+      worsen("no");
+      reasons.push(
+        `Walls too thin: ${Math.round(share * 100)}% of ${wall.samples} measured points are under the ${min} mm ${limits.label} minimum (median wall ${fmt(wall.medianMm)} mm).`
+      );
+    } else if (share >= 0.03) {
+      worsen("risky");
+      reasons.push(
+        `Some walls too thin: ${Math.round(share * 100)}% of ${wall.samples} measured points are under the ${min} mm ${limits.label} minimum (thinnest ${fmt(wall.minMm)} mm). Thicken those areas.`
+      );
+    }
+  } else if (analysis?.meanThicknessMm != null && analysis.meanThicknessMm < min) {
+    worsen("risky");
+    reasons.push(
+      `Walls look thin: average thickness is about ${fmt(analysis.meanThicknessMm)} mm (volume over surface area) against ${min} mm for ${limits.label}.`
+    );
+  }
+  if (!reasons.length) reasons.push("Fits the build volume and the wall minimum.");
+  return { verdict, reasons };
+}
+
+export function assessMaterials(
+  facts: ModelFacts,
+  materials: ReadonlyArray<MaterialMetadata | MaterialWithLimits> = MATERIALS
+): MaterialFit[] {
   return materials.map((m) => {
-    const reasons: string[] = [];
-    let verdict: Verdict = "good";
-    const worsen = (v: Verdict) => {
-      if (v === "no" || verdict === "no") verdict = "no";
-      else verdict = "risky";
-    };
-
     const c = m.constraints;
-    const volume = [c.maxDimensions.x, c.maxDimensions.y, c.maxDimensions.z] as const;
-    if (!modelFitsInVolume(dims, volume)) {
-      worsen("no");
-      reasons.push(
-        `Too big: needs ${dims.map(fmt).join(" x ")} mm, the largest ${m.method} build is ${volume.join(" x ")} mm (any orientation).`
-      );
-    }
-    if (thinnestSide > 0 && thinnestSide < c.minWallThickness * 0.5) {
-      worsen("no");
-      reasons.push(
-        `Too thin: the part is ${fmt(thinnestSide)} mm on its smallest side and ${m.method} needs about ${c.minWallThickness} mm.`
-      );
-    } else if (thinnestSide > 0 && thinnestSide < c.minWallThickness) {
-      worsen("risky");
-      reasons.push(
-        `Borderline thin: ${fmt(thinnestSide)} mm on its smallest side against a ${c.minWallThickness} mm minimum for ${m.method}.`
-      );
-    }
-    if (thickness !== null && thickness < c.minWallThickness) {
-      worsen("risky");
-      reasons.push(
-        `Walls look thin: average thickness is about ${fmt(thickness)} mm (an estimate) against ${c.minWallThickness} mm needed. Thicken thin ribs and shells, or pick a finer process.`
-      );
-    }
-    if (!reasons.length) reasons.push("Fits the build volume and the wall minimum.");
-
+    const { verdict, reasons } = judge(facts, {
+      label: m.method,
+      minWallMm: c.minWallThickness,
+      maxBuildMm: [c.maxDimensions.x, c.maxDimensions.y, c.maxDimensions.z],
+    });
     return {
       materialId: m.id,
       name: m.name,
       method: m.method,
       verdict,
       reasons,
+      ...("limitsFrom" in m ? { limitsFrom: m.limitsFrom } : {}),
     };
   });
+}
+
+/** The same check per CraftCloud process, with the catalog's own limits. */
+export function assessProcesses(
+  facts: ModelFacts,
+  processes: readonly ProcessLimits[]
+): ProcessFit[] {
+  return processes.map((p) => ({
+    process: p.process,
+    minWallMm: p.minWallMm,
+    minDetailMm: p.minDetailMm,
+    maxBuildMm: p.maxBuildMm,
+    ...judge(facts, {
+      label: p.process,
+      minWallMm: p.minWallMm,
+      maxBuildMm: p.maxBuildMm,
+    }),
+  }));
 }
 
 /** Short, process-specific design advice, only for processes in play. */

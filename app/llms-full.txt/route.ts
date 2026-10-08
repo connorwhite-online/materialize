@@ -5,6 +5,7 @@
  */
 
 import { getCraftCloudCatalog } from "@/lib/craftcloud/catalog";
+import { designLimits, formatLimit } from "@/lib/craftcloud/design-limits";
 import { deriveAppUrl } from "@/lib/utils/request-url";
 
 export async function GET() {
@@ -43,6 +44,11 @@ export async function GET() {
         const [x, y, z] = m.maximumPrintingDimensions;
         props.push(`max build volume ${x}×${y}×${z} mm`);
       }
+      const limits = designLimits(m);
+      const wall = formatLimit(limits, (l) => l.minWallMm);
+      const detail = formatLimit(limits, (l) => l.minDetailMm);
+      if (wall) props.push(`min wall thickness ${wall}`);
+      if (detail) props.push(`min detail size ${detail}`);
       if (m.warpingRisk) props.push(`warping risk: ${m.warpingRisk}`);
       if (props.length) lines.push(`- properties: ${props.join("; ")}`);
       const finishes = (m.finishGroups ?? []).map((fg) => fg.name);

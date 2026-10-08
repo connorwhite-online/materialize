@@ -182,3 +182,142 @@ function analyzeTopology(
 
   return { openEdges: open, nonManifoldEdges: nonManifold, shells: roots.size };
 }
+
+/**
+ * Wall thickness MEASURED at sample points, not inferred from volume.
+ *
+ * Points are drawn over the surface (area-weighted, fixed seed so the same
+ * file always gives the same answer), and from each one a ray goes inward
+ * along the face normal to the first surface it meets: that distance is the
+ * wall there. It is the method the CAD runner's DFM check uses
+ * (`cad-runner/dfm.py`).
+ *
+ * It is sampled, so a feature thinner than the sample spacing can slip
+ * through; `samples` says how many points were measured. It needs a closed
+ * mesh with consistent winding, so it returns null when the mesh has holes,
+ * is too heavy for the time budget, or no ray hit anything.
+ */
+export interface WallSample {
+  samples: number;
+  /** Thinnest single sample. Noisy: one sliver face can set it. */
+  minMm: number;
+  /** 5th percentile: the thin end, with sliver noise dropped. */
+  thinMm: number;
+  medianMm: number;
+  /** All measured thicknesses, ascending, for per-material fractions. */
+  sorted: Float32Array;
+}
+
+/** Ray-triangle tests allowed per call (rays x triangles). ~1.5s of JS. */
+const RAY_BUDGET = 1.5e8;
+const MAX_RAYS = 1500;
+const MIN_RAYS = 150;
+
+export function sampleWallThickness(
+  triangles: Float64Array,
+  unit: keyof typeof UNIT_TO_MM = "mm",
+  invertedNormals = false
+): WallSample | null {
+  const n = Math.floor(triangles.length / 9);
+  if (n === 0) return null;
+  const rays = Math.min(MAX_RAYS, Math.floor(RAY_BUDGET / n));
+  if (rays < MIN_RAYS) return null;
+
+  const k = UNIT_TO_MM[unit];
+  const t = new Float64Array(n * 9);
+  for (let i = 0; i < t.length; i++) t[i] = triangles[i] * k;
+
+  // Cumulative area for area-weighted picks.
+  const cum = new Float64Array(n);
+  let total = 0;
+  for (let i = 0; i < n; i++) {
+    const o = i * 9;
+    const ux = t[o + 3] - t[o], uy = t[o + 4] - t[o + 1], uz = t[o + 5] - t[o + 2];
+    const vx = t[o + 6] - t[o], vy = t[o + 7] - t[o + 1], vz = t[o + 8] - t[o + 2];
+    const cx = uy * vz - uz * vy, cy = uz * vx - ux * vz, cz = ux * vy - uy * vx;
+    total += 0.5 * Math.sqrt(cx * cx + cy * cy + cz * cz);
+    cum[i] = total;
+  }
+  if (total <= 0) return null;
+
+  let seed = 0x9e3779b9;
+  const rand = () => {
+    seed = (seed + 0x6d2b79f5) | 0;
+    let x = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+    x ^= x + Math.imul(x ^ (x >>> 7), 61 | x);
+    return ((x ^ (x >>> 14)) >>> 0) / 4294967296;
+  };
+
+  const flip = invertedNormals ? -1 : 1;
+  const out: number[] = [];
+  for (let r = 0; r < rays; r++) {
+    // Area-weighted triangle pick.
+    const target = rand() * total;
+    let lo = 0, hi = n - 1;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (cum[mid] < target) lo = mid + 1;
+      else hi = mid;
+    }
+    const o = lo * 9;
+    const ax = t[o], ay = t[o + 1], az = t[o + 2];
+    const ux = t[o + 3] - ax, uy = t[o + 4] - ay, uz = t[o + 5] - az;
+    const vx = t[o + 6] - ax, vy = t[o + 7] - ay, vz = t[o + 8] - az;
+    let nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+    const len = Math.sqrt(nx * nx + ny * ny + nz * nz);
+    if (len < 1e-12) continue;
+    nx = (nx / len) * flip; ny = (ny / len) * flip; nz = (nz / len) * flip;
+
+    // Uniform point in the triangle.
+    let a = rand(), b = rand();
+    if (a + b > 1) { a = 1 - a; b = 1 - b; }
+    const px = ax + a * ux + b * vx, py = ay + a * uy + b * vy, pz = az + a * uz + b * vz;
+
+    // Inward ray, nudged off the surface so it doesn't hit its own face.
+    const eps = 1e-3;
+    const dx = -nx, dy = -ny, dz = -nz;
+    const ox = px + dx * eps, oy = py + dy * eps, oz = pz + dz * eps;
+    const hit = nearestHit(t, n, ox, oy, oz, dx, dy, dz);
+    if (hit !== null) out.push(hit + eps);
+  }
+  if (out.length < MIN_RAYS / 2) return null;
+
+  const sorted = Float32Array.from(out).sort();
+  const at = (q: number) => sorted[Math.min(sorted.length - 1, Math.floor(q * sorted.length))];
+  return {
+    samples: sorted.length,
+    minMm: sorted[0],
+    thinMm: at(0.05),
+    medianMm: at(0.5),
+    sorted,
+  };
+}
+
+/** Moller-Trumbore against every triangle; nearest positive hit or null. */
+function nearestHit(
+  t: Float64Array,
+  n: number,
+  ox: number, oy: number, oz: number,
+  dx: number, dy: number, dz: number
+): number | null {
+  let best = Infinity;
+  for (let i = 0; i < n; i++) {
+    const o = i * 9;
+    const ax = t[o], ay = t[o + 1], az = t[o + 2];
+    const e1x = t[o + 3] - ax, e1y = t[o + 4] - ay, e1z = t[o + 5] - az;
+    const e2x = t[o + 6] - ax, e2y = t[o + 7] - ay, e2z = t[o + 8] - az;
+    const hx = dy * e2z - dz * e2y, hy = dz * e2x - dx * e2z, hz = dx * e2y - dy * e2x;
+    const det = e1x * hx + e1y * hy + e1z * hz;
+    if (det > -1e-12 && det < 1e-12) continue;
+    const inv = 1 / det;
+    const sx = ox - ax, sy = oy - ay, sz = oz - az;
+    const u = inv * (sx * hx + sy * hy + sz * hz);
+    if (u < 0 || u > 1) continue;
+    const qx = sy * e1z - sz * e1y, qy = sz * e1x - sx * e1z, qz = sx * e1y - sy * e1x;
+    const v = inv * (dx * qx + dy * qy + dz * qz);
+    if (v < 0 || u + v > 1) continue;
+    const d = inv * (e2x * qx + e2y * qy + e2z * qz);
+    if (d > 1e-6 && d < best) best = d;
+  }
+  return best === Infinity ? null : best;
+}
