@@ -76,6 +76,7 @@ vi.mock("@clerk/nextjs/server", () => ({
 import {
   clerkIssuerUrl,
   clientNameFromMetadataUrl,
+  toEpochSeconds,
   verifyOAuthAccessToken,
   OAUTH_CONNECTION_SCOPES,
 } from "../oauth";
@@ -263,5 +264,16 @@ describe("clientNameFromMetadataUrl", () => {
   it("returns null for an ordinary Clerk client id or a non-https URL", () => {
     expect(clientNameFromMetadataUrl("SCamTHu6rYwGs0nT")).toBeNull();
     expect(clientNameFromMetadataUrl("http://chatgpt.com/oauth/client.json")).toBeNull();
+  });
+});
+
+describe("toEpochSeconds", () => {
+  it("converts Clerk's millisecond expirations and keeps second ones as they are", () => {
+    const seconds = Date.UTC(2030, 0, 1) / 1000;
+    expect(toEpochSeconds(seconds * 1000)).toBe(seconds);
+    // A seconds value must not be divided again: that lands in 1970 and
+    // mcp-handler 401s every request as expired.
+    expect(toEpochSeconds(seconds)).toBe(seconds);
+    expect(toEpochSeconds(null)).toBeUndefined();
   });
 });
