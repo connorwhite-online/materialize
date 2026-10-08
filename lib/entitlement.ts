@@ -207,7 +207,7 @@ export async function userOwnsProject(
  * Printing is allowed for the asset's owner OR any published listing
  * (the public "Print with X" path). Blocks ordering / carting another
  * user's private or draft asset by a guessed id. Mirrors the gate in
- * `app/api/craftcloud/quotes/route.ts`.
+ * `app/api/quotes/route.ts`.
  */
 export async function userCanPrintAsset(
   userId: string | null,

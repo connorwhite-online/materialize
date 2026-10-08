@@ -55,6 +55,9 @@ describe("PUBLIC_ROUTES — genuinely public surfaces", () => {
     "/api/search?q=x",
     "/api/webhooks/stripe",
     "/api/upload/anon-presign",
+    // Anon quote flow: start, then poll, before any session exists.
+    "/api/quotes",
+    "/api/quotes/poll?priceId=x",
     "/api/cron/place-auto-approved-orders",
     "/llms.txt",
     "/sitemap.xml",

@@ -4,14 +4,12 @@ import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { fileAssets, files } from "@/lib/db/schema";
 import {
-  createPriceRequest,
-  getPrice,
-  CraftCloudApiError,
-} from "@/lib/craftcloud/client";
-import {
-  getCraftCloudCatalog,
-  getProviderIndex,
-} from "@/lib/craftcloud/catalog";
+  getQuoteProvider,
+  QuoteModelNotReadyError,
+  QuoteModelRejectedError,
+  type QuoteSnapshot,
+  type QuoteSnapshotStats,
+} from "@/lib/quotes";
 
 export interface AgentQuote {
   priceId: string;
@@ -68,39 +66,35 @@ export async function getQuoteForUser(
   if (assetRow.ownerId !== input.userId && assetRow.fileStatus !== "published") {
     return { error: "Forbidden" };
   }
-  if (!assetRow.asset.craftCloudModelId) {
-    return {
-      error:
-        "File is still being prepared for printing. Try again in a few seconds.",
-    };
-  }
 
   const currency = input.currency ?? "USD";
   const countryCode = input.countryCode ?? "US";
   const quantity = input.quantity ?? 1;
+  const provider = getQuoteProvider();
 
-  let materialConfigIds: string[] | undefined;
-  if (input.materialId) {
-    const catalog = await getCraftCloudCatalog();
-    const material = catalog.materialById.get(input.materialId);
-    if (!material) return { error: "Unknown materialId" };
-    materialConfigIds = (material.finishGroups ?? []).flatMap((fg) =>
-      fg.materialConfigs.map((c) => c.id)
-    );
+  if (input.materialId && !(await provider.hasMaterial(input.materialId))) {
+    return { error: "Unknown materialId" };
   }
 
   let priceId: string;
   try {
-    const res = await createPriceRequest({
+    const res = await provider.startQuote({
+      model: { kind: "asset", asset: assetRow.asset },
       currency,
       countryCode,
-      models: [{ modelId: assetRow.asset.craftCloudModelId, quantity }],
-      materialConfigIds,
+      quantity,
+      materialId: input.materialId,
     });
     priceId = res.priceId;
   } catch (error) {
-    if (error instanceof CraftCloudApiError && error.isQuoteExpired()) {
-      return { error: "Quote request rejected by CraftCloud (stale model). Re-upload and retry." };
+    if (error instanceof QuoteModelNotReadyError) {
+      return {
+        error:
+          "File is still being prepared for printing. Try again in a few seconds.",
+      };
+    }
+    if (error instanceof QuoteModelRejectedError) {
+      return { error: "Quote request rejected (stale model). Re-upload and retry." };
     }
     throw error;
   }
@@ -108,58 +102,47 @@ export async function getQuoteForUser(
   const startedAt = Date.now();
   let lastCount = -1;
   let stableStreak = 0;
-  let lastSnapshot: Awaited<ReturnType<typeof getPrice>> | null = null;
+  let last: { snapshot: QuoteSnapshot; stats: QuoteSnapshotStats } | null =
+    null;
 
   while (Date.now() - startedAt < POLL_DEADLINE_MS) {
-    const snapshot = await getPrice(priceId);
-    lastSnapshot = snapshot;
-    const count = snapshot.quotes?.length ?? 0;
+    last = await provider.getSnapshot(priceId);
+    const count = last.snapshot.quotes.length;
 
-    if (snapshot.allComplete && count === lastCount) {
+    if (last.snapshot.allComplete && count === lastCount) {
       stableStreak += 1;
       if (stableStreak >= STABLE_POLLS_REQUIRED) break;
     } else {
-      stableStreak = snapshot.allComplete && count === lastCount ? stableStreak : 0;
+      stableStreak = 0;
     }
     lastCount = count;
 
     await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
   }
 
-  if (!lastSnapshot) return { error: "No quotes returned" };
+  if (!last) return { error: "No quotes returned" };
 
-  const [catalog, providers] = await Promise.all([
-    getCraftCloudCatalog(),
-    getProviderIndex(),
-  ]);
-
-  const shippings = lastSnapshot.shippings ?? lastSnapshot.shipping ?? [];
-  const shippingByVendor = new Map<string, (typeof shippings)[number]>();
-  for (const s of shippings) {
+  const shippingByVendor = new Map<
+    string,
+    QuoteSnapshot["shipping"][number]
+  >();
+  for (const s of last.snapshot.shipping) {
     if (!shippingByVendor.has(s.vendorId)) shippingByVendor.set(s.vendorId, s);
   }
 
-  const quotes: AgentQuote[] = [];
-  let dropped = 0;
-  for (const q of lastSnapshot.quotes ?? []) {
-    const entry = catalog.configById.get(q.materialConfigId);
-    if (!entry) {
-      dropped += 1;
-      continue;
-    }
-    const provider = providers.get(q.vendorId);
+  const quotes: AgentQuote[] = last.snapshot.quotes.map((q) => {
     const shipping = shippingByVendor.get(q.vendorId);
-    quotes.push({
+    return {
       priceId,
       quoteId: q.quoteId,
       vendorId: q.vendorId,
-      vendorName: provider?.name ?? q.vendorId,
-      materialId: entry.material.id,
-      materialName: entry.material.name,
-      finishGroupId: entry.finishGroup.id,
-      finishGroupName: entry.finishGroup.name,
-      materialConfigId: entry.config.id,
-      color: entry.config.color,
+      vendorName: q.vendorName,
+      materialId: q.materialId,
+      materialName: q.materialName,
+      finishGroupId: q.finishGroupId,
+      finishGroupName: q.finishGroupName,
+      materialConfigId: q.materialConfigId,
+      color: q.color,
       priceCents: Math.round(q.price * 100),
       currency: q.currency ?? currency,
       shippingId: shipping?.shippingId ?? null,
@@ -167,10 +150,11 @@ export async function getQuoteForUser(
         shipping?.price != null ? Math.round(shipping.price * 100) : null,
       productionTimeFastDays: q.productionTimeFast ?? null,
       productionTimeSlowDays: q.productionTimeSlow ?? null,
-    });
-  }
+    };
+  });
 
   const warnings: string[] = [];
+  const dropped = last.stats.droppedCount;
   if (dropped > 0) {
     warnings.push(
       `${dropped} quote(s) referenced material configs not in our catalog and were dropped`

@@ -67,6 +67,9 @@ export const PUBLIC_ROUTES = [
   "/u/(.*)",
   "/api/webhooks(.*)",
   "/api/craftcloud/(.*)",
+  // Quote start + poll. Anon visitors price a model before OTP signup
+  // runs; the start route does its own asset ownership check.
+  "/api/quotes(.*)",
   // Anon draft /print stages the STL in R2 before the server relays
   // it to CraftCloud. The route self-gates via a one-time grant —
   // auth.protect() would redirect visitors to sign-in and kill the

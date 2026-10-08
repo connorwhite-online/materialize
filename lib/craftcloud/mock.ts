@@ -101,7 +101,7 @@ function quantityFromPriceId(priceId: string): number {
 
 /**
  * Slim catalog slice used to seed mock quotes with real CraftCloud
- * materialConfigIds. Without this, /api/craftcloud/quotes/poll drops
+ * materialConfigIds. Without this, /api/quotes/poll drops
  * every mock quote (the hardcoded pla-white ids are not in the
  * catalog) and the picker never leaves the empty state.
  */

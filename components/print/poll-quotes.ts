@@ -1,19 +1,6 @@
-import type { EnrichedQuote } from "./material-picker/types";
+import type { QuoteSnapshot } from "@/lib/quotes/types";
 
-interface ShippingOption {
-  shippingId: string;
-  vendorId: string;
-  name: string;
-  deliveryTime: number;
-  price: number;
-  type: "standard" | "express";
-}
-
-export interface QuoteSnapshot {
-  quotes: EnrichedQuote[];
-  shipping: ShippingOption[];
-  allComplete: boolean;
-}
+export type { QuoteSnapshot };
 
 /**
  * Why the poll loop exited. The UI uses this to distinguish "we have
@@ -79,7 +66,7 @@ export function wait(ms: number, signal: AbortSignal): Promise<void> {
 }
 
 /**
- * Poll /api/craftcloud/quotes/poll until the quote set stabilises.
+ * Poll /api/quotes/poll until the quote set stabilises.
  *
  * **Termination invariant** — we do NOT trust CraftCloud's
  * `allComplete` flag alone. It can flip true while late-arriving
@@ -119,7 +106,7 @@ export async function pollQuotes({
       let pollRes: Response;
       try {
         pollRes = await fetch(
-          `/api/craftcloud/quotes/poll?priceId=${encodeURIComponent(priceId)}`,
+          `/api/quotes/poll?priceId=${encodeURIComponent(priceId)}`,
           { signal }
         );
       } catch (err) {
