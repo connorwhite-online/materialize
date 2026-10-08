@@ -85,6 +85,29 @@ export async function fingerprintFromStream(
   return computeFingerprintFromTriangles(byteHash, triangles, unit);
 }
 
+/**
+ * Parse raw model bytes into a flat triangle list (9 floats per triangle,
+ * file units). Returns null for formats we don't parse (step/amf) and for
+ * files that fail to parse, so callers can degrade to bounding-box data.
+ */
+export function parseMeshTriangles(
+  buf: Uint8Array,
+  format: MeshFormat
+): Float64Array | null {
+  if (!PARSEABLE_FORMATS.has(format)) return null;
+  try {
+    const t =
+      format === "stl"
+        ? parseStl(buf)
+        : format === "obj"
+          ? parseObj(buf)
+          : parse3mf(buf);
+    return t.length > 0 ? t : null;
+  } catch {
+    return null;
+  }
+}
+
 // Test seam: callers with already-parsed triangles (e.g. a future
 // 3mf/amf parser, or unit tests) can skip the IO/parse and feed the
 // raw triangle list directly.

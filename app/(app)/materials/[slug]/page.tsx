@@ -15,6 +15,7 @@ import {
   type CatalogMaterial,
 } from "@/lib/craftcloud/catalog";
 import { safeJsonLdScript } from "@/lib/seo/json-ld";
+import { designLimits, formatLimit } from "@/lib/craftcloud/design-limits";
 
 function truncate(s: string, n: number) {
   return s.length > n ? `${s.slice(0, n - 1).trimEnd()}…` : s;
@@ -67,6 +68,9 @@ export default async function MaterialDetailPage(props: {
   const { material, group } = hit;
 
   const tags = material.tags ?? [];
+  const limits = designLimits(material);
+  const minWall = formatLimit(limits, (l) => l.minWallMm);
+  const minDetail = formatLimit(limits, (l) => l.minDetailMm);
   const appUrl =
     process.env.NEXT_PUBLIC_APP_URL ?? "https://materialize.cc";
   const printUrl = `${appUrl}/print?material=${material.id}`;
@@ -121,6 +125,14 @@ export default async function MaterialDetailPage(props: {
             name: "Heat deflection (66 PSI)",
             value: material.heatDeflectionTemp66PSIMax,
             unitText: "°C",
+          }
+        : null,
+      limits.length
+        ? {
+            "@type": "PropertyValue",
+            name: "Minimum wall thickness",
+            value: Math.min(...limits.map((l) => l.minWallMm)),
+            unitText: "mm",
           }
         : null,
     ].filter(Boolean),
@@ -282,6 +294,8 @@ export default async function MaterialDetailPage(props: {
                 </p>
               </div>
             )}
+            {minWall && <Row label="Min wall thickness" value={minWall} />}
+            {minDetail && <Row label="Min detail size" value={minDetail} />}
             {hasNumber(material.defaultLayerHeight) && (
               <Row
                 label="Default layer height"

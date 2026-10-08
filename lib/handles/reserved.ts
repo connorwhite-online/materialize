@@ -50,6 +50,7 @@ export const RESERVED_HANDLES = new Set<string>([
   "favicon.ico",
   "llms.txt",
   "llms-full.txt",
+  "agents.txt",
   // Future-proof claims — short, generic, likely to ship
   "about",
   "pricing",

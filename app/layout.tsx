@@ -6,6 +6,7 @@ import { AuthModalProvider } from "@/components/auth/auth-modal";
 import { ThemeProvider } from "@/components/theme-provider";
 import { PendingPrintFileProvider } from "@/components/upload/pending-print-file";
 import { PageTransitionLoader } from "@/components/nav/page-transition-loader";
+import { AGENT_NOTE, LLMS_TXT_PATH } from "@/lib/seo/agent-discovery";
 
 // Body text and headings share the system font stack (globals.css).
 //
@@ -56,6 +57,8 @@ const SITE_DESCRIPTION =
 
 export const metadata: Metadata = {
   metadataBase: new URL(APP_URL),
+  // <link rel="alternate" type="text/markdown"> on every page: the agent guide.
+  alternates: { types: { "text/markdown": LLMS_TXT_PATH } },
   title: {
     default: DEFAULT_TITLE,
     template: `%s · ${SITE_NAME}`,
@@ -163,6 +166,9 @@ export default function RootLayout({
         suppressHydrationWarning
       >
         <body className="min-h-full flex flex-col">
+          <p className="sr-only" aria-hidden="true">
+            {AGENT_NOTE}
+          </p>
           <MotionConfig reducedMotion="user">
             <ThemeProvider>
               <AuthModalProvider>

@@ -20,10 +20,12 @@ export function llmsTxt(url: string): string {
    - Attached in chat or at a public https URL: \`materialize_import_model\`.
    - Local file: \`materialize_request_upload_url\`, PUT the bytes, then \`materialize_register_upload\`.
    - Already uploaded: \`materialize_list_files\`.
-2. Price it: \`materialize_get_quote\` with the \`fileAssetId\`. Pass \`materialId\` (from \`materialize_list_materials\`) when the user has a material in mind; it is much faster. Prices are USD, cheapest first, and include vendor, finish, color and lead time.
-3. Order: \`materialize_create_order\` with the chosen quote, a shipping address and a phone number (the manufacturer requires one).
-4. The user approves and pays at the returned \`confirmationUrl\` unless they set a spending policy that lets this connection order within limits. Nothing is placed with a print shop until payment clears. Do not tell the user the order is placed before that.
-5. Track it: \`materialize_get_order\` and \`materialize_list_orders\`.
+2. Check it: \`materialize_check_printability\` with the \`fileAssetId\`. It finds holes in the surface, loose pieces, wrong units and thin walls, says how to fix each, and rates every material good, risky or no for this part. Fix blockers before quoting; a broken mesh is rejected by the vendor after the user has seen a price.
+3. Choose a material: ask what the part has to do (carry load, bend, survive heat, show fine detail, stay cheap), then \`materialize_recommend_material\` with the \`fileAssetId\`. It returns a shortlist with reasons, trade-offs and the \`materialId\` for quoting.
+4. Price it: \`materialize_get_quote\` with the \`fileAssetId\`. Pass \`materialId\` (from \`materialize_recommend_material\` or \`materialize_list_materials\`) when the user has a material in mind; it is much faster. Prices are USD, cheapest first, and include vendor, finish, color and lead time.
+5. Order: \`materialize_create_order\` with the chosen quote, a shipping address and a phone number (the manufacturer requires one).
+6. The user approves and pays at the returned \`confirmationUrl\` unless they set a spending policy that lets this connection order within limits. Nothing is placed with a print shop until payment clears. Do not tell the user the order is placed before that.
+7. Track it: \`materialize_get_order\` and \`materialize_list_orders\`.
 
 Help choosing a material: \`materialize_list_materials\`, \`materialize_get_material\`, or the guides at ${url}/materials.
 

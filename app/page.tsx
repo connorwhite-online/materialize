@@ -57,7 +57,7 @@ export const metadata: Metadata = {
   // Self-referencing canonical. Cheap insurance against the same
   // content being indexed under tracking params (?ref=, ?utm_*) that
   // inbound links and social shares append.
-  alternates: { canonical: "/" },
+  alternates: { canonical: "/", types: { "text/markdown": "/llms.txt" } },
   openGraph: {
     type: "website",
     title: HOME_TITLE,

@@ -86,6 +86,8 @@ function parseResultText(result: {
 const EXPECTED_TOOL_SCOPES: Record<string, string> = {
   materialize_list_materials: "catalog:read",
   materialize_get_material: "catalog:read",
+  materialize_recommend_material: "catalog:read",
+  materialize_check_printability: "files:read",
   materialize_request_upload_url: "files:write",
   materialize_register_upload: "files:write",
   materialize_import_model: "files:write",
@@ -211,7 +213,7 @@ describe("tool annotations (ChatGPT app review + Claude permission prompts)", ()
       }
       if (a.readOnlyHint) {
         expect(a.destructiveHint, name).toBe(false);
-        expect(name, name).toMatch(/_(get|list)_|_cad_(run|reference)$/);
+        expect(name, name).toMatch(/_(get|list)_|_cad_(run|reference)$|_recommend_material$|_check_printability$/);
       }
     }
   });
