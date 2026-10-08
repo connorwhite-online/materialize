@@ -11,6 +11,8 @@ import { getCheckoutModel } from "@/lib/env";
 import { Badge } from "@/components/ui/badge";
 import { DESIGN_TAG_LABELS } from "@/lib/validations/file";
 
+export const metadata = { title: "Print" };
+
 export default async function PrintConfigPage(props: {
   params: Promise<{ fileAssetId: string }>;
   searchParams: Promise<{ material?: string; finish?: string; project?: string }>;

@@ -70,7 +70,9 @@ export function ProjectCreateForm({
     <form action={handleSubmit} className="space-y-4">
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">Project details</CardTitle>
+          <CardTitle className="text-base">
+            <h2>Project details</h2>
+          </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
           <OwnerPicker label="Create as" />
@@ -194,12 +196,18 @@ export function ProjectCreateForm({
         <CardHeader>
           <div className="flex items-start justify-between gap-4">
             <div>
-              <CardTitle className="text-base">List for sale</CardTitle>
+              <CardTitle className="text-base">
+                <h2>List for sale</h2>
+              </CardTitle>
               <p className="mt-0.5 text-xs text-muted-foreground">
                 Make this project available to purchase publicly.
               </p>
             </div>
-            <Switch checked={sellEnabled} onCheckedChange={setSellEnabled} />
+            <Switch
+              checked={sellEnabled}
+              onCheckedChange={setSellEnabled}
+              aria-label="List for sale"
+            />
           </div>
         </CardHeader>
         {sellEnabled && (
@@ -225,7 +233,7 @@ export function ProjectCreateForm({
       <Card>
         <CardHeader>
           <CardTitle className="text-base">
-            Pick files for this project
+            <h2>Pick files for this project</h2>
           </CardTitle>
           <p className="text-xs text-muted-foreground">
             Optional — add files now or later. {selected.length} selected.

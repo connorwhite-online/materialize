@@ -5,6 +5,8 @@ import { getPaymentMethodSummary } from "@/app/actions/billing";
 import { PaymentCard } from "@/components/print/payment-card";
 import { BillingActions } from "./billing-actions";
 
+export const metadata = { title: "Billing" };
+
 export default async function BillingSettingsPage({
   searchParams,
 }: {

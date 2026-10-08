@@ -36,6 +36,8 @@ interface PageProps {
   searchParams: Promise<{ fee?: string; t?: string }>;
 }
 
+export const metadata = { title: "Pay for production" };
+
 export default async function PayProductionPage({
   params,
   searchParams,

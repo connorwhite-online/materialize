@@ -174,7 +174,7 @@ function PhotoThumb({
       >
         <Image
           src={photo.downloadUrl}
-          alt={photo.caption || ""}
+          alt={photo.caption || `Photo ${index + 1}`}
           fill
           sizes="(min-width: 640px) 160px, 128px"
           className="object-cover"

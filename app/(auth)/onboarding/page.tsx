@@ -35,7 +35,7 @@ export default function OnboardingPage() {
   };
 
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center px-4">
+    <main className="flex min-h-screen flex-col items-center justify-center px-4">
       <AnimatedWordmark
         title="Materialize"
         animateOnMount
@@ -44,7 +44,9 @@ export default function OnboardingPage() {
 
       <Card className="w-full max-w-sm">
         <CardHeader className="text-center">
-          <CardTitle className="text-xl">Pick a username</CardTitle>
+          <CardTitle className="text-xl">
+            <h1>Pick a username</h1>
+          </CardTitle>
           <p className="text-sm text-muted-foreground mt-1">
             This is how others will find you
           </p>
@@ -84,6 +86,6 @@ export default function OnboardingPage() {
           </form>
         </CardContent>
       </Card>
-    </div>
+    </main>
   );
 }

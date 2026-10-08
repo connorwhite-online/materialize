@@ -447,6 +447,14 @@ function ActiveColumn({
 }) {
   return (
     <>
+      {/* Always mounted so phase changes are announced. */}
+      <p role="status" className="sr-only">
+        {authedActive
+          ? phase === "uploading"
+            ? "Uploading file"
+            : "Preparing quote configurator"
+          : ""}
+      </p>
       <FileContextBar
         file={picked.file}
         format={picked.format}
@@ -493,7 +501,18 @@ function ActiveColumn({
       )}
 
       {authedActive && (
-        <div className="mt-6 rounded-xl border border-border bg-card p-6 text-center">
+        <div
+          className="mt-6 rounded-xl border border-border bg-card p-6 text-center"
+          aria-busy="true"
+        >
+          {phase === "uploading" && (
+            <progress
+              className="sr-only"
+              aria-label={`Uploading ${picked.file.name}`}
+              max={100}
+              value={progress}
+            />
+          )}
           <div className="mx-auto h-6 w-6 animate-spin rounded-full border-2 border-muted border-t-foreground" />
           <p className="mt-3 text-sm font-medium">
             {phase === "uploading"
@@ -553,7 +572,7 @@ function FileContextBar({
         .{format}
       </div>
       <div className="min-w-0 flex-1">
-        <p className="truncate text-sm font-medium">{file.name}</p>
+        <h1 className="truncate text-sm font-medium">{file.name}</h1>
         <p className="mt-0.5 text-[11px] text-muted-foreground">{metaLine}</p>
       </div>
       {showUnitPicker && (
@@ -566,7 +585,7 @@ function FileContextBar({
             onValueChange={(v) => onUnitChange(v as Unit)}
             disabled={unitPickerDisabled}
           >
-            <SelectTrigger className="h-8 w-[72px] text-xs">
+            <SelectTrigger className="h-8 w-[72px] text-xs" aria-label="Source units">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>

@@ -40,9 +40,11 @@ import {
   NotEqualStencilFunc,
   Plane,
   ReplaceStencilOp,
+  Spherical,
   Vector3,
 } from "three";
 import type { OrbitControls as OrbitControlsImpl } from "three-stdlib";
+import { useReducedMotion } from "motion/react";
 import type * as THREE from "three";
 import { type ThreeEvent } from "@react-three/fiber";
 import {
@@ -1473,6 +1475,8 @@ export function ModelViewer({
   const wheelZoom =
     enableWheelZoom === undefined ? !isPreview : enableWheelZoom;
   const controlsRef = useRef<OrbitControlsImpl>(null);
+  // Previews spin forever; honour the OS "reduce motion" setting.
+  const reduceMotion = useReducedMotion();
   const wrapperRef = useRef<HTMLDivElement>(null);
 
   // "Update preview" — the camera distance at the viewer's own settled
@@ -1638,6 +1642,39 @@ export function ModelViewer({
     [inspectable, sectionOn, plane]
   );
 
+  // Keyboard orbit for the canvas: OrbitControls is pointer-only, so the
+  // focused viewer turns the camera around its target with the arrow
+  // keys (15° a press) and zooms with +/-.
+  const orbitBy = (dTheta: number, dPhi: number) => {
+    const controls = controlsRef.current;
+    if (!controls) return;
+    const camera = controls.object as THREE.PerspectiveCamera;
+    const offset = camera.position.clone().sub(controls.target);
+    const sph = new Spherical().setFromVector3(offset);
+    sph.theta += dTheta;
+    sph.phi = Math.min(Math.max(sph.phi + dPhi, 0.05), Math.PI - 0.05);
+    offset.setFromSpherical(sph);
+    camera.position.copy(controls.target).add(offset);
+    controls.update();
+  };
+  const onViewerKeyDown = (e: React.KeyboardEvent) => {
+    if (e.target !== e.currentTarget) return;
+    const step = Math.PI / 12;
+    const actions: Record<string, () => void> = {
+      ArrowLeft: () => orbitBy(-step, 0),
+      ArrowRight: () => orbitBy(step, 0),
+      ArrowUp: () => orbitBy(0, -step),
+      ArrowDown: () => orbitBy(0, step),
+      "+": () => zoomBy(0.85),
+      "=": () => zoomBy(0.85),
+      "-": () => zoomBy(1 / 0.85),
+    };
+    const act = actions[e.key];
+    if (!act) return;
+    e.preventDefault();
+    act();
+  };
+
   const zoomBy = (factor: number) => {
     const controls = controlsRef.current;
     if (!controls) return;
@@ -1663,6 +1700,17 @@ export function ModelViewer({
     >
       <ErrorBoundary fallback={<PreviewUnavailable />}>
         <Canvas
+          // A canvas is opaque to assistive tech. Name it, and make it a
+          // tab stop so the arrow keys can turn the model.
+          role="img"
+          aria-label={
+            isPreview
+              ? "3D model preview"
+              : "Interactive 3D model. Use arrow keys to rotate, plus and minus to zoom."
+          }
+          tabIndex={isPreview ? undefined : 0}
+          onKeyDown={isPreview ? undefined : onViewerKeyDown}
+          className="rounded-[inherit] outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
           camera={
             fixedFrame
               ? { position: STUDIO_CAMERA.position, fov: STUDIO_CAMERA.fov }
@@ -1846,7 +1894,7 @@ export function ModelViewer({
             // target saves a direction the thumbnail (origin pivot)
             // cannot reproduce (CON-35).
             enablePan={!isPreview && !capturePreviewEnabled}
-            autoRotate={isPreview}
+            autoRotate={isPreview && !reduceMotion}
             autoRotateSpeed={2}
           />
         </Canvas>
@@ -2111,8 +2159,9 @@ export function ModelViewer({
                     setNoteDraft("");
                   }
                 }}
+                aria-label="Annotation note"
                 placeholder="Describe this face…"
-                className="field-text w-56 rounded-lg border border-foreground/20 bg-card px-2.5 py-1.5 shadow-lg outline-none focus:border-foreground/40 sm:text-sm"
+                className="field-text w-56 rounded-lg border border-foreground/20 bg-card px-2.5 py-1.5 shadow-lg outline-none focus:border-foreground/40 focus-visible:ring-2 focus-visible:ring-ring/50 sm:text-sm"
               />
             </div>
           )}

@@ -188,6 +188,9 @@ export function CommentForm({
         onChange={(e) => setBody(e.target.value)}
         onPaste={handlePaste}
         placeholder={placeholderText}
+        aria-label={parentId ? "Write a reply" : "Write a comment"}
+        aria-invalid={error ? true : undefined}
+        aria-describedby={error ? "comment-form-error" : undefined}
         maxLength={MAX_COMMENT_LENGTH}
         autoFocus={autoFocus}
         className="min-h-20"
@@ -220,7 +223,11 @@ export function CommentForm({
         </div>
       )}
 
-      {error && <p className="text-xs text-destructive">{error}</p>}
+      {error && (
+        <p id="comment-form-error" role="alert" className="text-xs text-destructive">
+          {error}
+        </p>
+      )}
 
       <div className="flex items-center justify-end gap-2">
         {acceptPhoto && (

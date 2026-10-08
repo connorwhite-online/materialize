@@ -30,7 +30,7 @@ export function CollapsibleSection({
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="group flex w-full cursor-pointer items-center gap-2 text-left outline-none"
+        className="group flex w-full cursor-pointer items-center gap-2 rounded-md text-left outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
         aria-expanded={open}
       >
         <motion.span

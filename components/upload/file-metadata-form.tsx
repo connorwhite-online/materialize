@@ -422,6 +422,7 @@ export function FileMetadataForm({
                     <Input
                       value={newCollectionName}
                       onChange={(e) => setNewCollectionName(e.target.value)}
+                      aria-label="Collection name"
                       placeholder="Collection name"
                       autoFocus
                     />
@@ -474,7 +475,7 @@ export function FileMetadataForm({
                 Make this file available to purchase or download publicly.
               </p>
             </div>
-            <Switch checked={sellEnabled} onCheckedChange={setSellEnabled} />
+            <Switch aria-label="List for sale" checked={sellEnabled} onCheckedChange={setSellEnabled} />
           </div>
         </CardHeader>
         <AnimatePresence initial={false}>

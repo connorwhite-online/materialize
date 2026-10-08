@@ -25,7 +25,9 @@ export function UserAvatar({
   return (
     <div className={cn("relative block h-8 w-8", className)}>
       <Avatar className="h-full w-full">
-        {imageUrl && <AvatarImage src={imageUrl} alt={displayName || ""} />}
+        {/* Decorative: every avatar sits beside the person's name or inside
+            a control that names them, so a repeated alt is just noise. */}
+        {imageUrl && <AvatarImage src={imageUrl} alt="" />}
         <AvatarFallback
           className="h-full w-full"
           style={{ background: gradient }}

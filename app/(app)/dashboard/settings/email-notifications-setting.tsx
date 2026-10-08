@@ -54,7 +54,11 @@ export function EmailNotificationsSetting({ initial, initialPrefs }: Props) {
     <div>
       <div className="flex items-center justify-between gap-4">
         <div className="text-sm font-medium">Email notifications</div>
-        <Switch checked={master} onCheckedChange={handleMaster} />
+        <Switch
+          checked={master}
+          onCheckedChange={handleMaster}
+          aria-label="Email notifications"
+        />
       </div>
 
       {master && (
@@ -70,6 +74,7 @@ export function EmailNotificationsSetting({ initial, initialPrefs }: Props) {
                 <Switch
                   checked={enabled}
                   onCheckedChange={(v) => handleType(key, v)}
+                  aria-label={label}
                 />
               </div>
             );

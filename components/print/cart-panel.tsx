@@ -529,18 +529,19 @@ function CartItemRow({
           onClick={() => item.quantity > 1 && onUpdateQty(item.quantity - 1)}
           disabled={item.quantity <= 1}
           aria-label={`Decrease quantity of ${name}`}
-          className="rounded p-0.5 text-muted-foreground hover:text-foreground disabled:opacity-30 transition-colors"
+          className="relative rounded p-0.5 text-muted-foreground hover:text-foreground disabled:opacity-30 transition-colors after:absolute after:-inset-[3px] after:content-['']"
         >
           <MinusIcon className="h-3.5 w-3.5" aria-hidden="true" />
         </button>
-        <span className="w-6 text-center text-sm tabular-nums" aria-live="polite">
+        <span className="w-6 text-center text-sm tabular-nums">
+          <span className="sr-only">Quantity </span>
           {item.quantity}
         </span>
         <button
           onClick={() => item.quantity < 100 && onUpdateQty(item.quantity + 1)}
           disabled={item.quantity >= 100}
           aria-label={`Increase quantity of ${name}`}
-          className="rounded p-0.5 text-muted-foreground hover:text-foreground disabled:opacity-30 transition-colors"
+          className="relative rounded p-0.5 text-muted-foreground hover:text-foreground disabled:opacity-30 transition-colors after:absolute after:-inset-[3px] after:content-['']"
         >
           <PlusIcon className="h-3.5 w-3.5" aria-hidden="true" />
         </button>
@@ -559,7 +560,7 @@ function CartItemRow({
       <button
         onClick={onRemove}
         aria-label={`Remove ${name} from cart`}
-        className="rounded p-0.5 text-muted-foreground hover:text-destructive transition-colors"
+        className="relative rounded p-0.5 text-muted-foreground hover:text-destructive transition-colors after:absolute after:-inset-[3px] after:content-['']"
       >
         <TrashIcon className="h-3.5 w-3.5" aria-hidden="true" />
       </button>

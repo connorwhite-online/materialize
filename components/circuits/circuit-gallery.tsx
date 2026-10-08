@@ -138,7 +138,7 @@ function CircuitThumb({ circuit, index, onOpen, canDelete }: ThumbProps) {
           // technical drawings, unlike photos.
           <img
             src={circuit.previewUrl}
-            alt={circuit.caption || ""}
+            alt={circuit.caption || `Circuit diagram ${index + 1}`}
             loading="lazy"
             decoding="async"
             className="absolute inset-0 h-full w-full object-contain bg-white dark:bg-zinc-900"

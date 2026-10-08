@@ -5,6 +5,8 @@ import { OrdersTab } from "@/components/profile/orders-tab";
 import { reconcileOrderForUser } from "@/lib/stripe/reconcile-production-payments";
 import { logError } from "@/lib/logger";
 
+export const metadata = { title: "Orders" };
+
 export default async function OrdersPage({
   searchParams,
 }: {

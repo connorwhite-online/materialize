@@ -425,6 +425,49 @@ export function MobileNav({
     };
   }, [open]);
 
+  // Focus management. On open: focus the first menu link and make the
+  // page behind inert so Tab / screen-reader browse can't reach it. On
+  // close: put focus back on the toggle (the identity pill and the
+  // trailing toggle are different elements, so it is looked up by
+  // `aria-controls` once the pill has re-mounted).
+  const wasOpenRef = useRef(false);
+  useEffect(() => {
+    if (!open) {
+      if (wasOpenRef.current) {
+        wasOpenRef.current = false;
+        let tries = 0;
+        let raf = 0;
+        const restore = () => {
+          const btn = document.querySelector<HTMLElement>(
+            `button[aria-controls="${menuId}"][aria-expanded="false"]:not([tabindex="-1"])`
+          );
+          if (btn) btn.focus();
+          else if (tries++ < 40) raf = requestAnimationFrame(restore);
+        };
+        raf = requestAnimationFrame(restore);
+        return () => cancelAnimationFrame(raf);
+      }
+      return;
+    }
+    wasOpenRef.current = true;
+    const inertTargets = [document.getElementById("main-content")].filter(
+      (el): el is HTMLElement => el !== null
+    );
+    inertTargets.forEach((el) => el.setAttribute("inert", ""));
+    let tries = 0;
+    let raf = 0;
+    const focusFirst = () => {
+      const first = menuNavRef.current?.querySelector<HTMLElement>("a[href]");
+      if (first) first.focus({ preventScroll: true });
+      else if (tries++ < 10) raf = requestAnimationFrame(focusFirst);
+    };
+    raf = requestAnimationFrame(focusFirst);
+    return () => {
+      cancelAnimationFrame(raf);
+      inertTargets.forEach((el) => el.removeAttribute("inert"));
+    };
+  }, [open, menuId]);
+
   const handleDragEnd = (_: unknown, info: PanInfo) => {
     if (info.offset.y > DRAG_CLOSE_OFFSET || info.velocity.y > DRAG_CLOSE_VELOCITY) {
       close();

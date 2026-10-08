@@ -108,7 +108,7 @@ export function CatalogBrowser({ groups }: CatalogBrowserProps) {
           setActiveGroup(value === ALL_GROUPS ? null : value)
         }
       >
-        <SelectTrigger size="sm" className="min-w-48">
+        <SelectTrigger size="sm" className="min-w-48" aria-label="Material family">
           <SelectValue>
             {(value) => {
               if (value === ALL_GROUPS || value == null) return "All materials";
@@ -189,28 +189,33 @@ function GroupSection({
   const [open, setOpen] = useState(true);
   return (
     <section>
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        className="group flex w-full cursor-pointer items-center justify-between gap-2 text-left"
-        aria-expanded={open}
-      >
-        <div className="flex items-center gap-2">
-          <motion.span
-            animate={{ rotate: open ? 90 : 0 }}
-            transition={{ duration: 0.22, ease: [0.2, 0.8, 0.2, 1] }}
-            className="flex shrink-0 text-muted-foreground transition-colors group-hover:text-foreground"
-          >
-            <ChevronRight size={14} />
-          </motion.span>
-          <h3 className="font-sans text-sm font-medium text-muted-foreground transition-colors group-hover:text-foreground">
-            {name}
-          </h3>
-        </div>
-        <p className="text-xs text-muted-foreground">
-          {count} {count === 1 ? "material" : "materials"}
-        </p>
-      </button>
+      {/* Disclosure pattern: the heading wraps the button, so heading
+          navigation still lands on each family and the toggle stays a
+          real button with its expanded state. */}
+      <h2>
+        <button
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          className="group flex w-full cursor-pointer items-center justify-between gap-2 rounded-md text-left focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none"
+          aria-expanded={open}
+        >
+          <span className="flex items-center gap-2">
+            <motion.span
+              animate={{ rotate: open ? 90 : 0 }}
+              transition={{ duration: 0.22, ease: [0.2, 0.8, 0.2, 1] }}
+              className="flex shrink-0 text-muted-foreground transition-colors group-hover:text-foreground"
+            >
+              <ChevronRight size={14} />
+            </motion.span>
+            <span className="font-sans text-sm font-medium text-muted-foreground transition-colors group-hover:text-foreground">
+              {name}
+            </span>
+          </span>
+          <span className="text-xs font-normal text-muted-foreground">
+            {count} {count === 1 ? "material" : "materials"}
+          </span>
+        </button>
+      </h2>
       <AnimatePresence initial={false}>
         {open && (
           <motion.div

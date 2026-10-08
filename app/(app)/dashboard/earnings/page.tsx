@@ -2,6 +2,8 @@ import { redirect } from "next/navigation";
 import { auth, currentUser } from "@clerk/nextjs/server";
 import { EarningsTab } from "@/components/profile/earnings-tab";
 
+export const metadata = { title: "Earnings" };
+
 export default async function EarningsPage() {
   const { userId } = await auth();
   if (!userId) redirect("/");

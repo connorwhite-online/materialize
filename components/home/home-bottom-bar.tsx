@@ -207,7 +207,8 @@ export function HomeBottomBar() {
         className={cn(
           "pointer-events-auto w-full max-w-2xl rounded-3xl border border-input",
           "bg-muted/70 backdrop-blur-xl dark:bg-input/40",
-          "depth-sunken p-1"
+          "depth-sunken p-1",
+          "focus-within:ring-2 focus-within:ring-ring/50"
         )}
       >
         <AnimatePresence initial={false}>

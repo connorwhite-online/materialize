@@ -12,6 +12,8 @@ interface PageProps {
   searchParams: Promise<{ token?: string }>;
 }
 
+export const metadata = { title: "Cancel order" };
+
 export default async function CancelAgentOrderPage({
   params,
   searchParams,

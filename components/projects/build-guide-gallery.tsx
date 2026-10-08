@@ -35,7 +35,7 @@ export function BuildGuideGallery({ images }: { images: GalleryImage[] }) {
           <img
             key={`${i}-${img.src}`}
             src={img.src}
-            alt={img.alt || ""}
+            alt={img.alt || `Build guide image ${i + 1}`}
             loading="lazy"
             onClick={() => {
               setIndex(i);
@@ -76,7 +76,7 @@ export function LightboxImage({
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img
         src={src}
-        alt={alt || ""}
+        alt={alt || "Build guide image"}
         loading="lazy"
         onClick={() => setOpen(true)}
         className={`my-3 block ${maxHeightClass} max-w-full cursor-zoom-in rounded-xl border border-border object-contain`}

@@ -22,6 +22,8 @@ import { CheckoutForm } from "@/components/checkout/checkout-form";
  * inline before calling completePrintOrder. For multi-item orders
  * there's no inline step, so we land here instead.
  */
+export const metadata = { title: "Checkout" };
+
 export default async function CheckoutPage(props: {
   params: Promise<{ orderId: string }>;
 }) {
