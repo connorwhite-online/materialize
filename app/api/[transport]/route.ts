@@ -13,6 +13,11 @@ import {
   findMaterialBySlug,
 } from "@/lib/craftcloud/catalog";
 import {
+  checkPrintabilityForUser,
+  recommendMaterialsForUser,
+} from "@/lib/mcp/internal/printability";
+import type { Needs } from "@/lib/dfm/recommend";
+import {
   requestUploadUrlForUser,
   registerUploadForUser,
   listFilesForUser,
@@ -197,7 +202,8 @@ function readAuthExtra(extra: {
 
 const MCP_SERVER_INSTRUCTIONS = [
   "Materialize gets 3D models professionally printed and shipped, and hosts models and hardware projects creators publish.",
-  "To print: get the model in with materialize_import_model (a file attached in chat or a public https URL) or materialize_request_upload_url + materialize_register_upload, price it with materialize_get_quote, then materialize_create_order.",
+  "To print: get the model in with materialize_import_model (a file attached in chat or a public https URL) or materialize_request_upload_url + materialize_register_upload, run materialize_check_printability and fix any blockers it reports, price it with materialize_get_quote, then materialize_create_order.",
+  "If the user hasn't picked a material, ask what the part has to do and use materialize_recommend_material rather than guessing; pass its materialId to materialize_get_quote.",
   "Before materialize_create_order, show the user the price, material, vendor and lead time and get their go-ahead. Orders are physical and can't be undone once placed.",
   "The user approves and pays at the returned confirmationUrl unless their spending policy allows the order. Don't tell them it is placed until materialize_get_order says so.",
 ].join(" ");
@@ -437,6 +443,110 @@ const handler = createMcpHandler(
           });
         } catch (err) {
           return scopeOrInternal(err, "materialize_get_material");
+        }
+      }
+    );
+
+    server.registerTool(
+      "materialize_check_printability",
+      {
+        title: "Check a model before printing",
+        description:
+          "Check an uploaded model for problems that make prints fail, and see which materials it suits. Reports size, holes in the surface, loose pieces, flipped faces, probable unit mistakes, and thin walls, each with how to fix it, plus a good/risky/no verdict per material and design tips for the processes that fit. Run this after upload and before materialize_get_quote, and fix blockers first: a quote for a broken mesh gets rejected by the vendor after you've told the user a price. Wall thickness is an estimate and process limits are conservative envelopes, not a vendor's guarantee.",
+        inputSchema: {
+          fileAssetId: z
+            .string()
+            .uuid()
+            .describe("The fileAssetId from materialize_register_upload or materialize_import_model"),
+        },
+      },
+      async ({ fileAssetId }, extra) => {
+        try {
+          const auth = readAuthExtra(extra);
+          requireScope(auth, "files:read");
+          const result = await checkPrintabilityForUser({
+            userId: auth.userId,
+            fileAssetId,
+          });
+          if ("error" in result) {
+            return errorResult({
+              code: result.error === "Forbidden" ? "forbidden" : "not_found",
+              message: result.error,
+            });
+          }
+          return jsonResult(result);
+        } catch (err) {
+          return scopeOrInternal(err, "materialize_check_printability");
+        }
+      }
+    );
+
+    server.registerTool(
+      "materialize_recommend_material",
+      {
+        title: "Recommend materials for a part",
+        description:
+          "Shortlist materials for what the part must do, with why each fits, what to watch out for, and the materialId to pass to materialize_get_quote. Say what matters (useCase, or minimum scores 1-5 for strength, flexibility, detail, heatResistance, a price ceiling, a preference) and, if you have one, the fileAssetId so materials the part can't be made in (too big, too thin) are ruled out. Ask the user what the part will do before guessing: a bracket, a figurine and a phone case want different materials. ruledOut says which requirement removed each material.",
+        inputSchema: {
+          useCase: z
+            .enum([
+              "prototype",
+              "functional",
+              "display",
+              "outdoor",
+              "flexible",
+              "high_temp",
+              "miniature",
+            ])
+            .optional(),
+          needs: z
+            .object({
+              strength: z.number().int().min(1).max(5).optional(),
+              flexibility: z.number().int().min(1).max(5).optional(),
+              detail: z.number().int().min(1).max(5).optional(),
+              heatResistance: z.number().int().min(1).max(5).optional(),
+            })
+            .optional()
+            .describe("Minimum scores out of 5; overrides the useCase defaults"),
+          maxPrice: z
+            .enum(["budget", "mid", "premium"])
+            .optional()
+            .describe("Highest price tier to consider"),
+          category: z
+            .enum(["plastic", "metal", "flexible", "resin", "ceramic", "composite"])
+            .optional(),
+          prefer: z
+            .enum([
+              "cheapest",
+              "strongest",
+              "most_detail",
+              "most_flexible",
+              "most_heat_resistant",
+            ])
+            .optional(),
+          fileAssetId: z.string().uuid().optional(),
+          limit: z.number().int().min(1).max(10).optional(),
+        },
+      },
+      async (args, extra) => {
+        try {
+          const auth = readAuthExtra(extra);
+          requireScope(auth, "catalog:read");
+          if (args.fileAssetId) requireScope(auth, "files:read");
+          const result = await recommendMaterialsForUser({
+            userId: auth.userId,
+            ...args,
+            needs: args.needs as Needs | undefined,
+          });
+          if ("error" in result) {
+            return errorResult({
+              code: result.error === "Forbidden" ? "forbidden" : "not_found",
+              message: result.error,
+            });
+          }
+          return jsonResult(result);
+        } catch (err) {
+          return scopeOrInternal(err, "materialize_recommend_material");
         }
       }
     );

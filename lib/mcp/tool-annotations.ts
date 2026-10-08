@@ -49,6 +49,9 @@ export const TOOL_ANNOTATIONS: Record<string, ToolAnnotations> = {
   // Catalog
   materialize_list_materials: READ,
   materialize_get_material: READ,
+  materialize_recommend_material: READ,
+  // Reads the model's bytes and measures them; nothing is stored.
+  materialize_check_printability: READ,
 
   // Files. Presigning mints a URL and writes no row.
   materialize_request_upload_url: { ...CREATE, idempotentHint: true },

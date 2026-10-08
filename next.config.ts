@@ -99,6 +99,15 @@ const nextConfig: NextConfig = {
             value: "strict-origin-when-cross-origin",
           },
           { key: "X-Frame-Options", value: "DENY" },
+          // Point agents at the machine-readable guide on every response.
+          // Mirrors AGENT_LINK_HEADER in lib/seo/agent-discovery.ts (not
+          // imported: this file runs before the TS path aliases exist).
+          {
+            key: "Link",
+            value:
+              '</llms.txt>; rel="describedby"; type="text/markdown", </.well-known/mcp.json>; rel="service-desc"; type="application/json"',
+          },
+          { key: "X-Llms-Txt", value: "/llms.txt" },
           {
             key: "Content-Security-Policy-Report-Only",
             value:

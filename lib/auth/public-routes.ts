@@ -113,6 +113,8 @@ export const PUBLIC_ROUTES = [
   // Discovery surfaces for crawlers + AI agents.
   "/llms.txt",
   "/llms-full.txt",
+  "/agents.txt",
+  "/.well-known/mcp.json",
   "/robots.txt",
   "/sitemap.xml",
   // Public user / org vanity profiles live at the root: `/[handle]`
