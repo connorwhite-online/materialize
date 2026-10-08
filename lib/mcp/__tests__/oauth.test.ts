@@ -58,6 +58,11 @@ vi.mock("@/lib/db/schema", () => ({
 
 vi.mock("@/lib/logger", () => ({ logError: vi.fn() }));
 
+const ensureUserRow = vi.fn();
+vi.mock("@/lib/users/ensure-user-row", () => ({
+  ensureUserRow: (id: string) => ensureUserRow(id),
+}));
+
 const verify = vi.fn();
 const listApps = vi.fn();
 vi.mock("@clerk/nextjs/server", () => ({
@@ -70,6 +75,7 @@ vi.mock("@clerk/nextjs/server", () => ({
 
 import {
   clerkIssuerUrl,
+  clientNameFromMetadataUrl,
   verifyOAuthAccessToken,
   OAUTH_CONNECTION_SCOPES,
 } from "../oauth";
@@ -116,6 +122,8 @@ describe("verifyOAuthAccessToken", () => {
     touched.length = 0;
     insertThrows = false;
     verify.mockReset();
+    ensureUserRow.mockReset();
+    ensureUserRow.mockResolvedValue(true);
     listApps.mockReset();
     listApps.mockResolvedValue({
       data: [{ clientId: "client_chatgpt", name: "ChatGPT" }],
@@ -191,6 +199,32 @@ describe("verifyOAuthAccessToken", () => {
     expect(inserted[0].name).toBe("Connected app");
   });
 
+  it("creates the users row before the connection, since the webhook may not have", async () => {
+    verify.mockResolvedValue(liveToken());
+    await verifyOAuthAccessToken("oat_live");
+    expect(ensureUserRow).toHaveBeenCalledWith("user_abc");
+    expect(inserted).toHaveLength(1);
+  });
+
+  it("refuses the token when the users row can't be created", async () => {
+    ensureUserRow.mockResolvedValue(false);
+    verify.mockResolvedValue(liveToken());
+    expect(await verifyOAuthAccessToken("oat_live")).toBeUndefined();
+    expect(inserted).toHaveLength(0);
+  });
+
+  it("names a metadata-document client after its host without asking Clerk", async () => {
+    verify.mockResolvedValue(
+      liveToken({ clientId: "https://chatgpt.com/oauth/client.json" })
+    );
+    await verifyOAuthAccessToken("oat_live");
+    expect(inserted[0]).toMatchObject({
+      name: "ChatGPT",
+      oauthClientId: "https://chatgpt.com/oauth/client.json",
+    });
+    expect(listApps).not.toHaveBeenCalled();
+  });
+
   it("refuses the token instead of throwing when the connection can't be created", async () => {
     insertThrows = true;
     verify.mockResolvedValue(liveToken());
@@ -216,5 +250,18 @@ describe("verifyMaterializeToken routing", () => {
       "mtl_pat_abcdefghijklmnopqrstuvwxyz1234567890"
     );
     expect(verify).not.toHaveBeenCalled();
+  });
+});
+
+describe("clientNameFromMetadataUrl", () => {
+  it("names known clients and falls back to the host", () => {
+    expect(clientNameFromMetadataUrl("https://chatgpt.com/oauth/client.json")).toBe("ChatGPT");
+    expect(clientNameFromMetadataUrl("https://claude.ai/oauth/mcp-client.json")).toBe("Claude");
+    expect(clientNameFromMetadataUrl("https://www.example.dev/client.json")).toBe("example.dev");
+  });
+
+  it("returns null for an ordinary Clerk client id or a non-https URL", () => {
+    expect(clientNameFromMetadataUrl("SCamTHu6rYwGs0nT")).toBeNull();
+    expect(clientNameFromMetadataUrl("http://chatgpt.com/oauth/client.json")).toBeNull();
   });
 });

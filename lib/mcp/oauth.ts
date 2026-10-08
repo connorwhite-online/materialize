@@ -3,6 +3,7 @@ import { clerkClient } from "@clerk/nextjs/server";
 import { db } from "@/lib/db";
 import { personalAccessTokens } from "@/lib/db/schema";
 import { logError } from "@/lib/logger";
+import { ensureUserRow } from "@/lib/users/ensure-user-row";
 import { hashToken } from "./tokens";
 import { ALL_SCOPES, type Scope } from "./scopes";
 import type { MaterializeAuthInfo } from "./auth";
@@ -132,6 +133,10 @@ export async function resolveOAuthConnection(input: {
   const existing = await findConnection(input);
   if (existing) return existing.revokedAt ? null : existing;
 
+  // The connection row's FK needs the users row, which the Clerk
+  // webhook may not have written yet (or ever, if it missed).
+  if (!(await ensureUserRow(input.userId))) return null;
+
   const name = await oauthClientName(input.clientId);
   try {
     await db
@@ -148,7 +153,6 @@ export async function resolveOAuthConnection(input: {
       })
       .onConflictDoNothing();
   } catch (err) {
-    // A missing users row (webhook hasn't landed yet) fails the FK.
     // Refuse the token rather than 500 the whole MCP request.
     logError("mcp.oauth.createConnection", err);
     return null;
@@ -213,6 +217,11 @@ async function touchLastUsed(connection: Connection) {
  * falls back to a generic label rather than fail the sign-in.
  */
 async function oauthClientName(clientId: string): Promise<string> {
+  // Clients that sign in with a Client ID Metadata Document (ChatGPT
+  // does whenever the server supports it) use the document's URL as
+  // their client id and have no Clerk application to look up.
+  const cimdName = clientNameFromMetadataUrl(clientId);
+  if (cimdName) return cimdName;
   try {
     // Newest first by default, and the client registered moments before
     // this first token, so page one is where it is. Instances collect an
@@ -225,4 +234,27 @@ async function oauthClientName(clientId: string): Promise<string> {
     logError("mcp.oauth.clientName", err);
   }
   return "Connected app";
+}
+
+const KNOWN_CLIENT_HOSTS: Record<string, string> = {
+  "chatgpt.com": "ChatGPT",
+  "claude.ai": "Claude",
+};
+
+/**
+ * A display name for a CIMD client id (`https://chatgpt.com/oauth/client.json`):
+ * a known product name, else the bare host. Null for an ordinary Clerk
+ * client id. Deliberately doesn't fetch the document: Clerk already did,
+ * and the host is the part a user can check.
+ */
+export function clientNameFromMetadataUrl(clientId: string): string | null {
+  let url: URL;
+  try {
+    url = new URL(clientId);
+  } catch {
+    return null;
+  }
+  if (url.protocol !== "https:") return null;
+  const host = url.hostname.replace(/^www\./, "");
+  return KNOWN_CLIENT_HOSTS[host] ?? host.slice(0, 100);
 }
