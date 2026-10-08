@@ -1710,7 +1710,7 @@ export function ModelViewer({
           }
           tabIndex={isPreview ? undefined : 0}
           onKeyDown={isPreview ? undefined : onViewerKeyDown}
-          className="rounded-[inherit] outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+          className="rounded-[inherit] outline-none focus-visible:outline-2 focus-visible:outline-solid focus-visible:-outline-offset-2 focus-visible:outline-foreground/60"
           camera={
             fixedFrame
               ? { position: STUDIO_CAMERA.position, fov: STUDIO_CAMERA.fov }
