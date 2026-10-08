@@ -7,6 +7,7 @@ import { setMockUserId } from "@/vitest.setup";
 const mockCreatePriceRequest = vi.fn();
 vi.mock("@/lib/craftcloud/client", () => ({
   createPriceRequest: (...args: unknown[]) => mockCreatePriceRequest(...args),
+  CraftCloudApiError: class CraftCloudApiError extends Error {},
 }));
 
 // Catalog lookup — only exercised when a materialId scope hint is sent.
@@ -29,14 +30,14 @@ vi.mock("@/lib/db", () => ({ db: {} }));
 import { POST } from "../route";
 
 function postRequest(body: unknown): Request {
-  return new Request("http://localhost/api/craftcloud/quotes", {
+  return new Request("http://localhost/api/quotes", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(body),
   });
 }
 
-describe("POST /api/craftcloud/quotes", () => {
+describe("POST /api/quotes", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     setMockUserId("test-user-id");
@@ -145,6 +146,6 @@ describe("POST /api/craftcloud/quotes", () => {
     const json = await res.json();
     expect(json.error).toMatch(/Failed to start quote request/);
     expect(mockLogError).toHaveBeenCalledOnce();
-    expect(mockLogError.mock.calls[0][0]).toBe("api/craftcloud/quotes");
+    expect(mockLogError.mock.calls[0][0]).toBe("api/quotes");
   });
 });

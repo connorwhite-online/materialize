@@ -302,7 +302,7 @@ describe("QuoteConfigurator wiring (CON-38)", () => {
 
   it("skips ensureModelUploaded in draft mode (no download-url / cache-model fetch)", async () => {
     const fetchMock = vi.fn(async (url: string) => {
-      if (url.includes("/api/craftcloud/quotes")) {
+      if (url.includes("/api/quotes")) {
         return {
           ok: true,
           status: 200,
@@ -327,7 +327,7 @@ describe("QuoteConfigurator wiring (CON-38)", () => {
     expect(uploadToCraftCloudMock).not.toHaveBeenCalled();
     // The quote START request did fire (the legitimate draft-mode call).
     expect(
-      calledUrls.some((u) => u.includes("/api/craftcloud/quotes"))
+      calledUrls.some((u) => u.includes("/api/quotes"))
     ).toBe(true);
   });
 
@@ -495,7 +495,7 @@ describe("QuoteConfigurator wiring (CON-38)", () => {
     );
     expect(
       fetchMock.mock.calls.some((c) =>
-        String(c[0]).includes("/api/craftcloud/quotes")
+        String(c[0]).includes("/api/quotes")
       )
     ).toBe(false);
     expect(reportClientErrorMock).toHaveBeenCalledWith(
@@ -512,7 +512,7 @@ describe("QuoteConfigurator wiring (CON-38)", () => {
     // Quote start used the just-uploaded modelId, not the fileAssetId →
     // DB lookup that would 409 if persistence hadn't landed.
     const quotesCall = fetchMock.mock.calls.find((c) =>
-      String(c[0]).includes("/api/craftcloud/quotes")
+      String(c[0]).includes("/api/quotes")
     );
     const body = JSON.parse(String(quotesCall![1]?.body));
     expect(body.modelId).toBe("fresh-model");

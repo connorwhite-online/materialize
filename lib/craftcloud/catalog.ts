@@ -167,6 +167,30 @@ let cachedCatalogFetchedAt = 0;
 let cachedProviders: Map<string, Provider> | null = null;
 let cachedProvidersFetchedAt = 0;
 
+// In-flight loads, so concurrent callers on a cold instance share one
+// download. The material catalog is ~4MB, over Next's 2MB data-cache
+// limit, so `next: { revalidate }` never stores it and the module memo
+// is the only cache. Without this, the quote start and the first poll
+// (or two visitors) landing on a cold instance each fetched it.
+let catalogLoad: Promise<CraftCloudCatalog> | null = null;
+let providersLoad: Promise<Map<string, Provider>> | null = null;
+
+/**
+ * Share one in-flight load between concurrent callers. The slot is
+ * cleared when the load settles, so a failure isn't cached and the
+ * next caller retries.
+ */
+function sharedLoad<T>(
+  current: Promise<T> | null,
+  set: (p: Promise<T> | null) => void,
+  load: () => Promise<T>
+): Promise<T> {
+  if (current) return current;
+  const p = load().finally(() => set(null));
+  set(p);
+  return p;
+}
+
 /**
  * Whether a module-scope memo entry is still within the TTL window.
  * Without this, `cachedCatalog`/`cachedProviders` short-circuit
@@ -241,7 +265,10 @@ const PRINTABLE_TECHNOLOGIES = new Set(["3d_printing"]);
 
 export async function getCraftCloudCatalog(): Promise<CraftCloudCatalog> {
   if (cachedCatalog && isFresh(cachedCatalogFetchedAt)) return cachedCatalog;
+  return sharedLoad(catalogLoad, (p) => (catalogLoad = p), loadCatalog);
+}
 
+async function loadCatalog(): Promise<CraftCloudCatalog> {
   const json = await fetchCatalogJson();
   const rawGroups = json.materialStructure ?? [];
 
@@ -291,6 +318,10 @@ export async function getCraftCloudCatalog(): Promise<CraftCloudCatalog> {
 
 export async function getProviderIndex(): Promise<Map<string, Provider>> {
   if (cachedProviders && isFresh(cachedProvidersFetchedAt)) return cachedProviders;
+  return sharedLoad(providersLoad, (p) => (providersLoad = p), loadProviders);
+}
+
+async function loadProviders(): Promise<Map<string, Provider>> {
   const list = await fetchProvidersJson();
   cachedProviders = new Map(list.map((p) => [p.vendorId, p]));
   cachedProvidersFetchedAt = Date.now();

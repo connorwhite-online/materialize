@@ -22,7 +22,7 @@ vi.mock("@/lib/logger", () => ({
 import { GET } from "../route";
 
 function pollRequest(query: string): Request {
-  return new Request(`http://localhost/api/craftcloud/quotes/poll${query}`);
+  return new Request(`http://localhost/api/quotes/poll${query}`);
 }
 
 // A catalog entry shaped the way the route's enrichment code reads it.
@@ -56,7 +56,7 @@ const ONE_QUOTE = {
   scale: 1,
 };
 
-describe("GET /api/craftcloud/quotes/poll", () => {
+describe("GET /api/quotes/poll", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockGetCraftCloudCatalog.mockResolvedValue({
@@ -235,6 +235,6 @@ describe("GET /api/craftcloud/quotes/poll", () => {
     const json = await res.json();
     expect(json.error).toMatch(/Failed to fetch quote snapshot/);
     expect(mockLogError).toHaveBeenCalledOnce();
-    expect(mockLogError.mock.calls[0][0]).toBe("api/craftcloud/quotes/poll");
+    expect(mockLogError.mock.calls[0][0]).toBe("api/quotes/poll");
   });
 });

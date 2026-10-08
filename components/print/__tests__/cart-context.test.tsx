@@ -168,7 +168,7 @@ function mockFetchRouter() {
         { status: 200, headers: { "content-type": "application/json" } }
       );
     }
-    if (href.includes("/api/craftcloud/quotes")) {
+    if (href.includes("/api/quotes")) {
       return new Response(JSON.stringify({ priceId: "price-1" }), {
         status: 200,
         headers: { "content-type": "application/json" },

@@ -257,7 +257,7 @@ export function CartProvider({ children }: { children: ReactNode }) {
 
       setRepricing(id, true);
       try {
-        const startRes = await fetch("/api/craftcloud/quotes", {
+        const startRes = await fetch("/api/quotes", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({

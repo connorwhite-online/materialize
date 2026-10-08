@@ -386,7 +386,7 @@ export function QuoteConfigurator({
   // The modelId from the upload done in THIS session. Quote start
   // prefers it over the fileAssetId → DB lookup so a persistence
   // hiccup can't turn into a 409 "File not yet uploaded for printing"
-  // loop from /api/craftcloud/quotes.
+  // loop from /api/quotes.
   const uploadedModelIdRef = useRef<string | null>(null);
 
   const ensureModelUploaded = useCallback(async () => {
@@ -791,7 +791,7 @@ export function QuoteConfigurator({
 
     try {
       // 1. Start the price request and get a priceId back.
-      const startRes = await fetch("/api/craftcloud/quotes", {
+      const startRes = await fetch("/api/quotes", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

@@ -160,3 +160,31 @@ describe("catalog fetch retry", () => {
     }
   });
 });
+
+describe("concurrent catalog loads", () => {
+  beforeEach(() => {
+    fetchMock.mockReset();
+  });
+
+  it("share one download between callers on a cold instance", async () => {
+    fetchMock.mockImplementation(async () =>
+      jsonResponse([{ vendorId: "v1", name: "Vendor One" }])
+    );
+
+    const { getProviderIndex } = await freshModule();
+    const [a, b] = await Promise.all([getProviderIndex(), getProviderIndex()]);
+
+    expect(a).toBe(b);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not cache a failed load: the next caller retries", async () => {
+    fetchMock.mockResolvedValue(statusResponse(404));
+    const { getProviderIndex } = await freshModule();
+    await expect(getProviderIndex()).rejects.toThrow("provider fetch failed: 404");
+
+    fetchMock.mockResolvedValue(jsonResponse([{ vendorId: "v1", name: "Vendor One" }]));
+    const providers = await getProviderIndex();
+    expect(providers.get("v1")?.name).toBe("Vendor One");
+  });
+});
