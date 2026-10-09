@@ -141,7 +141,13 @@ const SCRIPT = `
       byKey[g] = { q: q, mats: [q.materialName] };
       groups.push(byKey[g]);
     });
-    return groups.filter(function(o, i){ return i < 6 || keep[o.q.quoteId]; });
+    // Each material's cheapest first, so a comparison of seven nylons
+    // shows seven nylons, not four FDM vendors; then the rest up to 8.
+    var firstOf = {}, picked = [];
+    groups.forEach(function(o){ if (!firstOf[o.q.materialId]) { firstOf[o.q.materialId] = true; picked.push(o); } });
+    groups.forEach(function(o){ if (picked.length < 8 && picked.indexOf(o) < 0) picked.push(o); });
+    groups.forEach(function(o){ if (keep[o.q.quoteId] && picked.indexOf(o) < 0) picked.push(o); });
+    return groups.filter(function(o){ return picked.indexOf(o) >= 0; });
   }
   function indexOfQuote(opts, quoteId){
     for (var i = 0; i < opts.length; i++) if (opts[i].q.quoteId === quoteId) return i;
