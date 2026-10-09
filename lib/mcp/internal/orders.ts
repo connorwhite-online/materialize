@@ -487,6 +487,9 @@ export interface AgentOrderSummary {
   terminal: boolean;
   initiatedByAgent: boolean;
   agentName: string | null;
+  /** What the user pays: totalPriceCents + serviceFeeCents. */
+  amountDueCents: number;
+  /** Items + shipping, before the service fee. Not the total. */
   totalPriceCents: number;
   serviceFeeCents: number;
   currency: "USD";
@@ -592,6 +595,7 @@ async function shapeOrderRow(
     terminal: TERMINAL_STATUSES.has(row.status),
     initiatedByAgent: row.initiatedByTokenId != null,
     agentName: row.agentName,
+    amountDueCents: row.totalPrice + row.serviceFee,
     totalPriceCents: row.totalPrice,
     serviceFeeCents: row.serviceFee,
     currency: "USD",
