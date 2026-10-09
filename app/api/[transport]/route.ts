@@ -1433,7 +1433,7 @@ const handler = createMcpHandler(
       {
         title: "Get prices for a print",
         description:
-          "Server-side polls CraftCloud for prices on a registered fileAsset. Returns sorted (cheapest first) quotes with vendor, finish, color, lead time. Pass the returned priceId/quoteId/materialConfigId/shippingId into materialize_create_order. Quotes and orders are USD-only for now.",
+          "Server-side polls CraftCloud for prices on a registered fileAsset. Returns quotes sorted by what the buyer pays, with vendor, finish, color, lead time. totalCents is the price to tell the user: production x quantity, plus the vendor's minimum-order top-up (minimumFeeCents), shipping, and Materialize's service fee (serviceFeeCents). priceCents is the per-unit production price only; never present it as the price. Pass the returned priceId/quoteId/materialConfigId/shippingId and the per-unit priceCents as materialPriceCents into materialize_create_order. Quotes and orders are USD-only for now.",
         inputSchema: {
           fileAssetId: z.string().uuid(),
           materialId: z

@@ -16,7 +16,11 @@ Run this end to end, signed in as the reviewer account, before every submission.
 2. **Create as a plugin** → **Continue to Materialize** → the Clerk consent screen should name ChatGPT and the reviewer's email → **Allow**.
 3. ChatGPT should land back on Plugins with the tool list loaded. "Authentication succeeded, action discovery failed" means our first MCP request refused the token; check Sentry for `mcp.oauth.*` (that is how the missing-`users`-row bug showed up).
 4. In a new chat with the plugin enabled, run the manifest's review cases with the files in `public/review/`: a quote for an attached model, a marketplace search, a cheaper-material comparison. Stop before paying.
-5. Remove the custom server afterwards (Plugins → Materialize → remove) so the next run starts from a cold sign-in.
+   Check that every price ChatGPT states matches the quote's `totalCents` (fee and vendor minimum included), not `priceCents` plus shipping.
+5. After a server deploy that changes tools, open the plugin's settings and press **Refresh tools**; ChatGPT caches the tool list per app version.
+6. Remove the custom server afterwards (Plugins → Materialize → remove) so the next run starts from a cold sign-in.
+
+Things that look like failures and aren't: ChatGPT sends one MCP request without a bearer token during discovery and logs a 401 for it (`mcp.auth.rejected` with `hasBearer: false`, user agent `Python/… aiohttp/…`). That is its probe, and discovery still succeeds.
 
 Things that look like requirements and aren't: ChatGPT does **not** use dynamic client registration with us. Clerk's metadata advertises CIMD support, so ChatGPT's client id is the URL `https://chatgpt.com/oauth/client.json` and it requests `openid email offline_access` itself, so Clerk's DCR default scopes don't affect it. Claude and older clients still register through DCR.
 
