@@ -1514,6 +1514,14 @@ const handler = createMcpHandler(
             .describe(
               "Narrow to a specific material UUID (from materialize_list_materials) — much faster than getting all quotes."
             ),
+          materialIds: z
+            .array(z.string())
+            .min(1)
+            .max(8)
+            .optional()
+            .describe(
+              "Quote several materials in one call, e.g. every nylon (FDM nylon, SLS PA12, MJF PA12) or the user's shortlist. Prefer this to one call per material: the user gets one comparison instead of several separate cards."
+            ),
           countryCode: z
             .string()
             .length(2)
@@ -1523,7 +1531,7 @@ const handler = createMcpHandler(
         },
       },
       async (
-        { fileAssetId, materialId, countryCode, quantity },
+        { fileAssetId, materialId, materialIds, countryCode, quantity },
         extra
       ) => {
         try {
@@ -1533,6 +1541,7 @@ const handler = createMcpHandler(
             userId: auth.userId,
             fileAssetId,
             materialId,
+            materialIds,
             currency: "USD",
             countryCode,
             quantity,

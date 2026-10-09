@@ -111,3 +111,37 @@ export function vendorsToProbe(
     .sort((a, b) => a[1] - b[1])
     .map(([vendorId]) => vendorId);
 }
+
+/**
+ * `days` business days after `from` (UTC), skipping Saturday and Sunday.
+ * CraftCloud's production and delivery times are business days.
+ */
+export function addBusinessDays(from: Date, days: number): Date {
+  const d = new Date(Date.UTC(from.getUTCFullYear(), from.getUTCMonth(), from.getUTCDate()));
+  let left = Math.max(0, Math.round(days));
+  while (left > 0) {
+    d.setUTCDate(d.getUTCDate() + 1);
+    const wd = d.getUTCDay();
+    if (wd !== 0 && wd !== 6) left--;
+  }
+  return d;
+}
+
+/**
+ * When the part should arrive if ordered now: production, then the
+ * vendor's shipping time, both in business days. People want the date it
+ * reaches them, not how long the printer takes. Null without both times.
+ */
+export function arrivalWindow(
+  q: { productionTimeFastDays: number | null; productionTimeSlowDays: number | null; shippingDays: number | null },
+  now: Date = new Date()
+): { arrivesEarliest: string; arrivesLatest: string } | null {
+  const fast = q.productionTimeFastDays ?? q.productionTimeSlowDays;
+  const slow = q.productionTimeSlowDays ?? q.productionTimeFastDays;
+  if (fast == null || slow == null || q.shippingDays == null) return null;
+  const iso = (d: Date) => d.toISOString().slice(0, 10);
+  return {
+    arrivesEarliest: iso(addBusinessDays(now, fast + q.shippingDays)),
+    arrivesLatest: iso(addBusinessDays(now, slow + q.shippingDays)),
+  };
+}
