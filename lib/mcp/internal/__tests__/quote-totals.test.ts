@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { addBusinessDays, arrivalWindow, byBuyerTotal, chooseLead, processOf, quoteTotals, vendorsToProbe } from "../quote-totals";
+import { addBusinessDays, arrivalWindow, parseDays, trimQuotes, byBuyerTotal, chooseLead, processOf, quoteTotals, vendorsToProbe } from "../quote-totals";
 
 const noMinimums = new Map<string, number>();
 
@@ -97,16 +97,16 @@ describe("arrivalWindow", () => {
     expect(addBusinessDays(thu, 1).toISOString().slice(0, 10)).toBe("2026-10-09");
     expect(addBusinessDays(thu, 2).toISOString().slice(0, 10)).toBe("2026-10-12");
     expect(
-      arrivalWindow({ productionTimeFastDays: 5, productionTimeSlowDays: 7, shippingDays: 3 }, thu)
+      arrivalWindow({ productionTimeFastDays: 5, productionTimeSlowDays: 7, shippingDaysMin: 3, shippingDaysMax: 3 }, thu)
     ).toEqual({ arrivesEarliest: "2026-10-20", arrivesLatest: "2026-10-22" });
   });
 
   it("is null without a shipping time, and uses one production time when the other is missing", () => {
     expect(
-      arrivalWindow({ productionTimeFastDays: 5, productionTimeSlowDays: 7, shippingDays: null }, thu)
+      arrivalWindow({ productionTimeFastDays: 5, productionTimeSlowDays: 7, shippingDaysMin: null, shippingDaysMax: null }, thu)
     ).toBeNull();
     expect(
-      arrivalWindow({ productionTimeFastDays: null, productionTimeSlowDays: 4, shippingDays: 1 }, thu)
+      arrivalWindow({ productionTimeFastDays: null, productionTimeSlowDays: 4, shippingDaysMin: 1, shippingDaysMax: 1 }, thu)
     ).toEqual({ arrivesEarliest: "2026-10-15", arrivesLatest: "2026-10-15" });
   });
 });
@@ -144,5 +144,25 @@ describe("processOf / chooseLead", () => {
     expect(chooseLead([q("a", "FDM", 1000), q("b", "FDM", 1200)])).toEqual({ quoteId: "a", why: "cheapest", alternative: null });
     expect(chooseLead([q("s", "SLS", 900), q("f", "FDM", 1000)])).toEqual({ quoteId: "s", why: "cheapest", alternative: null });
     expect(chooseLead([])).toBeNull();
+  });
+});
+
+describe("parseDays", () => {
+  it("reads numbers and string ranges, so '4' + '2' can't become 42 days", () => {
+    expect(parseDays(3)).toEqual([3, 3]);
+    expect(parseDays("2")).toEqual([2, 2]);
+    expect(parseDays("2-3")).toEqual([2, 3]);
+    expect(parseDays("3 – 8")).toEqual([3, 8]);
+    expect(parseDays(null)).toBeNull();
+    expect(parseDays("soon")).toBeNull();
+  });
+});
+
+describe("trimQuotes", () => {
+  const q = (quoteId: string, materialId: string, vendorId: string) => ({ quoteId, materialId, vendorId });
+  it("keeps the cheapest config per material + vendor, capped, plus the lead", () => {
+    const rows = [q("a1", "pla", "v1"), q("a2", "pla", "v1"), q("b", "pla", "v2"), q("c", "abs", "v1"), q("d", "pa12", "v3")];
+    expect(trimQuotes(rows).map((r) => r.quoteId)).toEqual(["a1", "b", "c", "d"]);
+    expect(trimQuotes(rows, ["d"], 2).map((r) => r.quoteId)).toEqual(["a1", "b", "d"]);
   });
 });

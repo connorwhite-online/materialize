@@ -93,13 +93,23 @@ const SCRIPT = `
     return out.slice(0, 2);
   }
 
+  function arrives(pr){
+    if (!pr.arrivesEarliest || !pr.arrivesLatest) return null;
+    var md = { month: "short", day: "numeric", timeZone: "UTC" };
+    var a = new Date(pr.arrivesEarliest + "T12:00:00Z"), b = new Date(pr.arrivesLatest + "T12:00:00Z");
+    var first = a.toLocaleDateString("en-US", md);
+    return "arrives " + (pr.arrivesEarliest === pr.arrivesLatest ? first
+      : a.getUTCMonth() === b.getUTCMonth() ? first + "–" + b.getUTCDate()
+      : first + " – " + b.toLocaleDateString("en-US", md));
+  }
+
   function card(p, i){
     var s = p.scores || {};
     var name = p.name;
     return h("section", { "class": "pick" + (i === 0 ? " top" : ""), "aria-label": name }, [
       h("div", { "class": "meters" }, [
         h("div", { "class": "who", style: "display:flex;flex-direction:column;gap:2px" }, [
-          h("span", { "class": "pname rounded" }, [name]),
+          h("span", { "class": "pname rounded", style: "display:flex;align-items:center;gap:8px;flex-wrap:wrap" }, [name, i === 0 && p.price ? h("span", { "class": "pill", style: "background:var(--bg);color:var(--pick-ink);font-size:11.5px;padding:3px 9px" }, ["Best fit"]) : null]),
           h("span", { "class": "pmeta" }, [p.method + " · " + (TIER[p.priceTier] || p.priceTier)])
         ])
       ].concat(AXES.map(function(a){ return pips(s[a[0]] || 0, a[1]); }))),
@@ -108,7 +118,16 @@ const SCRIPT = `
         return h("p", null, [h("span", { html: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--warn-ink)" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M12 8v5M12 16.5h.01"/><circle cx="12" cy="12" r="9"/></svg>' }), c]);
       })) : null,
       h("div", { "class": "foot" }, [
-        i === 0 ? h("span", { "class": "pill", style: "background:var(--bg);color:var(--pick-ink)" }, ["Best fit"]) : h("span"),
+        p.price && p.price.fromCents != null
+          ? h("div", { style: "display:flex;flex-direction:column;gap:1px" }, [
+              h("span", { style: "display:flex;align-items:baseline;gap:6px" }, [
+                h("span", { "class": "muted", style: "font-size:12px" }, ["from"]),
+                h("span", { "class": "rounded", style: "font-size:20px;font-weight:750" }, ["$" + (p.price.fromCents / 100).toFixed(2)]),
+                h("span", { "class": "muted", style: "font-size:12px" }, ["all-in"])
+              ]),
+              h("span", { "class": "muted", style: "font-size:12px" }, [p.price.vendorName + (arrives(p.price) ? " · " + arrives(p.price) : "")])
+            ])
+          : i === 0 ? h("span", { "class": "pill", style: "background:var(--bg);color:var(--pick-ink)" }, ["Best fit"]) : h("span"),
         h("button", { "class": "btn " + (i === 0 ? "btn-primary" : "btn-soft"), type: "button", style: "min-height:44px;font-size:14px", onclick: function(){
           window.mz.followUp("Get print quotes in " + name + ".");
         } }, ["Quote in " + name])

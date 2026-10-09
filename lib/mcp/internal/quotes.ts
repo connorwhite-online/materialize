@@ -19,7 +19,9 @@ import {
   arrivalWindow,
   byBuyerTotal,
   chooseLead,
+  parseDays,
   processOf,
+  trimQuotes,
   type Lead,
   quoteTotals,
   vendorsToProbe,
@@ -49,8 +51,9 @@ export interface AgentQuote extends QuoteTotals {
   shippingPriceCents: number | null;
   productionTimeFastDays: number | null;
   productionTimeSlowDays: number | null;
-  /** Business days in transit for shippingId. */
-  shippingDays: number | null;
+  /** Business days in transit for shippingId, as a range. */
+  shippingDaysMin: number | null;
+  shippingDaysMax: number | null;
   /** Estimated delivery window if ordered now (YYYY-MM-DD, UTC). */
   arrivesEarliest: string | null;
   arrivesLatest: string | null;
@@ -62,6 +65,8 @@ export interface GetQuoteInput {
   materialId?: string;
   /** Several materials in one request, e.g. a family across processes. */
   materialIds?: string[];
+  /** Cap on returned options (default MAX_QUOTE_OPTIONS). */
+  maxOptions?: number;
   currency?: "USD" | "EUR" | "GBP";
   countryCode?: string;
   quantity?: number;
@@ -232,9 +237,10 @@ export async function getQuoteForUser(
       shippingId: shipping?.shippingId ?? null,
       shippingPriceCents:
         shipping?.price != null ? Math.round(shipping.price * 100) : null,
-      productionTimeFastDays: q.productionTimeFast ?? null,
-      productionTimeSlowDays: q.productionTimeSlow ?? null,
-      shippingDays: shipping?.deliveryTime ?? null,
+      productionTimeFastDays: parseDays(q.productionTimeFast)?.[0] ?? null,
+      productionTimeSlowDays: parseDays(q.productionTimeSlow)?.[1] ?? null,
+      shippingDaysMin: parseDays(shipping?.deliveryTime)?.[0] ?? null,
+      shippingDaysMax: parseDays(shipping?.deliveryTime)?.[1] ?? null,
       arrivesEarliest: null,
       arrivesLatest: null,
     });
@@ -323,9 +329,14 @@ export async function getQuoteForUser(
   }));
   priced.sort(byBuyerTotal);
   const lead = chooseLead(priced);
+  const options = trimQuotes(
+    priced,
+    lead ? [lead.quoteId, ...(lead.alternative ? [lead.alternative.quoteId] : [])] : [],
+    input.maxOptions
+  );
   const geometry = assetRow.asset.geometryData ?? undefined;
   return {
-    quotes: priced,
+    quotes: options,
     lead,
     warnings,
     quantity,
@@ -341,4 +352,18 @@ export async function getQuoteForUser(
       volumeCm3: toCm3(geometry?.volume, geometry?.dimensions),
     },
   };
+}
+
+/**
+ * The cheapest all-in option per material, for showing prices while the
+ * user is still choosing a material (the material card). `quotes` must be
+ * sorted by buyer total.
+ */
+export function cheapestByMaterial(quotes: AgentQuote[]): Map<string, AgentQuote> {
+  const out = new Map<string, AgentQuote>();
+  for (const q of quotes) {
+    if (q.totalCents == null) continue;
+    if (!out.has(q.materialId)) out.set(q.materialId, q);
+  }
+  return out;
 }

@@ -133,17 +133,40 @@ export function addBusinessDays(from: Date, days: number): Date {
  * reaches them, not how long the printer takes. Null without both times.
  */
 export function arrivalWindow(
-  q: { productionTimeFastDays: number | null; productionTimeSlowDays: number | null; shippingDays: number | null },
+  q: {
+    productionTimeFastDays: number | null;
+    productionTimeSlowDays: number | null;
+    shippingDaysMin: number | null;
+    shippingDaysMax: number | null;
+  },
   now: Date = new Date()
 ): { arrivesEarliest: string; arrivesLatest: string } | null {
   const fast = q.productionTimeFastDays ?? q.productionTimeSlowDays;
   const slow = q.productionTimeSlowDays ?? q.productionTimeFastDays;
-  if (fast == null || slow == null || q.shippingDays == null) return null;
+  const shipMin = q.shippingDaysMin ?? q.shippingDaysMax;
+  const shipMax = q.shippingDaysMax ?? q.shippingDaysMin;
+  if (fast == null || slow == null || shipMin == null || shipMax == null) return null;
   const iso = (d: Date) => d.toISOString().slice(0, 10);
   return {
-    arrivesEarliest: iso(addBusinessDays(now, fast + q.shippingDays)),
-    arrivesLatest: iso(addBusinessDays(now, slow + q.shippingDays)),
+    arrivesEarliest: iso(addBusinessDays(now, fast + shipMin)),
+    arrivesLatest: iso(addBusinessDays(now, slow + shipMax)),
   };
+}
+
+/**
+ * A day count from CraftCloud, which is typed as a number but has arrived
+ * as a string range ("2-3"). Adding the string to a number concatenated
+ * it ("4" + "2" = 42 days) and the card said "Arrives Dec 8-22" for a part
+ * due in a week. Returns [min, max], or null for anything unreadable.
+ */
+export function parseDays(v: unknown): [number, number] | null {
+  if (typeof v === "number" && Number.isFinite(v) && v >= 0) return [v, v];
+  if (typeof v !== "string") return null;
+  const m = v.match(/(\d+(?:\.\d+)?)\s*(?:[-–]\s*(\d+(?:\.\d+)?))?/);
+  if (!m) return null;
+  const a = Number(m[1]);
+  const b = m[2] != null ? Number(m[2]) : a;
+  return [Math.min(a, b), Math.max(a, b)];
 }
 
 /**
@@ -211,4 +234,31 @@ export function chooseLead(
     why: "cheapest",
     alternative: { quoteId: industrial.quoteId, kind: "upgrade", deltaCents: delta },
   };
+}
+
+/** How many options a quote result carries. */
+export const MAX_QUOTE_OPTIONS = 12;
+
+/**
+ * Keep the cheapest config per material + vendor, best first, capped,
+ * always keeping the lead. CraftCloud returns every colour and finish
+ * from every vendor (hundreds of rows for one cube); the agent and the
+ * card need the choices, not the colour swatches, and a payload that
+ * size invites the model to re-tabulate it under the card.
+ * `quotes` must be sorted by buyer total.
+ */
+export function trimQuotes<
+  T extends { quoteId: string; materialId: string; vendorId: string },
+>(quotes: T[], keepQuoteIds: string[] = [], max = MAX_QUOTE_OPTIONS): T[] {
+  const keep = new Set(keepQuoteIds);
+  const seen = new Set<string>();
+  const out: T[] = [];
+  for (const q of quotes) {
+    const k = `${q.materialId}|${q.vendorId}`;
+    if (seen.has(k) && !keep.has(q.quoteId)) continue;
+    if (out.length >= max && !keep.has(q.quoteId)) continue;
+    seen.add(k);
+    out.push(q);
+  }
+  return out;
 }
