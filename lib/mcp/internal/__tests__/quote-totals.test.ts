@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { byBuyerTotal, quoteTotals } from "../quote-totals";
+import { byBuyerTotal, quoteTotals, vendorsToProbe } from "../quote-totals";
 
 const noMinimums = new Map<string, number>();
 
@@ -58,5 +58,33 @@ describe("byBuyerTotal", () => {
     expect(
       [cheapItem, noShipping, dearerItem].sort(byBuyerTotal)
     ).toEqual([dearerItem, cheapItem, noShipping]);
+  });
+});
+
+describe("vendorsToProbe", () => {
+  const q = (vendorId: string, priceCents: number, materialId = "pla") => ({
+    vendorId,
+    materialId,
+    priceCents,
+    shippingPriceCents: 500,
+  });
+
+  it("asks for a pricier vendor when every probed one has a high minimum", () => {
+    // a, b were probed and both top up to $33; c's $12 item can still win.
+    const quotes = [q("a", 300), q("b", 400), q("c", 1200)];
+    const minimums = new Map([["a", 33], ["b", 33]]);
+    expect(vendorsToProbe(quotes, 1, minimums, new Set(["a", "b"]))).toEqual(["c"]);
+  });
+
+  it("stops once no unprobed vendor can undercut the best known total", () => {
+    const quotes = [q("a", 300), q("c", 1200)];
+    const minimums = new Map([["a", 0]]);
+    expect(vendorsToProbe(quotes, 1, minimums, new Set(["a"]))).toEqual([]);
+  });
+
+  it("judges each material on its own and skips vendors already attempted", () => {
+    const quotes = [q("a", 300, "pla"), q("x", 900, "nylon"), q("y", 800, "nylon")];
+    const minimums = new Map([["a", 0]]);
+    expect(vendorsToProbe(quotes, 1, minimums, new Set(["a", "x"]))).toEqual(["y"]);
   });
 });
