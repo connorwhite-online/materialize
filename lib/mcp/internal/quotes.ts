@@ -12,8 +12,12 @@ import {
   getCraftCloudCatalog,
   getProviderIndex,
 } from "@/lib/craftcloud/catalog";
+import { getVendorMinimums } from "@/lib/craftcloud/vendor-minimums";
+import { pickMinimumProbes } from "@/components/print/material-picker/vendor-minimums";
+import { logError } from "@/lib/logger";
+import { byBuyerTotal, quoteTotals, type QuoteTotals } from "./quote-totals";
 
-export interface AgentQuote {
+export interface AgentQuote extends QuoteTotals {
   priceId: string;
   quoteId: string;
   vendorId: string;
@@ -139,7 +143,7 @@ export async function getQuoteForUser(
     if (!shippingByVendor.has(s.vendorId)) shippingByVendor.set(s.vendorId, s);
   }
 
-  const quotes: AgentQuote[] = [];
+  const quotes: Omit<AgentQuote, keyof QuoteTotals>[] = [];
   let dropped = 0;
   for (const q of lastSnapshot.quotes ?? []) {
     const entry = catalog.configById.get(q.materialConfigId);
@@ -180,6 +184,41 @@ export async function getQuoteForUser(
     warnings.push("Quote polling hit the 30s deadline; results may be incomplete");
   }
 
-  quotes.sort((a, b) => a.priceCents - b.priceCents);
-  return { quotes, warnings };
+  // Learn the vendor minimums the cheapest options would hit, the same
+  // probes the print picker runs. Best-effort: a vendor whose probe
+  // fails is priced without a minimum and flagged minimumKnown: false.
+  let minimums = new Map<string, number>();
+  try {
+    const probes = pickMinimumProbes(
+      (lastSnapshot.quotes ?? []).map((q) => ({
+        quoteId: q.quoteId,
+        vendorId: q.vendorId,
+        materialId: catalog.configById.get(q.materialConfigId)?.material.id ?? "",
+        price: q.price,
+      })),
+      shippings.map((s) => ({
+        vendorId: s.vendorId,
+        price: s.price,
+        shippingId: s.shippingId,
+      })),
+      quantity
+    );
+    minimums = new Map(
+      Object.entries(await getVendorMinimums(probes, currency))
+    );
+  } catch (err) {
+    logError("getQuoteForUser.vendorMinimums", err);
+  }
+  if (quotes.some((q) => !minimums.has(q.vendorId))) {
+    warnings.push(
+      "Some vendors' minimum order values weren't checked, so their totalCents may be low (minimumKnown: false). The order confirmation shows the final price."
+    );
+  }
+
+  const priced: AgentQuote[] = quotes.map((q) => ({
+    ...q,
+    ...quoteTotals(q, quantity, minimums),
+  }));
+  priced.sort(byBuyerTotal);
+  return { quotes: priced, warnings };
 }

@@ -67,6 +67,8 @@ import { LICENSE_ENUM_VALUES } from "@/lib/licenses";
 import { DESIGN_TAG_OPTIONS } from "@/lib/validations/file";
 import { deriveAppUrl } from "@/lib/utils/request-url";
 import { logError } from "@/lib/logger";
+import { clerkClient } from "@clerk/nextjs/server";
+import { primaryEmail } from "@/lib/clerk-email";
 import { shippingPhoneSchema } from "@/lib/validations/address";
 import { TOOL_ANNOTATIONS } from "@/lib/mcp/tool-annotations";
 
@@ -142,6 +144,49 @@ const OWNER_ONLY_TOOLS = [
 ];
 
 const requestAuth = new AsyncLocalStorage<{ auth?: MaterializeAuthInfo }>();
+
+/**
+ * Order price fields for create_order responses. amountDueCents is what
+ * the user pays (the confirm page charges totalPriceCents + the service
+ * fee); totalPriceCents alone reads as the total and isn't.
+ */
+function priceFields(result: {
+  totalPriceCents: number;
+  serviceFeeCents: number;
+  breakdown?: {
+    productionCents: number;
+    minimumFeeCents: number;
+    shippingCents: number;
+  };
+}) {
+  return {
+    amountDueCents: result.totalPriceCents + result.serviceFeeCents,
+    totalPriceCents: result.totalPriceCents,
+    serviceFeeCents: result.serviceFeeCents,
+    ...(result.breakdown
+      ? {
+          productionCents: result.breakdown.productionCents,
+          minimumFeeCents: result.breakdown.minimumFeeCents,
+          shippingCents: result.breakdown.shippingCents,
+        }
+      : {}),
+  };
+}
+
+/**
+ * The signed-in user's primary email, so an agent doesn't have to ask
+ * for something the account already has (ChatGPT stopped the order
+ * review case to ask for it). Null when Clerk has none or is unreachable.
+ */
+async function accountEmail(userId: string): Promise<string | null> {
+  try {
+    const client = await clerkClient();
+    return primaryEmail(await client.users.getUser(userId));
+  } catch (err) {
+    logError("mcp.accountEmail", err);
+    return null;
+  }
+}
 
 async function verifyAndRecord(req: Request, bearerToken: string | undefined) {
   const auth = await verifyMaterializeToken(req, bearerToken);
@@ -1443,7 +1488,7 @@ const handler = createMcpHandler(
       {
         title: "Get prices for a print",
         description:
-          "Server-side polls CraftCloud for prices on a registered fileAsset. Returns sorted (cheapest first) quotes with vendor, finish, color, lead time. Pass the returned priceId/quoteId/materialConfigId/shippingId into materialize_create_order. Quotes and orders are USD-only for now.",
+          "Server-side polls CraftCloud for prices on a registered fileAsset. Returns quotes sorted by what the buyer pays, with vendor, finish, color, lead time. totalCents is the price to tell the user: production x quantity, plus the vendor's minimum-order top-up (minimumFeeCents), shipping, and Materialize's service fee (serviceFeeCents). priceCents is the per-unit production price only; never present it as the price. Pass the returned priceId/quoteId/materialConfigId/shippingId and the per-unit priceCents as materialPriceCents into materialize_create_order. Quotes and orders are USD-only for now.",
         inputSchema: {
           fileAssetId: z.string().uuid(),
           materialId: z
@@ -1496,7 +1541,7 @@ const handler = createMcpHandler(
       {
         title: "Create a draft print order (requires user confirmation)",
         description:
-          "Creates a draft order against the user's account. The user is notified by email and must approve and pay via the returned confirmationUrl before the order is placed with the vendor. USD only. Idempotency is keyed on (user, idempotencyKey).",
+          "Creates a draft order against the user's account. The user is notified by email and must approve and pay via the returned confirmationUrl before the order is placed with the vendor. The response's amountDueCents is what the user will pay, broken down as productionCents + minimumFeeCents (the vendor's minimum-order top-up) + shippingCents + serviceFeeCents; tell the user that amount, and explain minimumFeeCents if it's above zero. USD only. Idempotency is keyed on (user, idempotencyKey).",
         inputSchema: {
           priceId: z
             .string()
@@ -1514,7 +1559,13 @@ const handler = createMcpHandler(
           materialPriceCents: z.number().int().min(1),
           shippingPriceCents: z.number().int().min(0),
           shippingAddress: z.object({
-            email: z.string().email(),
+            email: z
+              .string()
+              .email()
+              .optional()
+              .describe(
+                "Where order emails go. Omit to use the signed-in account's email; only ask the user if they want a different one."
+              ),
             firstName: z.string().min(1),
             lastName: z.string().min(1),
             address: z.string().min(1),
@@ -1540,6 +1591,15 @@ const handler = createMcpHandler(
         try {
           const auth = readAuthExtra(extra);
           requireScope(auth, "orders:create");
+          const email =
+            input.shippingAddress.email ?? (await accountEmail(auth.userId));
+          if (!email) {
+            return errorResult({
+              code: "email_required",
+              message:
+                "This account has no email address on file. Ask the user for one and pass shippingAddress.email.",
+            });
+          }
           const result = await createAgentInitiatedOrder({
             userId: auth.userId,
             initiatedByTokenId: auth.tokenId,
@@ -1556,7 +1616,7 @@ const handler = createMcpHandler(
             materialPriceCents: input.materialPriceCents,
             shippingPriceCents: input.shippingPriceCents,
             currency: "USD",
-            shippingAddress: input.shippingAddress,
+            shippingAddress: { ...input.shippingAddress, email },
           });
           if ("error" in result) {
             return errorResult({
@@ -1578,8 +1638,7 @@ const handler = createMcpHandler(
               terminal: false,
               chargedAt: new Date().toISOString(),
               cancellationDeadline: result.cancellationDeadline,
-              totalPriceCents: result.totalPriceCents,
-              serviceFeeCents: result.serviceFeeCents,
+              ...priceFields(result),
               currency: "USD",
               remainingPeriodBudgetCents: result.remainingPeriodBudgetCents,
               notificationsSent: { email: emailResult.ok, push: false },
@@ -1599,8 +1658,7 @@ const handler = createMcpHandler(
             terminal: false,
             confirmationUrl,
             expiresAt: result.confirmationExpiresAt,
-            totalPriceCents: result.totalPriceCents,
-            serviceFeeCents: result.serviceFeeCents,
+            ...priceFields(result),
             currency: "USD",
             ...(result.fallbackReason
               ? { reason: result.fallbackReason }

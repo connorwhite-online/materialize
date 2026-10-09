@@ -137,6 +137,17 @@ export interface CreateAgentOrderResult {
   totalPriceCents: number;
   serviceFeeCents: number;
   /**
+   * The line items behind totalPriceCents, so an agent can explain the
+   * price instead of reporting an unexplained difference from the quote
+   * (ChatGPT did: "$75.76 Materialize did not explain"). Absent on an
+   * idempotent replay of an older order.
+   */
+  breakdown?: {
+    productionCents: number;
+    minimumFeeCents: number;
+    shippingCents: number;
+  };
+  /**
    * Set on auto-approved orders. Until this timestamp, the
    * CraftCloud-placement step is held so the user can still cancel.
    */
@@ -460,6 +471,11 @@ export async function createAgentInitiatedOrder(
     cancellationDeadline: autoApprovedUntil?.toISOString(),
     totalPriceCents: totalPrice,
     serviceFeeCents: serviceFee,
+    breakdown: {
+      productionCents: materialPriceCents * input.quantity,
+      minimumFeeCents: productionFeeCents,
+      shippingCents: input.shippingPriceCents,
+    },
     remainingPeriodBudgetCents,
     fallbackReason,
   };
@@ -471,6 +487,9 @@ export interface AgentOrderSummary {
   terminal: boolean;
   initiatedByAgent: boolean;
   agentName: string | null;
+  /** What the user pays: totalPriceCents + serviceFeeCents. */
+  amountDueCents: number;
+  /** Items + shipping, before the service fee. Not the total. */
   totalPriceCents: number;
   serviceFeeCents: number;
   currency: "USD";
@@ -576,6 +595,7 @@ async function shapeOrderRow(
     terminal: TERMINAL_STATUSES.has(row.status),
     initiatedByAgent: row.initiatedByTokenId != null,
     agentName: row.agentName,
+    amountDueCents: row.totalPrice + row.serviceFee,
     totalPriceCents: row.totalPrice,
     serviceFeeCents: row.serviceFee,
     currency: "USD",
