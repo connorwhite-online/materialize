@@ -6,7 +6,6 @@ import { widgetDocument } from "./shell";
  * one against, and what was ruled out and why. "Quote in X" hands the
  * choice back to the chat.
  */
-export const MATERIALS_WIDGET_URI = "ui://materialize/materials-v2.html";
 
 const STYLES = `
 .hd{display:flex;justify-content:space-between;align-items:flex-end;gap:12px;flex-wrap:wrap;padding:2px 4px 0}

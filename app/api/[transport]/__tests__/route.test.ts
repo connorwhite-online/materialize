@@ -282,20 +282,20 @@ describe("CAD tools are owner-only on top of their scope", () => {
 
 describe("in-chat widgets (ChatGPT apps / MCP Apps)", () => {
   it.each([
-    ["materialize_get_quote", "ui://materialize/quote-v2.html"],
-    ["materialize_recommend_material", "ui://materialize/materials-v2.html"],
-  ])("%s points at its widget under both hosts' keys", (name, uri) => {
+    ["materialize_get_quote", "quote"],
+    ["materialize_recommend_material", "materials"],
+  ])("%s points at its registered widget under both hosts' keys", (name, base) => {
     const tool = registered.find((r) => r.name === name);
     const meta = (tool!.config as { _meta?: Record<string, unknown> })._meta!;
-    expect(meta.ui).toEqual({ resourceUri: uri });
+    const uri = (meta.ui as { resourceUri: string }).resourceUri;
+    // Content-hashed, so a changed widget is a new URI hosts can't serve stale.
+    expect(uri).toMatch(new RegExp(`^ui://materialize/${base}-[0-9a-f]{10}\\.html$`));
     expect(meta["openai/outputTemplate"]).toBe(uri);
+    expect(registeredResources.map((r) => r.uri)).toContain(uri);
   });
 
   it("registers each widget as an MCP Apps HTML resource that allows the CDN and our origin", async () => {
-    expect(registeredResources.map((r) => r.uri).sort()).toEqual([
-      "ui://materialize/materials-v2.html",
-      "ui://materialize/quote-v2.html",
-    ]);
+    expect(registeredResources).toHaveLength(2);
     for (const r of registeredResources) {
       const { contents } = await r.read();
       expect(contents[0].mimeType).toBe("text/html;profile=mcp-app");
@@ -304,5 +304,18 @@ describe("in-chat widgets (ChatGPT apps / MCP Apps)", () => {
       expect(csp.resourceDomains).toContain("https://cdn.jsdelivr.net");
       expect(csp.connectDomains.some((d) => d.startsWith("http"))).toBe(true);
     }
+  });
+});
+
+describe("card results", () => {
+  it("tells ChatGPT the user already sees the card, and leaves other hosts' text alone", async () => {
+    const tool = registered.find((r) => r.name === "materialize_recommend_material")!;
+    const auth = { userId: "user_test", tokenId: "tok_test", tokenName: "t", scopes: ["catalog:read"] };
+    const plain = await tool.handler({ useCase: "outdoor" }, { authInfo: { extra: auth } });
+    const chatgpt = await tool.handler({ useCase: "outdoor" }, { authInfo: { extra: auth }, _meta: { "openai/locale": "en-US" } });
+    expect(plain.content).toHaveLength(1);
+    expect(chatgpt.content).toHaveLength(2);
+    expect(chatgpt.content[0].text).toMatch(/materials card/);
+    expect(chatgpt.content[1].text).toBe(plain.content[0].text);
   });
 });

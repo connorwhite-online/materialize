@@ -85,6 +85,28 @@ import { TOOL_ANNOTATIONS } from "@/lib/mcp/tool-annotations";
  * hand to widgets, and what current clients read first) and as one
  * JSON text block for clients that predate structured output.
  */
+/**
+ * ChatGPT puts its own `openai/*` keys (locale, user agent, location) in
+ * every tools/call request's _meta; their presence means the result will
+ * render as our card.
+ */
+function hostRendersCard(extra: unknown): boolean {
+  const meta = (extra as { _meta?: Record<string, unknown> } | undefined)?._meta;
+  return !!meta && Object.keys(meta).some((k) => k.startsWith("openai/"));
+}
+
+/**
+ * A card result: the JSON for the model and widget, led by a note that the
+ * user is already looking at it. The widget description alone didn't stop
+ * ChatGPT from re-tabulating every price under the card; the note goes
+ * only to hosts that render it, so text-only clients still get prices.
+ */
+function cardResult(payload: object, extra: unknown, note: string) {
+  const base = jsonResult(payload);
+  if (!hostRendersCard(extra)) return base;
+  return { ...base, content: [{ type: "text" as const, text: note }, ...base.content] };
+}
+
 function jsonResult(payload: object) {
   return {
     content: [
@@ -616,7 +638,9 @@ const handler = createMcpHandler(
             });
           }
           // useCase titles the material widget.
-          return jsonResult({ ...result, useCase: args.useCase ?? null });
+          return cardResult({ ...result, useCase: args.useCase ?? null }, extra,
+            "The user is looking at this shortlist in Materialize's materials card: each material's strength, flex, detail and heat ratings, description and cautions, and what was ruled out. Reply in one or two sentences on which you'd pick and why. Don't restate the shortlist or ratings in a table."
+          );
         } catch (err) {
           return scopeOrInternal(err, "materialize_recommend_material");
         }
@@ -1501,7 +1525,7 @@ const handler = createMcpHandler(
       {
         title: "Get prices for a print",
         description:
-          "Server-side polls CraftCloud for prices on a registered fileAsset. Returns quotes sorted by what the buyer pays, with vendor, finish, color, lead time. totalCents is the price to tell the user: production x quantity, plus the vendor's minimum-order top-up (minimumFeeCents), shipping, and Materialize's service fee (serviceFeeCents). priceCents is the per-unit production price only; never present it as the price. Pass the returned priceId/quoteId/materialConfigId/shippingId and the per-unit priceCents as materialPriceCents into materialize_create_order. Quotes and orders are USD-only for now. Where the host shows Materialize's quote card (ChatGPT, Claude), the card already lists the prices and compares the options: don't repeat them in a table, give a sentence or two of advice instead.",
+          "Server-side polls CraftCloud for prices on a registered fileAsset. Returns quotes sorted by what the buyer pays, with vendor, finish, color, lead time. `lead` names the option to recommend first: the cheapest industrial print (SLS, MJF, SLA…) when it costs at most twice the cheapest, with the cheaper FDM print as its `alternative`; otherwise the cheapest, with industrial as the upgrade. Present it the same way. totalCents is the price to tell the user: production x quantity, plus the vendor's minimum-order top-up (minimumFeeCents), shipping, and Materialize's service fee (serviceFeeCents). priceCents is the per-unit production price only; never present it as the price. Pass the returned priceId/quoteId/materialConfigId/shippingId and the per-unit priceCents as materialPriceCents into materialize_create_order. Quotes and orders are USD-only for now. Where the host shows Materialize's quote card (ChatGPT, Claude), the card already lists the prices and compares the options: don't repeat them in a table, give a sentence or two of advice instead.",
         _meta: widgetToolMeta(QUOTE_WIDGET_URI, {
           invoking: "Getting live quotes…",
           invoked: "Quotes ready",
@@ -1560,7 +1584,9 @@ const handler = createMcpHandler(
           } catch (err) {
             logError("mcp.quote.widgetModelLink", err);
           }
-          return jsonResult({ ...result, part: { ...result.part, model } });
+          return cardResult({ ...result, part: { ...result.part, model } }, extra,
+            "The user is looking at these quotes in Materialize's quote card: the part in 3D, the recommended option's price breakdown, a one-tap cheaper or upgrade option, and a comparison of every option. Reply in one or two sentences of advice. Don't restate the prices or list the options in a table."
+          );
         } catch (err) {
           return scopeOrInternal(err, "materialize_get_quote");
         }
