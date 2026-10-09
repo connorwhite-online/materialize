@@ -101,13 +101,21 @@ export async function verifyOAuthAccessToken(
   if (!connection) return undefined;
   await touchLastUsed(connection);
 
+  const expiresAt = toEpochSeconds(token.expiration);
+  if (expiresAt != null && expiresAt < Date.now() / 1000) {
+    // Clerk says live but the expiry reads as past: mcp-handler will 401
+    // this request, which a client reports as "reauthentication required".
+    logError("mcp.oauth.expiryInPast", {
+      expiration: token.expiration,
+      clientId: token.clientId,
+    });
+  }
+
   return {
     token: bearerToken,
     clientId: token.clientId,
     scopes: connection.scopes,
-    // Clerk reports milliseconds; AuthInfo.expiresAt is seconds.
-    expiresAt:
-      token.expiration != null ? Math.floor(token.expiration / 1000) : undefined,
+    expiresAt,
     extra: {
       userId: token.subject,
       tokenId: connection.id,
@@ -115,6 +123,20 @@ export async function verifyOAuthAccessToken(
       scopes: connection.scopes,
     },
   };
+}
+
+/**
+ * AuthInfo.expiresAt is epoch seconds, and mcp-handler answers 401
+ * "Token has expired" for anything in the past. Clerk's JWT path reports
+ * milliseconds, but the unit isn't pinned for opaque tokens verified
+ * through its API, and dividing seconds by 1000 lands in January 1970:
+ * every request from a freshly signed-in ChatGPT then fails discovery
+ * with "Reauthentication required". Anything below 1e12 is already in
+ * seconds (1e12 ms is 2001; 1e12 s is the year 33658).
+ */
+export function toEpochSeconds(expiration: number | null): number | undefined {
+  if (expiration == null) return undefined;
+  return expiration >= 1e12 ? Math.floor(expiration / 1000) : expiration;
 }
 
 /**
