@@ -318,7 +318,7 @@ const SCRIPT = `
     var q = (opts[state.pick] || opts[0]).q;
     var actions = h("div", { "class": "actions" }, [
       h("button", { "class": "btn btn-primary", type: "button", onclick: function(){
-        window.mz.followUp("Order the " + title(q) + " option from " + q.vendorName + " (" + money(parts(q, d.quantity || 1).total) + " all-in).");
+        window.mz.followUp("Order the " + title(q) + " option from " + q.vendorName + " (" + money(parts(q, d.quantity || 1).total) + " all-in). Ask me for the shipping address and phone number to use.");
       } }, ["Order this"]),
       opts.length > 1 ? h("button", { "class": "btn btn-soft", type: "button", "aria-expanded": String(state.view === "compare"), onclick: function(){
         state.view = state.view === "compare" ? "best" : "compare"; render();
