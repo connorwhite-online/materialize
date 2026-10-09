@@ -1,12 +1,23 @@
 import "server-only";
 
+import { createHash } from "node:crypto";
 import { deriveAppUrl } from "@/lib/utils/request-url";
 import { mintWidgetModelToken } from "./model-token";
-import { MATERIALS_WIDGET_URI, materialsWidgetHtml } from "./materials-widget";
-import { QUOTE_WIDGET_URI, quoteWidgetHtml } from "./quote-widget";
+import { materialsWidgetHtml } from "./materials-widget";
+import { quoteWidgetHtml } from "./quote-widget";
 import { WIDGET_CDN, WIDGET_MIME_TYPE } from "./shell";
 
-export { MATERIALS_WIDGET_URI, QUOTE_WIDGET_URI };
+/**
+ * Hosts cache a template by its URI, so the URI carries a hash of the
+ * page: any change to a widget is a new URI and reaches users on the
+ * next tool refresh. A hand-bumped version was forgotten once and
+ * ChatGPT kept serving the old card.
+ */
+function versionedUri(name: string, html: string): string {
+  const hash = createHash("sha256").update(html).digest("hex").slice(0, 10);
+  return `ui://materialize/${name}-${hash}.html`;
+}
+
 
 /**
  * What each card already shows, read by the host's model alongside the
@@ -17,6 +28,13 @@ export const QUOTE_WIDGET_DESCRIPTION =
   "Shows the user an interactive card: the part in 3D with its name and size, the cheapest option's all-in price broken into printing, shipping, vendor minimum and service fee, and a comparison of every option. Don't repeat these prices or list the options in a table; add one or two sentences of advice, such as which option you'd pick and why.";
 export const MATERIALS_WIDGET_DESCRIPTION =
   "Shows the user an interactive card: each shortlisted material with strength, flex, detail and heat meters, its description and cautions, and what was ruled out. Don't repeat the shortlist or the ratings in a table; add one or two sentences on which you'd pick for their part and why.";
+
+// The description travels with the template, so it's part of the hash too.
+export const QUOTE_WIDGET_URI = versionedUri("quote", quoteWidgetHtml() + QUOTE_WIDGET_DESCRIPTION);
+export const MATERIALS_WIDGET_URI = versionedUri(
+  "materials",
+  materialsWidgetHtml() + MATERIALS_WIDGET_DESCRIPTION
+);
 
 /**
  * Tool `_meta` that points a tool at its widget. `ui.resourceUri` is the

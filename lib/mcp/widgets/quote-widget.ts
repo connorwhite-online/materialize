@@ -5,11 +5,7 @@ import { FALLBACK_ICON, widgetDocument } from "./shell";
  * name and size, the cheapest option as line items with percent bars,
  * and a comparison of every option on one scale. Clicking an option
  * makes it the one shown; "Order this" hands the choice back to the chat.
- *
- * Bump the version in the URI on any breaking change: hosts cache the
- * template by URI.
  */
-export const QUOTE_WIDGET_URI = "ui://materialize/quote-v2.html";
 
 const STYLES = `
 .head{display:flex;gap:16px;align-items:stretch}
