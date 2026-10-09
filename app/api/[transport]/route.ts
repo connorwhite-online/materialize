@@ -47,6 +47,13 @@ import {
 } from "@/lib/mcp/internal/projects";
 import { getQuoteForUser } from "@/lib/mcp/internal/quotes";
 import {
+  MATERIALS_WIDGET_URI,
+  QUOTE_WIDGET_URI,
+  registerWidgets,
+  widgetModelLink,
+  widgetToolMeta,
+} from "@/lib/mcp/widgets";
+import {
   assertCadAccess,
   CadAccessError,
   hasCadAccess,
@@ -267,6 +274,7 @@ const MCP_SERVER_INSTRUCTIONS = [
 const handler = createMcpHandler(
   async (server) => {
     const tools = annotateTools(server);
+    registerWidgets(server as unknown as Parameters<typeof registerWidgets>[0]);
 
     /* -------------------- CAD (agent writes, Materialize runs) -------------------- */
 
@@ -546,6 +554,10 @@ const handler = createMcpHandler(
         title: "Recommend materials for a part",
         description:
           "Shortlist materials for what the part must do, with why each fits, what to watch out for, and the materialId to pass to materialize_get_quote. Say what matters (useCase, or minimum scores 1-5 for strength, flexibility, detail, heatResistance, a price ceiling, a preference) and, if you have one, the fileAssetId so materials the part can't be made in (too big, too thin) are ruled out. Ask the user what the part will do before guessing: a bracket, a figurine and a phone case want different materials. ruledOut says which requirement removed each material.",
+        _meta: widgetToolMeta(MATERIALS_WIDGET_URI, {
+          invoking: "Shortlisting materials…",
+          invoked: "Materials ready",
+        }),
         inputSchema: {
           useCase: z
             .enum([
@@ -603,7 +615,8 @@ const handler = createMcpHandler(
               message: result.error,
             });
           }
-          return jsonResult(result);
+          // useCase titles the material widget.
+          return jsonResult({ ...result, useCase: args.useCase ?? null });
         } catch (err) {
           return scopeOrInternal(err, "materialize_recommend_material");
         }
@@ -1489,6 +1502,10 @@ const handler = createMcpHandler(
         title: "Get prices for a print",
         description:
           "Server-side polls CraftCloud for prices on a registered fileAsset. Returns quotes sorted by what the buyer pays, with vendor, finish, color, lead time. totalCents is the price to tell the user: production x quantity, plus the vendor's minimum-order top-up (minimumFeeCents), shipping, and Materialize's service fee (serviceFeeCents). priceCents is the per-unit production price only; never present it as the price. Pass the returned priceId/quoteId/materialConfigId/shippingId and the per-unit priceCents as materialPriceCents into materialize_create_order. Quotes and orders are USD-only for now.",
+        _meta: widgetToolMeta(QUOTE_WIDGET_URI, {
+          invoking: "Getting live quotes…",
+          invoked: "Quotes ready",
+        }),
         inputSchema: {
           fileAssetId: z.string().uuid(),
           materialId: z
@@ -1527,7 +1544,14 @@ const handler = createMcpHandler(
               retryable: true,
             });
           }
-          return jsonResult(result);
+          // The widget's 3D view; best-effort, the card renders without it.
+          let model: Awaited<ReturnType<typeof widgetModelLink>> | null = null;
+          try {
+            model = await widgetModelLink(result.part.fileAssetId, result.part.format);
+          } catch (err) {
+            logError("mcp.quote.widgetModelLink", err);
+          }
+          return jsonResult({ ...result, part: { ...result.part, model } });
         } catch (err) {
           return scopeOrInternal(err, "materialize_get_quote");
         }

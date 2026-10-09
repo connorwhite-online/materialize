@@ -83,6 +83,10 @@ export const PUBLIC_ROUTES = [
   // Same-origin proxy for the 3D model preview on published file
   // pages. The route itself enforces published-or-owner access.
   "/api/files/preview/(.*)",
+  // Model bytes for the ChatGPT / Claude widgets' 3D preview. Fetched
+  // from the host's sandbox iframe with no session; the route checks a
+  // signed token minted by the MCP tool (lib/mcp/widgets/model-token.ts).
+  "/api/widget/(.*)",
   // MCP server. The transport route (app/api/[transport]/route.ts)
   // does its own bearer-token auth via withMcpAuth — Clerk session
   // cookies are not relevant here.
