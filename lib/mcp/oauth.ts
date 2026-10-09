@@ -86,12 +86,27 @@ export async function verifyOAuthAccessToken(
   try {
     const client = await clerkClient();
     token = await client.idPOAuthAccessToken.verify(bearerToken);
-  } catch {
-    // Unknown, malformed or foreign tokens all land here. Not an error
-    // worth logging — any bearer that isn't a PAT is tried this way.
+  } catch (err) {
+    // Unknown, malformed or foreign tokens all land here. Logged while
+    // ChatGPT discovery is being debugged: it gets a 401 on a token that
+    // verified moments earlier, and this is one of the two places that
+    // can produce it. Never logs the token itself.
+    logError("mcp.oauth.verifyRejected", {
+      status: (err as { status?: number })?.status,
+      message: err instanceof Error ? err.message : String(err),
+      tokenShape: describeToken(bearerToken),
+    });
     return undefined;
   }
-  if (token.revoked || token.expired) return undefined;
+  if (token.revoked || token.expired) {
+    logError("mcp.oauth.tokenDead", {
+      revoked: token.revoked,
+      expired: token.expired,
+      expiration: token.expiration,
+      clientId: token.clientId,
+    });
+    return undefined;
+  }
   if (!token.subject?.startsWith("user_") || !token.clientId) return undefined;
 
   const connection = await resolveOAuthConnection({
@@ -123,6 +138,13 @@ export async function verifyOAuthAccessToken(
       scopes: connection.scopes,
     },
   };
+}
+
+/** Enough to tell token kinds apart in a log, nothing usable as a credential. */
+function describeToken(token: string): string {
+  const prefix = token.match(/^[a-z]+_/)?.[0] ?? "";
+  const jwt = token.split(".").length === 3 ? "jwt" : "opaque";
+  return `${prefix || "noprefix"}:${jwt}:${token.length}`;
 }
 
 /**
