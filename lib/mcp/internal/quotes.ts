@@ -18,6 +18,9 @@ import { logError } from "@/lib/logger";
 import {
   arrivalWindow,
   byBuyerTotal,
+  chooseLead,
+  processOf,
+  type Lead,
   quoteTotals,
   vendorsToProbe,
   type QuoteTotals,
@@ -38,6 +41,8 @@ export interface AgentQuote extends QuoteTotals {
   finishGroupName: string;
   materialConfigId: string;
   color: string;
+  /** Printing process, e.g. "FDM", "SLS", "MJF" (null when unknown). */
+  process: string | null;
   priceCents: number;
   currency: string;
   shippingId: string | null;
@@ -64,6 +69,8 @@ export interface GetQuoteInput {
 
 export interface GetQuoteResult {
   quotes: AgentQuote[];
+  /** Which option to lead with, and the one to offer beside it. */
+  lead: Lead | null;
   warnings: string[];
   quantity: number;
   countryCode: string;
@@ -219,6 +226,7 @@ export async function getQuoteForUser(
       finishGroupName: entry.finishGroup.name,
       materialConfigId: entry.config.id,
       color: entry.config.color,
+      process: processOf(entry.material),
       priceCents: Math.round(q.price * 100),
       currency: q.currency ?? currency,
       shippingId: shipping?.shippingId ?? null,
@@ -314,9 +322,11 @@ export async function getQuoteForUser(
     ...(arrivalWindow(q, now) ?? {}),
   }));
   priced.sort(byBuyerTotal);
+  const lead = chooseLead(priced);
   const geometry = assetRow.asset.geometryData ?? undefined;
   return {
     quotes: priced,
+    lead,
     warnings,
     quantity,
     countryCode,

@@ -145,3 +145,70 @@ export function arrivalWindow(
     arrivesLatest: iso(addBusinessDays(now, slow + q.shippingDays)),
   };
 }
+
+/**
+ * The printing process of a CraftCloud material: its first printing
+ * method's short name, else read off the material name ("SLS Nylon
+ * PA12", "HP MJF Nylon PA12", "FDM Nylon").
+ */
+export function processOf(material: {
+  name: string;
+  printingMethods?: Array<{ name: string }>;
+}): string | null {
+  const fromName = material.name.match(/\b(FDM|FFF|SLS|MJF|SLA|DLP|LCD|PolyJet|SLM|DMLS|MJ|BJ)\b/i)?.[1];
+  const method = material.printingMethods?.[0]?.name;
+  const p = (fromName ?? method ?? "").trim();
+  if (!p) return null;
+  return /^fff$/i.test(p) ? "FDM" : p.length <= 6 ? p.toUpperCase() : p;
+}
+
+/** FDM is the hobbyist process; everything else counts as industrial. */
+export function isIndustrial(process: string | null): boolean {
+  return process != null && !/^(FDM|FFF)$/i.test(process) && !/fused/i.test(process);
+}
+
+export interface Lead {
+  /** The option the card and the agent should lead with. */
+  quoteId: string;
+  why: "industrial" | "cheapest";
+  /** The other option worth a tap: a cheaper FDM print, or an upgrade. */
+  alternative: { quoteId: string; kind: "cheaper" | "upgrade"; deltaCents: number } | null;
+}
+
+/** Lead with industrial unless it costs more than this times the cheapest. */
+export const INDUSTRIAL_LEAD_MAX_RATIO = 2;
+
+/**
+ * Lead with the cheapest industrial print (SLS, MJF, SLA…) and offer the
+ * cheaper FDM print beside it. For a small part the two processes cost
+ * about the same to print and the gap is mostly shipping (a 20 mm cube:
+ * SLS printing $10.09 vs FDM $10.99, totals $43.91 vs $24.35 because of
+ * shipping), so the industrial part is usually the better buy. When it
+ * would cost more than INDUSTRIAL_LEAD_MAX_RATIO times the cheapest, lead
+ * with the cheapest and offer industrial as the upgrade instead.
+ * `quotes` must be sorted by buyer total (byBuyerTotal).
+ */
+export function chooseLead(
+  quotes: Array<{ quoteId: string; process: string | null; totalCents: number | null }>
+): Lead | null {
+  const priced = quotes.filter((q) => q.totalCents != null);
+  if (!priced.length) return null;
+  const cheapest = priced[0];
+  const industrial = priced.find((q) => isIndustrial(q.process));
+  if (!industrial || industrial.quoteId === cheapest.quoteId) {
+    return { quoteId: cheapest.quoteId, why: "cheapest", alternative: null };
+  }
+  const delta = industrial.totalCents! - cheapest.totalCents!;
+  if (industrial.totalCents! <= cheapest.totalCents! * INDUSTRIAL_LEAD_MAX_RATIO) {
+    return {
+      quoteId: industrial.quoteId,
+      why: "industrial",
+      alternative: { quoteId: cheapest.quoteId, kind: "cheaper", deltaCents: delta },
+    };
+  }
+  return {
+    quoteId: cheapest.quoteId,
+    why: "cheapest",
+    alternative: { quoteId: industrial.quoteId, kind: "upgrade", deltaCents: delta },
+  };
+}

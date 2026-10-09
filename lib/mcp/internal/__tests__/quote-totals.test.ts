@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { addBusinessDays, arrivalWindow, byBuyerTotal, quoteTotals, vendorsToProbe } from "../quote-totals";
+import { addBusinessDays, arrivalWindow, byBuyerTotal, chooseLead, processOf, quoteTotals, vendorsToProbe } from "../quote-totals";
 
 const noMinimums = new Map<string, number>();
 
@@ -108,5 +108,41 @@ describe("arrivalWindow", () => {
     expect(
       arrivalWindow({ productionTimeFastDays: null, productionTimeSlowDays: 4, shippingDays: 1 }, thu)
     ).toEqual({ arrivesEarliest: "2026-10-15", arrivesLatest: "2026-10-15" });
+  });
+});
+
+describe("processOf / chooseLead", () => {
+  it("reads the process from the material name or its printing method", () => {
+    expect(processOf({ name: "SLS Nylon PA12" })).toBe("SLS");
+    expect(processOf({ name: "HP MJF Nylon PA12" })).toBe("MJF");
+    expect(processOf({ name: "FDM Nylon" })).toBe("FDM");
+    expect(processOf({ name: "Tough Resin", printingMethods: [{ name: "SLA" }] })).toBe("SLA");
+    expect(processOf({ name: "Mystery" })).toBeNull();
+  });
+
+  const q = (quoteId: string, process: string, totalCents: number) => ({ quoteId, process, totalCents });
+
+  it("leads with the cheapest industrial print and offers the cheaper FDM one (the nylon cube)", () => {
+    const lead = chooseLead([q("fdm", "FDM", 2435), q("sls", "SLS", 4391), q("mjf", "MJF", 4465)]);
+    expect(lead).toEqual({
+      quoteId: "sls",
+      why: "industrial",
+      alternative: { quoteId: "fdm", kind: "cheaper", deltaCents: 1956 },
+    });
+  });
+
+  it("leads with the cheapest when industrial costs over twice as much, and offers it as the upgrade", () => {
+    const lead = chooseLead([q("fdm", "FDM", 2000), q("sls", "SLS", 4500)]);
+    expect(lead).toEqual({
+      quoteId: "fdm",
+      why: "cheapest",
+      alternative: { quoteId: "sls", kind: "upgrade", deltaCents: 2500 },
+    });
+  });
+
+  it("has no alternative when everything is FDM, or industrial is already cheapest", () => {
+    expect(chooseLead([q("a", "FDM", 1000), q("b", "FDM", 1200)])).toEqual({ quoteId: "a", why: "cheapest", alternative: null });
+    expect(chooseLead([q("s", "SLS", 900), q("f", "FDM", 1000)])).toEqual({ quoteId: "s", why: "cheapest", alternative: null });
+    expect(chooseLead([])).toBeNull();
   });
 });
