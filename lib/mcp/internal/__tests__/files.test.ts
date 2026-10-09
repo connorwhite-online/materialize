@@ -12,9 +12,11 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
+const mockDb = vi.hoisted(() => ({}) as { select?: unknown });
 vi.mock("@/lib/db", () => ({
-  db: {},
+  db: mockDb,
 }));
+vi.mock("@/lib/files/current-version", () => ({ isCurrentAsset: () => ({}) }));
 vi.mock("@/lib/db/schema", () => ({
   fileAssets: {},
   filePhotos: {},
@@ -146,5 +148,31 @@ describe("importModelFromUrlForUser", () => {
     });
     expect(result).toMatchObject({ error: expect.stringContaining("Unsupported file format") });
     expect(mockPutObject).not.toHaveBeenCalled();
+  });
+});
+
+describe("importModelFromUrlForUser dedupe", () => {
+  it("reuses the user's existing upload of the same bytes instead of storing a duplicate", async () => {
+    mockPutObject.mockReset();
+    mockFetchModelBytes.mockResolvedValue({
+      bytes: new Uint8Array([1, 2, 3]),
+      urlFilename: "calibration-cube-20mm.stl",
+    });
+    const existing = { fileAssetId: "asset_1", fileId: "file_1", fileSlug: "calibration-cube", craftCloudModelId: "cc_1" };
+    const chain = {
+      from: () => chain,
+      innerJoin: () => chain,
+      where: () => chain,
+      orderBy: () => chain,
+      limit: () => Promise.resolve([existing]),
+    };
+    mockDb.select = () => chain;
+    const result = await importModelFromUrlForUser({
+      userId: "user_1",
+      url: "https://www.materialize.cc/review/calibration-cube-20mm.stl",
+    });
+    expect(result).toMatchObject({ ...existing, warnings: [expect.stringContaining("Reused")] });
+    expect(mockPutObject).not.toHaveBeenCalled();
+    delete mockDb.select;
   });
 });

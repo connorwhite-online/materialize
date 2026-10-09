@@ -1,6 +1,7 @@
 import "server-only";
 
-import { and, desc, eq } from "drizzle-orm";
+import { createHash } from "node:crypto";
+import { and, desc, eq, isNull, ne, or } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { after } from "next/server";
 import { db } from "@/lib/db";
@@ -187,6 +188,8 @@ export interface RegisterUploadInput {
   format: SupportedFormat;
   fileSize: number;
   fileUnit?: SupportedUnit;
+  /** SHA-256 of the bytes, when the caller has them (URL imports). */
+  contentHash?: string;
   /**
    * Optional listing metadata. When omitted, the file lands with the
    * same defaults as the print page's draft path: name derived from
@@ -266,6 +269,7 @@ export async function registerUploadForUser(
         format: input.format,
         fileUnit: input.fileUnit ?? "mm",
         fileSize: input.fileSize,
+        contentHash: input.contentHash ?? null,
         versionNumber: 1,
       })
       .returning({ id: fileAssets.id });
@@ -309,6 +313,50 @@ export interface ImportModelInput {
 }
 
 /**
+ * The user's current, non-archived upload of these exact bytes, if any.
+ * Matches on the content hash; uploads registered before imports stored
+ * one fall back to same filename + same size.
+ */
+async function findExistingUpload(input: {
+  userId: string;
+  contentHash: string;
+  originalFilename: string;
+  fileSize: number;
+}): Promise<RegisterUploadResult | null> {
+  const [row] = await db
+    .select({
+      fileAssetId: fileAssets.id,
+      fileId: files.id,
+      fileSlug: files.slug,
+      craftCloudModelId: fileAssets.craftCloudModelId,
+    })
+    .from(fileAssets)
+    .innerJoin(files, eq(fileAssets.fileId, files.id))
+    .where(
+      and(
+        eq(files.userId, input.userId),
+        ne(files.status, "archived"),
+        isCurrentAsset(),
+        or(
+          eq(fileAssets.contentHash, input.contentHash),
+          and(
+            isNull(fileAssets.contentHash),
+            eq(fileAssets.originalFilename, input.originalFilename),
+            eq(fileAssets.fileSize, input.fileSize)
+          )
+        )
+      )
+    )
+    .orderBy(desc(fileAssets.createdAt))
+    .limit(1);
+  if (!row) return null;
+  return {
+    ...row,
+    warnings: ["Reused your existing upload of this model instead of creating a duplicate."],
+  };
+}
+
+/**
  * Fetch a model from a URL into the user's R2 prefix, then register it
  * exactly as an agent-PUT upload would be. This is the path for hosts
  * whose model can't PUT bytes itself — chiefly ChatGPT, which hands a
@@ -335,10 +383,23 @@ export async function importModelFromUrlForUser(
     };
   }
 
+  // The same model attached or linked again (every ChatGPT turn that
+  // re-quotes a file re-imports it) reuses the user's existing upload
+  // instead of piling up duplicate files on their profile.
+  const contentHash = createHash("sha256").update(fetched.bytes).digest("hex");
+  const existing = await findExistingUpload({
+    userId: input.userId,
+    contentHash,
+    originalFilename,
+    fileSize: fetched.bytes.byteLength,
+  });
+  if (existing) return existing;
+
   const storageKey = `uploads/${input.userId}/${nanoid()}/${sanitizeFilename(originalFilename)}`;
   await putObject(storageKey, fetched.bytes, "application/octet-stream");
 
   return registerUploadForUser({
+    contentHash,
     userId: input.userId,
     storageKey,
     originalFilename,
