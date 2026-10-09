@@ -30,6 +30,11 @@ type ToolHandler = (
 ) => Promise<{ isError?: boolean; content: Array<{ type: string; text: string }> }>;
 
 const registered: Array<{ name: string; config: ToolConfig; handler: ToolHandler }> = [];
+const registeredResources: Array<{
+  name: string;
+  uri: string;
+  read: () => Promise<{ contents: Array<Record<string, unknown>> }>;
+}> = [];
 
 vi.mock("mcp-handler", () => ({
   createMcpHandler: (
@@ -44,6 +49,14 @@ vi.mock("mcp-handler", () => ({
     const stubServer = {
       registerTool: (name: string, config: ToolConfig, handler: ToolHandler) => {
         registered.push({ name, config, handler });
+      },
+      registerResource: (
+        name: string,
+        uri: string,
+        _config: unknown,
+        read: () => Promise<{ contents: Array<Record<string, unknown>> }>
+      ) => {
+        registeredResources.push({ name, uri, read });
       },
     };
     // The real route.ts callback is synchronous — it just calls
@@ -265,4 +278,31 @@ describe("CAD tools are owner-only on top of their scope", () => {
       expect(parseResultText(result).error.code).toBe("forbidden");
     }
   );
+});
+
+describe("in-chat widgets (ChatGPT apps / MCP Apps)", () => {
+  it.each([
+    ["materialize_get_quote", "ui://materialize/quote-v1.html"],
+    ["materialize_recommend_material", "ui://materialize/materials-v1.html"],
+  ])("%s points at its widget under both hosts' keys", (name, uri) => {
+    const tool = registered.find((r) => r.name === name);
+    const meta = (tool!.config as { _meta?: Record<string, unknown> })._meta!;
+    expect(meta.ui).toEqual({ resourceUri: uri });
+    expect(meta["openai/outputTemplate"]).toBe(uri);
+  });
+
+  it("registers each widget as an MCP Apps HTML resource that allows the CDN and our origin", async () => {
+    expect(registeredResources.map((r) => r.uri).sort()).toEqual([
+      "ui://materialize/materials-v1.html",
+      "ui://materialize/quote-v1.html",
+    ]);
+    for (const r of registeredResources) {
+      const { contents } = await r.read();
+      expect(contents[0].mimeType).toBe("text/html;profile=mcp-app");
+      expect(String(contents[0].text)).toContain("<!doctype html>");
+      const csp = (contents[0]._meta as { ui: { csp: { connectDomains: string[]; resourceDomains: string[] } } }).ui.csp;
+      expect(csp.resourceDomains).toContain("https://cdn.jsdelivr.net");
+      expect(csp.connectDomains.some((d) => d.startsWith("http"))).toBe(true);
+    }
+  });
 });

@@ -22,6 +22,7 @@ vi.mock("mcp-handler", () => ({
         registerTool: (name: string) => ({
           disable: () => state.disabled.push(name),
         }),
+        registerResource: () => ({}),
       };
       await state.init!(server);
       return new Response(null, { status: 200 });

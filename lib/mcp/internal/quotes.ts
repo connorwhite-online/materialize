@@ -57,6 +57,32 @@ export interface GetQuoteInput {
 export interface GetQuoteResult {
   quotes: AgentQuote[];
   warnings: string[];
+  quantity: number;
+  countryCode: string;
+  /** The model being quoted, for the quote widget's header and 3D view. */
+  part: QuotedPart;
+}
+
+export interface QuotedPart {
+  fileAssetId: string;
+  name: string;
+  filename: string;
+  format: string;
+  dimensionsMm: { x: number; y: number; z: number } | null;
+  volumeCm3: number | null;
+}
+
+/**
+ * CraftCloud reports volume in mm³; a part's volume can't exceed its
+ * bounding box, which tells the two units apart for older rows.
+ */
+export function toCm3(
+  volume: number | undefined,
+  dims: { x: number; y: number; z: number } | undefined
+): number | null {
+  if (volume == null || !(volume > 0)) return null;
+  if (dims && volume <= (dims.x * dims.y * dims.z) / 1000 + 1e-9) return volume;
+  return volume / 1000;
 }
 
 const POLL_INTERVAL_MS = 1500;
@@ -71,6 +97,7 @@ export async function getQuoteForUser(
       asset: fileAssets,
       ownerId: files.userId,
       fileStatus: files.status,
+      fileName: files.name,
     })
     .from(fileAssets)
     .innerJoin(files, eq(fileAssets.fileId, files.id))
@@ -263,5 +290,21 @@ export async function getQuoteForUser(
     ...quoteTotals(q, quantity, minimums),
   }));
   priced.sort(byBuyerTotal);
-  return { quotes: priced, warnings };
+  const geometry = assetRow.asset.geometryData ?? undefined;
+  return {
+    quotes: priced,
+    warnings,
+    quantity,
+    countryCode,
+    part: {
+      fileAssetId: assetRow.asset.id,
+      name:
+        assetRow.fileName ??
+        assetRow.asset.originalFilename.replace(/\.[^.]+$/, ""),
+      filename: assetRow.asset.originalFilename,
+      format: assetRow.asset.format,
+      dimensionsMm: geometry?.dimensions ?? null,
+      volumeCm3: toCm3(geometry?.volume, geometry?.dimensions),
+    },
+  };
 }
