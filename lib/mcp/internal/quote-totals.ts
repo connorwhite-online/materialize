@@ -250,15 +250,25 @@ export const MAX_QUOTE_OPTIONS = 12;
 export function trimQuotes<
   T extends { quoteId: string; materialId: string; vendorId: string },
 >(quotes: T[], keepQuoteIds: string[] = [], max = MAX_QUOTE_OPTIONS): T[] {
+  // Every material's cheapest option first, so asking for five nylons
+  // returns five nylons even when one material has a dozen vendors; then
+  // other vendors per material, best first, up to the cap.
   const keep = new Set(keepQuoteIds);
+  const chosen = new Set<string>();
   const seen = new Set<string>();
-  const out: T[] = [];
+  const materials = new Set<string>();
   for (const q of quotes) {
-    const k = `${q.materialId}|${q.vendorId}`;
-    if (seen.has(k) && !keep.has(q.quoteId)) continue;
-    if (out.length >= max && !keep.has(q.quoteId)) continue;
-    seen.add(k);
-    out.push(q);
+    if (materials.has(q.materialId) && !keep.has(q.quoteId)) continue;
+    materials.add(q.materialId);
+    seen.add(`${q.materialId}|${q.vendorId}`);
+    chosen.add(q.quoteId);
   }
-  return out;
+  for (const q of quotes) {
+    if (chosen.size >= max) break;
+    const k = `${q.materialId}|${q.vendorId}`;
+    if (seen.has(k)) continue;
+    seen.add(k);
+    chosen.add(q.quoteId);
+  }
+  return quotes.filter((q) => chosen.has(q.quoteId));
 }

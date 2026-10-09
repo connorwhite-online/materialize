@@ -163,6 +163,11 @@ describe("trimQuotes", () => {
   it("keeps the cheapest config per material + vendor, capped, plus the lead", () => {
     const rows = [q("a1", "pla", "v1"), q("a2", "pla", "v1"), q("b", "pla", "v2"), q("c", "abs", "v1"), q("d", "pa12", "v3")];
     expect(trimQuotes(rows).map((r) => r.quoteId)).toEqual(["a1", "b", "c", "d"]);
-    expect(trimQuotes(rows, ["d"], 2).map((r) => r.quoteId)).toEqual(["a1", "b", "d"]);
+    expect(trimQuotes(rows, ["d"], 2).map((r) => r.quoteId)).toEqual(["a1", "c", "d"]);
+  });
+
+  it("keeps every material's cheapest even past the cap", () => {
+    const many = [q("p1", "pla", "v1"), q("p2", "pla", "v2"), q("p3", "pla", "v3"), q("n", "pa12", "v4")];
+    expect(trimQuotes(many, [], 2).map((r) => r.quoteId)).toEqual(["p1", "n"]);
   });
 });

@@ -308,14 +308,13 @@ describe("in-chat widgets (ChatGPT apps / MCP Apps)", () => {
 });
 
 describe("card results", () => {
-  it("tells ChatGPT the user already sees the card, and leaves other hosts' text alone", async () => {
+  it("tells ChatGPT the user already sees the card, and other hosts only if they show it", async () => {
     const tool = registered.find((r) => r.name === "materialize_recommend_material")!;
     const auth = { userId: "user_test", tokenId: "tok_test", tokenName: "t", scopes: ["catalog:read"] };
     const plain = await tool.handler({ useCase: "outdoor" }, { authInfo: { extra: auth } });
     const chatgpt = await tool.handler({ useCase: "outdoor" }, { authInfo: { extra: auth }, _meta: { "openai/locale": "en-US" } });
-    expect(plain.content).toHaveLength(1);
-    expect(chatgpt.content).toHaveLength(2);
-    expect(chatgpt.content[0].text).toMatch(/materials card/);
-    expect(chatgpt.content[1].text).toBe(plain.content[0].text);
+    expect(chatgpt.content[0].text).toMatch(/^The user is looking at/);
+    expect(plain.content[0].text).toMatch(/^If your app shows Materialize's card/);
+    expect(chatgpt.content[1].text).toBe(plain.content[1].text);
   });
 });
