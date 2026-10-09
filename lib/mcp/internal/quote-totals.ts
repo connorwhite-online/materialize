@@ -61,3 +61,53 @@ export function byBuyerTotal(
   }
   return a.totalCents - b.totalCents;
 }
+
+/**
+ * Vendors whose minimum still has to be learned before the cheapest
+ * quote per material is certain.
+ *
+ * A minimum only ever raises a price, so a vendor's total without its
+ * minimum is a lower bound. An unprobed vendor can only beat the best
+ * known total for a material if that lower bound is below it; once no
+ * such vendor is left, the ranking is exact. Probing just the first few
+ * per material (what the picker does for its grid) isn't enough when
+ * every one of them turns out to have a high minimum: a vendor ranked
+ * sixth on item price may be the real cheapest.
+ *
+ * Returns vendorIds, cheapest lower bound first, excluding any already
+ * `attempted` (a failed probe isn't retried within the request).
+ */
+export function vendorsToProbe(
+  quotes: Array<{
+    vendorId: string;
+    materialId: string;
+    priceCents: number;
+    shippingPriceCents: number | null;
+  }>,
+  quantity: number,
+  minimums: VendorMinimums,
+  attempted: ReadonlySet<string>
+): string[] {
+  const best = new Map<string, number>();
+  for (const q of quotes) {
+    if (!minimums.has(q.vendorId)) continue;
+    const t = quoteTotals(q, quantity, minimums).totalCents;
+    if (t == null) continue;
+    const current = best.get(q.materialId);
+    if (current == null || t < current) best.set(q.materialId, t);
+  }
+
+  const lowerBound = new Map<string, number>();
+  for (const q of quotes) {
+    if (minimums.has(q.vendorId) || attempted.has(q.vendorId)) continue;
+    const bound = quoteTotals(q, quantity, new Map([[q.vendorId, 0]])).totalCents;
+    if (bound == null) continue;
+    const target = best.get(q.materialId);
+    if (target != null && bound >= target) continue;
+    const current = lowerBound.get(q.vendorId);
+    if (current == null || bound < current) lowerBound.set(q.vendorId, bound);
+  }
+  return Array.from(lowerBound.entries())
+    .sort((a, b) => a[1] - b[1])
+    .map(([vendorId]) => vendorId);
+}

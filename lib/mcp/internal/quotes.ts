@@ -15,7 +15,16 @@ import {
 import { getVendorMinimums } from "@/lib/craftcloud/vendor-minimums";
 import { pickMinimumProbes } from "@/components/print/material-picker/vendor-minimums";
 import { logError } from "@/lib/logger";
-import { byBuyerTotal, quoteTotals, type QuoteTotals } from "./quote-totals";
+import {
+  byBuyerTotal,
+  quoteTotals,
+  vendorsToProbe,
+  type QuoteTotals,
+} from "./quote-totals";
+
+/** Follow-up probe rounds after the picker's first batch, and their size. */
+const MINIMUM_PROBE_ROUNDS = 4;
+const PROBES_PER_ROUND = 10;
 
 export interface AgentQuote extends QuoteTotals {
   priceId: string;
@@ -184,17 +193,43 @@ export async function getQuoteForUser(
     warnings.push("Quote polling hit the 30s deadline; results may be incomplete");
   }
 
-  // Learn the vendor minimums the cheapest options would hit, the same
-  // probes the print picker runs. Best-effort: a vendor whose probe
-  // fails is priced without a minimum and flagged minimumKnown: false.
-  let minimums = new Map<string, number>();
+  // Learn vendor minimums until the cheapest quote per material is
+  // certain (see vendorsToProbe): start with the picker's probes, then
+  // keep probing any vendor that could still undercut the best known
+  // total. Best-effort: a vendor whose probe fails is priced without a
+  // minimum and flagged minimumKnown: false.
+  const minimums = new Map<string, number>();
+  const attempted = new Set<string>();
+  const cheapestShipping = new Map<string, { price: number; shippingId: string }>();
+  for (const s of shippings) {
+    if (!s.shippingId) continue;
+    const cur = cheapestShipping.get(s.vendorId);
+    if (!cur || s.price < cur.price) {
+      cheapestShipping.set(s.vendorId, { price: s.price, shippingId: s.shippingId });
+    }
+  }
+  const cheapestQuoteId = new Map<string, { price: number; quoteId: string }>();
+  for (const q of quotes) {
+    const cur = cheapestQuoteId.get(q.vendorId);
+    if (!cur || q.priceCents < cur.price) {
+      cheapestQuoteId.set(q.vendorId, { price: q.priceCents, quoteId: q.quoteId });
+    }
+  }
+  const probeFor = (vendorId: string) => {
+    const ship = cheapestShipping.get(vendorId);
+    const quote = cheapestQuoteId.get(vendorId);
+    return ship && quote
+      ? { vendorId, quoteId: quote.quoteId, shippingId: ship.shippingId }
+      : null;
+  };
+
   try {
-    const probes = pickMinimumProbes(
-      (lastSnapshot.quotes ?? []).map((q) => ({
+    let probes = pickMinimumProbes(
+      quotes.map((q) => ({
         quoteId: q.quoteId,
         vendorId: q.vendorId,
-        materialId: catalog.configById.get(q.materialConfigId)?.material.id ?? "",
-        price: q.price,
+        materialId: q.materialId,
+        price: q.priceCents / 100,
       })),
       shippings.map((s) => ({
         vendorId: s.vendorId,
@@ -203,9 +238,17 @@ export async function getQuoteForUser(
       })),
       quantity
     );
-    minimums = new Map(
-      Object.entries(await getVendorMinimums(probes, currency))
-    );
+    for (let round = 0; round < MINIMUM_PROBE_ROUNDS && probes.length > 0; round++) {
+      for (const p of probes) attempted.add(p.vendorId);
+      const learned = await getVendorMinimums(probes, currency);
+      for (const [vendorId, minimum] of Object.entries(learned)) {
+        minimums.set(vendorId, minimum);
+      }
+      probes = vendorsToProbe(quotes, quantity, minimums, attempted)
+        .slice(0, PROBES_PER_ROUND)
+        .map(probeFor)
+        .filter((p): p is NonNullable<typeof p> => p != null);
+    }
   } catch (err) {
     logError("getQuoteForUser.vendorMinimums", err);
   }
