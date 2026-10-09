@@ -137,6 +137,17 @@ export interface CreateAgentOrderResult {
   totalPriceCents: number;
   serviceFeeCents: number;
   /**
+   * The line items behind totalPriceCents, so an agent can explain the
+   * price instead of reporting an unexplained difference from the quote
+   * (ChatGPT did: "$75.76 Materialize did not explain"). Absent on an
+   * idempotent replay of an older order.
+   */
+  breakdown?: {
+    productionCents: number;
+    minimumFeeCents: number;
+    shippingCents: number;
+  };
+  /**
    * Set on auto-approved orders. Until this timestamp, the
    * CraftCloud-placement step is held so the user can still cancel.
    */
@@ -460,6 +471,11 @@ export async function createAgentInitiatedOrder(
     cancellationDeadline: autoApprovedUntil?.toISOString(),
     totalPriceCents: totalPrice,
     serviceFeeCents: serviceFee,
+    breakdown: {
+      productionCents: materialPriceCents * input.quantity,
+      minimumFeeCents: productionFeeCents,
+      shippingCents: input.shippingPriceCents,
+    },
     remainingPeriodBudgetCents,
     fallbackReason,
   };

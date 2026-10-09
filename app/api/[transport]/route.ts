@@ -146,6 +146,34 @@ const OWNER_ONLY_TOOLS = [
 const requestAuth = new AsyncLocalStorage<{ auth?: MaterializeAuthInfo }>();
 
 /**
+ * Order price fields for create_order responses. amountDueCents is what
+ * the user pays (the confirm page charges totalPriceCents + the service
+ * fee); totalPriceCents alone reads as the total and isn't.
+ */
+function priceFields(result: {
+  totalPriceCents: number;
+  serviceFeeCents: number;
+  breakdown?: {
+    productionCents: number;
+    minimumFeeCents: number;
+    shippingCents: number;
+  };
+}) {
+  return {
+    amountDueCents: result.totalPriceCents + result.serviceFeeCents,
+    totalPriceCents: result.totalPriceCents,
+    serviceFeeCents: result.serviceFeeCents,
+    ...(result.breakdown
+      ? {
+          productionCents: result.breakdown.productionCents,
+          minimumFeeCents: result.breakdown.minimumFeeCents,
+          shippingCents: result.breakdown.shippingCents,
+        }
+      : {}),
+  };
+}
+
+/**
  * The signed-in user's primary email, so an agent doesn't have to ask
  * for something the account already has (ChatGPT stopped the order
  * review case to ask for it). Null when Clerk has none or is unreachable.
@@ -1503,7 +1531,7 @@ const handler = createMcpHandler(
       {
         title: "Create a draft print order (requires user confirmation)",
         description:
-          "Creates a draft order against the user's account. The user is notified by email and must approve and pay via the returned confirmationUrl before the order is placed with the vendor. USD only. Idempotency is keyed on (user, idempotencyKey).",
+          "Creates a draft order against the user's account. The user is notified by email and must approve and pay via the returned confirmationUrl before the order is placed with the vendor. The response's amountDueCents is what the user will pay, broken down as productionCents + minimumFeeCents (the vendor's minimum-order top-up) + shippingCents + serviceFeeCents; tell the user that amount, and explain minimumFeeCents if it's above zero. USD only. Idempotency is keyed on (user, idempotencyKey).",
         inputSchema: {
           priceId: z
             .string()
@@ -1600,8 +1628,7 @@ const handler = createMcpHandler(
               terminal: false,
               chargedAt: new Date().toISOString(),
               cancellationDeadline: result.cancellationDeadline,
-              totalPriceCents: result.totalPriceCents,
-              serviceFeeCents: result.serviceFeeCents,
+              ...priceFields(result),
               currency: "USD",
               remainingPeriodBudgetCents: result.remainingPeriodBudgetCents,
               notificationsSent: { email: emailResult.ok, push: false },
@@ -1621,8 +1648,7 @@ const handler = createMcpHandler(
             terminal: false,
             confirmationUrl,
             expiresAt: result.confirmationExpiresAt,
-            totalPriceCents: result.totalPriceCents,
-            serviceFeeCents: result.serviceFeeCents,
+            ...priceFields(result),
             currency: "USD",
             ...(result.fallbackReason
               ? { reason: result.fallbackReason }
