@@ -103,8 +103,11 @@ function hostRendersCard(extra: unknown): boolean {
  */
 function cardResult(payload: object, extra: unknown, note: string) {
   const base = jsonResult(payload);
-  if (!hostRendersCard(extra)) return base;
-  return { ...base, content: [{ type: "text" as const, text: note }, ...base.content] };
+  // ChatGPT is detected by its _meta keys; anything else gets the note
+  // phrased conditionally, since hosts that render MCP Apps (Claude) don't
+  // identify themselves on the call.
+  const text = hostRendersCard(extra) ? note : `If your app shows Materialize's card for this result: ${note}`;
+  return { ...base, content: [{ type: "text" as const, text }, ...base.content] };
 }
 
 function jsonResult(payload: object) {
