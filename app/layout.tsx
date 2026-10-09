@@ -51,7 +51,7 @@ const SITE_NAME = "Materialize";
 // this site is. Routes that DO set a title get `%s · Materialize` via
 // the template below; app/page.tsx opts out with `title.absolute`.
 const DEFAULT_TITLE =
-  "Materialize — 3D Print Files Marketplace & On-Demand 3D Printing";
+  "Print anything and share your ideas";
 const SITE_DESCRIPTION =
   "A marketplace for 3D-print files with on-demand 3D printing built in — buy and sell STL, OBJ, 3MF and STEP models, or get any model printed in PLA, resin, nylon or metal and shipped to your door.";
 

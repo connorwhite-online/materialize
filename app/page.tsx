@@ -40,13 +40,11 @@ import {
  * "… · Materialize · Materialize". `absolute` opts this one route out
  * of the template while leaving it in force everywhere else.
  *
- * The title leads with the brand (so a navigational "materialize.cc"
- * search resolves cleanly) and then states the category in the words
- * people search — "3D print files" and "3D printing" — inside the
- * ~60-character window Google renders before truncating.
+ * The title is the marketing line Connor chose for link previews
+ * (og:title / twitter:title), verbatim — not the brand-plus-keywords form.
  */
 const HOME_TITLE =
-  "Materialize — 3D Print Files Marketplace & On-Demand 3D Printing";
+  "Print anything and share your ideas";
 
 const HOME_DESCRIPTION =
   "Buy and sell 3D-print files, or upload any STL, OBJ, 3MF or STEP model and get it printed on demand in PLA, resin, nylon or metal by a vetted manufacturer and shipped to your door.";
