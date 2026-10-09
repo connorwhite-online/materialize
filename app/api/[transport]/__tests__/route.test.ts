@@ -282,8 +282,8 @@ describe("CAD tools are owner-only on top of their scope", () => {
 
 describe("in-chat widgets (ChatGPT apps / MCP Apps)", () => {
   it.each([
-    ["materialize_get_quote", "ui://materialize/quote-v1.html"],
-    ["materialize_recommend_material", "ui://materialize/materials-v1.html"],
+    ["materialize_get_quote", "ui://materialize/quote-v2.html"],
+    ["materialize_recommend_material", "ui://materialize/materials-v2.html"],
   ])("%s points at its widget under both hosts' keys", (name, uri) => {
     const tool = registered.find((r) => r.name === name);
     const meta = (tool!.config as { _meta?: Record<string, unknown> })._meta!;
@@ -293,8 +293,8 @@ describe("in-chat widgets (ChatGPT apps / MCP Apps)", () => {
 
   it("registers each widget as an MCP Apps HTML resource that allows the CDN and our origin", async () => {
     expect(registeredResources.map((r) => r.uri).sort()).toEqual([
-      "ui://materialize/materials-v1.html",
-      "ui://materialize/quote-v1.html",
+      "ui://materialize/materials-v2.html",
+      "ui://materialize/quote-v2.html",
     ]);
     for (const r of registeredResources) {
       const { contents } = await r.read();

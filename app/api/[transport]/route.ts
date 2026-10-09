@@ -553,7 +553,7 @@ const handler = createMcpHandler(
       {
         title: "Recommend materials for a part",
         description:
-          "Shortlist materials for what the part must do, with why each fits, what to watch out for, and the materialId to pass to materialize_get_quote. Say what matters (useCase, or minimum scores 1-5 for strength, flexibility, detail, heatResistance, a price ceiling, a preference) and, if you have one, the fileAssetId so materials the part can't be made in (too big, too thin) are ruled out. Ask the user what the part will do before guessing: a bracket, a figurine and a phone case want different materials. ruledOut says which requirement removed each material.",
+          "Shortlist materials for what the part must do, with why each fits, what to watch out for, and the materialId to pass to materialize_get_quote. Say what matters (useCase, or minimum scores 1-5 for strength, flexibility, detail, heatResistance, a price ceiling, a preference) and, if you have one, the fileAssetId so materials the part can't be made in (too big, too thin) are ruled out. Ask the user what the part will do before guessing: a bracket, a figurine and a phone case want different materials. ruledOut says which requirement removed each material. Where the host shows Materialize's materials card (ChatGPT, Claude), the card already shows the shortlist and ratings: don't repeat them in a table, say which you'd pick and why.",
         _meta: widgetToolMeta(MATERIALS_WIDGET_URI, {
           invoking: "Shortlisting materials…",
           invoked: "Materials ready",
@@ -1501,7 +1501,7 @@ const handler = createMcpHandler(
       {
         title: "Get prices for a print",
         description:
-          "Server-side polls CraftCloud for prices on a registered fileAsset. Returns quotes sorted by what the buyer pays, with vendor, finish, color, lead time. totalCents is the price to tell the user: production x quantity, plus the vendor's minimum-order top-up (minimumFeeCents), shipping, and Materialize's service fee (serviceFeeCents). priceCents is the per-unit production price only; never present it as the price. Pass the returned priceId/quoteId/materialConfigId/shippingId and the per-unit priceCents as materialPriceCents into materialize_create_order. Quotes and orders are USD-only for now.",
+          "Server-side polls CraftCloud for prices on a registered fileAsset. Returns quotes sorted by what the buyer pays, with vendor, finish, color, lead time. totalCents is the price to tell the user: production x quantity, plus the vendor's minimum-order top-up (minimumFeeCents), shipping, and Materialize's service fee (serviceFeeCents). priceCents is the per-unit production price only; never present it as the price. Pass the returned priceId/quoteId/materialConfigId/shippingId and the per-unit priceCents as materialPriceCents into materialize_create_order. Quotes and orders are USD-only for now. Where the host shows Materialize's quote card (ChatGPT, Claude), the card already lists the prices and compares the options: don't repeat them in a table, give a sentence or two of advice instead.",
         _meta: widgetToolMeta(QUOTE_WIDGET_URI, {
           invoking: "Getting live quotes…",
           invoked: "Quotes ready",

@@ -9,7 +9,7 @@ import { FALLBACK_ICON, widgetDocument } from "./shell";
  * Bump the version in the URI on any breaking change: hosts cache the
  * template by URI.
  */
-export const QUOTE_WIDGET_URI = "ui://materialize/quote-v1.html";
+export const QUOTE_WIDGET_URI = "ui://materialize/quote-v2.html";
 
 const STYLES = `
 .head{display:flex;gap:16px;align-items:stretch}
