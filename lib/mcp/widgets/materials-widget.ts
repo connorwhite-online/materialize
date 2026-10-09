@@ -23,7 +23,8 @@ const STYLES = `
 .pips{display:flex;gap:3px}
 .pips i{width:16px;height:8px;border-radius:999px;background:var(--track)}
 .pips i.on{background:var(--print)}
-.pc{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;font-size:13px;line-height:1.4}
+.sum{margin:0;font-size:13.5px;line-height:1.45;color:var(--ink-2)}
+.pc{display:flex;flex-wrap:wrap;gap:6px 16px;font-size:13px;line-height:1.4}
 .pc p{margin:0;display:flex;gap:7px}
 .pc svg{flex-shrink:0;margin-top:2px}
 .foot{display:flex;justify-content:space-between;align-items:center;gap:10px}
@@ -83,6 +84,16 @@ const SCRIPT = `
     return parts.length ? h("span", { "class": "chip" }, [parts.join(" · ")]) : null;
   }
 
+  // The meters already say what a material is good at; the card adds the
+  // catalog's description and only the cautions, in plain words.
+  function cons(p){
+    var out = (p.watchOut || []).map(function(w){
+      return w.replace(/ \\(\\d\\/5\\)$/, "").replace(/^low /, "Low ").replace(/^rigid:/, "Rigid:");
+    });
+    if (p.fit && p.fit.verdict !== "good" && p.fit.reasons && p.fit.reasons[0]) out.unshift(p.fit.reasons[0]);
+    return out.slice(0, 2);
+  }
+
   function card(p, i){
     var s = p.scores || {};
     var name = p.name;
@@ -93,10 +104,10 @@ const SCRIPT = `
           h("span", { "class": "pmeta" }, [p.method + " · " + (TIER[p.priceTier] || p.priceTier)])
         ])
       ].concat(AXES.map(function(a){ return pips(s[a[0]] || 0, a[1]); }))),
-      h("div", { "class": "pc" }, [
-        p.why && p.why[0] ? h("p", null, [h("span", { html: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--good-ink)" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>' }), p.why[0]]) : null,
-        p.watchOut && p.watchOut[0] ? h("p", null, [h("span", { html: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--warn-ink)" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M12 8v5M12 16.5h.01"/><circle cx="12" cy="12" r="9"/></svg>' }), p.watchOut[0]]) : null
-      ]),
+      p.summary ? h("p", { "class": "sum" }, [p.summary]) : null,
+      cons(p).length ? h("div", { "class": "pc" }, cons(p).map(function(c){
+        return h("p", null, [h("span", { html: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--warn-ink)" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M12 8v5M12 16.5h.01"/><circle cx="12" cy="12" r="9"/></svg>' }), c]);
+      })) : null,
       h("div", { "class": "foot" }, [
         i === 0 ? h("span", { "class": "pill", style: "background:var(--bg);color:var(--pick-ink)" }, ["Best fit"]) : h("span"),
         h("button", { "class": "btn " + (i === 0 ? "btn-primary" : "btn-soft"), type: "button", style: "min-height:44px;font-size:14px", onclick: function(){

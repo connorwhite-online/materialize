@@ -46,7 +46,6 @@ const STYLES = `
 .note{margin:0;display:flex;gap:8px;align-items:center;font-size:12.5px;color:var(--warn-ink)}
 .legend{display:flex;flex-wrap:wrap;gap:14px;font-size:12.5px;color:var(--ink-2)}
 .legend span{display:flex;align-items:center;gap:6px}
-.warn{font-size:12px;color:var(--ink-3);margin:0}
 @media (max-width:520px){.head{flex-direction:column}.head .stage{width:100%;height:220px}.actions{flex-direction:column}}
 `;
 
@@ -103,15 +102,27 @@ const SCRIPT = `
     var f = q.finishGroupName && q.finishGroupName !== q.materialName ? q.finishGroupName : null;
     return q.materialName + (f ? ", " + f : "") + (q.color ? " · " + q.color : "");
   }
-  // One row per material + vendor (its cheapest config), best first.
+  // One entry per material + vendor (its cheapest config), best first,
+  // then grouped by vendor + price: a vendor that charges the same for
+  // five plastics is one row listing them, not five identical rows.
   function options(quotes){
-    var seen = {}, out = [];
+    var seen = {}, groups = [], byKey = {};
     quotes.forEach(function(q){
       var k = q.materialId + "|" + q.vendorId;
       if (seen[k]) return;
-      seen[k] = true; out.push(q);
+      seen[k] = true;
+      var g = q.vendorId + "|" + (q.totalCents != null ? q.totalCents : q.priceCents);
+      if (byKey[g]) { byKey[g].mats.push(q.materialName); return; }
+      byKey[g] = { q: q, mats: [q.materialName] };
+      groups.push(byKey[g]);
     });
-    return out.slice(0, 6);
+    return groups.slice(0, 6);
+  }
+  function alsoIn(o){
+    var rest = o.mats.slice(1);
+    if (!rest.length) return null;
+    var shown = rest.slice(0, 3).join(", ");
+    return "Same price in " + shown + (rest.length > 3 ? " and " + (rest.length - 3) + " more" : "");
   }
 
   function lineItem(color, label, cents, total, note, hollow){
@@ -174,7 +185,8 @@ const SCRIPT = `
   }
 
   function best(d, opts){
-    var q = opts[state.pick] || opts[0];
+    var o = opts[state.pick] || opts[0];
+    var q = o.q;
     var pr = parts(q, d.quantity || 1);
     var label = state.pick === 0 ? "Best price" : "Option " + (state.pick + 1);
     var minLine = pr.min > 0
@@ -185,7 +197,8 @@ const SCRIPT = `
         h("div", { style: "display:flex;flex-direction:column;gap:3px;min-width:0" }, [
           h("span", { "class": "muted", style: "font-size:12px" }, [label]),
           h("span", { style: "font-size:15px;font-weight:600" }, [title(q)]),
-          h("span", { style: "font-size:13px;color:var(--ink-2)" }, [q.vendorName + (days(q) ? " · " + days(q) : "")])
+          h("span", { style: "font-size:13px;color:var(--ink-2)" }, [q.vendorName + (days(q) ? " · " + days(q) : "")]),
+          alsoIn(o) ? h("span", { "class": "muted", style: "font-size:12.5px" }, [alsoIn(o)]) : null
         ]),
         h("div", { style: "display:flex;flex-direction:column;align-items:flex-end" }, [
           h("span", { "class": "total rounded" }, [money(pr.total)]),
@@ -205,9 +218,13 @@ const SCRIPT = `
 
   function compare(d, opts){
     var qty = d.quantity || 1;
-    var max = opts.reduce(function(m, q){ return Math.max(m, parts(q, qty).total); }, 1);
-    var rows = opts.map(function(q, i){
+    var max = opts.reduce(function(m, o){ return Math.max(m, parts(o.q, qty).total); }, 1);
+    var rows = opts.map(function(o, i){
+      var q = o.q;
       var pr = parts(q, qty);
+      var sub = o.mats.length > 1
+        ? o.mats.slice(0, 4).join(", ") + (o.mats.length > 4 ? " +" + (o.mats.length - 4) : "")
+        : title(q);
       var segs = [["print", pr.print], ["min", pr.min], ["ship", pr.ship], ["fee", pr.fee]]
         .filter(function(s){ return s[1] > 0; })
         .map(function(s){ return h("i", { style: "width:" + (s[1] / max * 100) + "%;min-width:4px;background:" + COLORS[s[0]] }); });
@@ -215,7 +232,7 @@ const SCRIPT = `
         h("div", { "class": "r1" }, [
           h("div", { "class": "who" }, [
             h("span", { "class": "name" }, [q.vendorName, i === 0 ? h("span", { "class": "pill", style: "background:var(--pick-bg);color:var(--pick-ink);font-size:11.5px;padding:3px 9px" }, ["Cheapest"]) : null]),
-            h("span", { "class": "sub" }, [title(q) + (days(q) ? " · " + days(q) : "")])
+            h("span", { "class": "sub" }, [sub + (days(q) ? " · " + days(q) : "")])
           ]),
           h("span", { "class": "price rounded" }, [money(pr.total)])
         ]),
@@ -225,7 +242,7 @@ const SCRIPT = `
     });
     return h("section", { style: "display:flex;flex-direction:column;gap:12px", "aria-label": "Compare options" }, [
       h("div", { style: "display:flex;justify-content:space-between;align-items:baseline;padding:0 4px" }, [
-        h("h3", { style: "margin:0;font-size:15px;font-weight:650" }, [opts.length + " options, by what you pay"]),
+        h("h3", { style: "margin:0;font-size:15px;font-weight:650" }, [opts.length === 1 ? "1 option" : opts.length + " options, by what you pay"]),
         h("span", { "class": "muted", style: "font-size:12px" }, ["one shared scale"])
       ]),
       h("div", { "class": "list" }, rows),
@@ -249,7 +266,7 @@ const SCRIPT = `
     var stageBefore = document.getElementById("stage");
     var kids = header(d);
     if (stageBefore) kids[0].replaceChild(stageBefore, kids[0].firstChild);
-    var q = opts[state.pick] || opts[0];
+    var q = (opts[state.pick] || opts[0]).q;
     var actions = h("div", { "class": "actions" }, [
       h("button", { "class": "btn btn-primary", type: "button", onclick: function(){
         window.mz.followUp("Order the " + title(q) + " option from " + q.vendorName + " (" + money(parts(q, d.quantity || 1).total) + " all-in).");
@@ -259,8 +276,9 @@ const SCRIPT = `
       } }, [state.view === "compare" ? "Show breakdown" : "Compare " + opts.length + " options"]) : null
     ]);
     var main = state.view === "compare" ? compare(d, opts) : best(d, opts);
-    var warns = (d.warnings || []).map(function(w){ return h("p", { "class": "warn" }, [w]); });
-    app.replaceChildren.apply(app, kids.concat([main, actions]).concat(warns));
+    // warnings are written for the model (catalog gaps, unchecked
+    // minimums), not the buyer; the card flags an unchecked minimum itself.
+    app.replaceChildren.apply(app, kids.concat([main, actions]));
     if (!state.mounted && d.part && d.part.model) {
       state.mounted = true;
       var stage = document.getElementById("stage");

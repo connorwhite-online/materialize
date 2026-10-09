@@ -64,6 +64,8 @@ export interface MaterialPick {
   category: MaterialMetadata["category"];
   priceTier: PriceTier;
   scores: MaterialMetadata["properties"];
+  /** The catalog's one-paragraph description, for people (the widget). */
+  summary: string;
   why: string[];
   watchOut: string[];
   /** Set when a `fits` verdict was passed: how it fares on this part. */
@@ -172,6 +174,7 @@ export function recommendMaterials(input: RecommendInput): {
       category: m.category,
       priceTier: m.priceRange,
       scores: m.properties,
+      summary: m.description,
       why: why.length ? why : ["a balanced all-rounder"],
       watchOut,
       ...(fit ? { fit: { verdict: fit.verdict, reasons: fit.reasons } } : {}),

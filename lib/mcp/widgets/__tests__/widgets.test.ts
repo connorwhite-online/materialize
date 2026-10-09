@@ -32,6 +32,18 @@ describe("widget templates", () => {
     expect(doc).not.toContain("${");
     expect(doc).toContain('"three":"https://cdn.jsdelivr.net/npm/three@');
   });
+
+  it.each([
+    ["quote", quoteWidgetHtml],
+    ["materials", materialsWidgetHtml],
+  ])("%s's scripts parse (escapes inside the template literal survive)", (_n, html) => {
+    const scripts = [...html().matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => m[1]);
+    expect(scripts.length).toBe(3);
+    // Dynamic import() is valid in a classic script but not in new Function.
+    for (const src of scripts) {
+      expect(() => new Function(src.replace(/\bimport\(/g, "__import("))).not.toThrow();
+    }
+  });
 });
 
 describe("toCm3", () => {
