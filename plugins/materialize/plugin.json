@@ -48,8 +48,8 @@
             {
               "description": "Price an attached model",
               "prompt": "How much would it cost to print this in nylon and ship it to San Francisco, 94103?",
-              "tools_triggered": "materialize_import_model, materialize_get_quote",
-              "expected_behavior": "Imports the attached cube, then lists several nylon options with vendor, price including shipping, and lead time. Nothing is ordered.",
+              "tools_triggered": "materialize_import_model, materialize_check_printability, materialize_get_quote",
+              "expected_behavior": "Imports the attached cube, checks it's printable, and shows Materialize's quote card: the cube in 3D, the recommended nylon option's all-in price broken into printing, shipping, any vendor minimum and service fee, its arrival dates, and a comparison of the other nylon options. Nothing is ordered.",
               "file_attachment_urls": [
                 "https://www.materialize.cc/review/calibration-cube-20mm.stl"
               ]
@@ -58,19 +58,19 @@
               "description": "Price a model from a link",
               "prompt": "Get me print quotes for https://www.materialize.cc/review/calibration-cube-20mm.stl in any plastic, shipping to the US.",
               "tools_triggered": "materialize_import_model, materialize_get_quote",
-              "expected_behavior": "Downloads the model from the link and returns a spread of plastic options, cheapest first, with prices and lead times."
+              "expected_behavior": "Downloads the model from the link and shows the quote card with every plastic option compared on one scale, each with its all-in price and arrival dates."
             },
             {
               "description": "Choose a material",
               "prompt": "What material should I use for a bracket that sits in a hot car all summer?",
-              "tools_triggered": "materialize_list_materials, materialize_get_material",
-              "expected_behavior": "Recommends heat-resistant materials from the catalog (for example nylon or PETG over PLA) and explains why, without uploading or ordering anything."
+              "tools_triggered": "materialize_recommend_material",
+              "expected_behavior": "Shows Materialize's materials card: heat-resistant options (such as polycarbonate or nylon) with strength, flex, detail and heat ratings and their cautions, with PLA and PETG ruled out for heat, and explains which it would pick. Nothing is uploaded or ordered."
             },
             {
               "description": "Prepare an order the user approves",
-              "prompt": "Order the cheapest option you found. Ship to Test Reviewer, 1 Market St, San Francisco, CA 94105, phone 415-555-0100.",
+              "prompt": "Order the recommended option. Ship to Test Reviewer, 1 Market St, San Francisco, CA 94105, phone 415-555-0100.",
               "tools_triggered": "materialize_create_order",
-              "expected_behavior": "Restates the price, material, vendor and lead time and asks for a go-ahead, then creates the order and returns a link to review and pay on materialize.cc. It says the order is not placed until payment."
+              "expected_behavior": "Restates the material, vendor, all-in price and arrival dates and asks for a go-ahead, then creates the order and returns a link to review and pay on materialize.cc. It says the order is not placed until payment."
             },
             {
               "description": "Check order status",
