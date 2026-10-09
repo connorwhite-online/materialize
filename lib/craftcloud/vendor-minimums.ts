@@ -1,6 +1,7 @@
 import "server-only";
 import { createCart } from "./client";
 import type { Currency } from "./types";
+import { logError } from "@/lib/logger";
 
 /**
  * Vendor minimum order values, learned from disposable CraftCloud carts.
@@ -76,9 +77,16 @@ export async function getVendorMinimums(
           fetchedAt: now,
         });
         out[probe.vendorId] = minimum;
-      } catch {
+      } catch (err) {
         // Stale quote id or a CraftCloud hiccup — skip; the picker
         // treats an unknown vendor as having no minimum until asked again.
+        // Logged because an agent quote then says the cheapest vendor's
+        // minimum is "unconfirmed" (Forge Friend, 2026-10-09) and nothing
+        // recorded why.
+        logError("vendorMinimums.probeFailed", {
+          vendorId: probe.vendorId,
+          message: err instanceof Error ? err.message : String(err),
+        });
       }
     }
   }
