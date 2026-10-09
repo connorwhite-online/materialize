@@ -66,10 +66,19 @@ describe("sortHomeOrders", () => {
 });
 
 describe("pendingOrderHref", () => {
-  it("sends agent-approval rows to the confirm page", () => {
+  it("sends agent-approval rows to the confirm page with their token", () => {
+    // The confirm page 404s without ?token=; the tile used to omit it.
+    expect(
+      pendingOrderHref(
+        order({ status: "awaiting_agent_approval", confirmationToken: "tok_A1-b" })
+      )
+    ).toBe("/orders/ord-1/confirm?token=tok_A1-b");
+  });
+
+  it("falls back to the detail page for an agent-approval row with no token", () => {
     expect(
       pendingOrderHref(order({ status: "awaiting_agent_approval" }))
-    ).toBe("/orders/ord-1/confirm");
+    ).toBe("/dashboard/orders/ord-1");
   });
 
   it("sends two-step rows to the production-payment page", () => {
