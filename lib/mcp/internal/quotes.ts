@@ -348,7 +348,13 @@ export async function getQuoteForUser(
         assetRow.asset.originalFilename.replace(/\.[^.]+$/, ""),
       filename: assetRow.asset.originalFilename,
       format: assetRow.asset.format,
-      dimensionsMm: geometry?.dimensions ?? null,
+      // A fresh import has no CraftCloud geometry yet (or zeros); show none
+      // rather than "0 × 0 × 0 mm".
+      dimensionsMm:
+        geometry?.dimensions &&
+        geometry.dimensions.x > 0 && geometry.dimensions.y > 0 && geometry.dimensions.z > 0
+          ? geometry.dimensions
+          : null,
       volumeCm3: toCm3(geometry?.volume, geometry?.dimensions),
     },
   };
