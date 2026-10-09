@@ -44,6 +44,10 @@ const STYLES = `
 .panel .stack{height:12px}
 .stack>i{display:block;height:100%;border-radius:999px}
 .note{margin:0;display:flex;gap:8px;align-items:center;font-size:12.5px;color:var(--warn-ink)}
+.vendor,.eta{display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--ink-2)}
+.vendor span,.eta span,.fac{display:inline-flex}
+.eta{color:var(--good-ink);font-weight:600}
+.row .name .fac{color:var(--ink-2)}
 .legend{display:flex;flex-wrap:wrap;gap:14px;font-size:12.5px;color:var(--ink-2)}
 .legend span{display:flex;align-items:center;gap:6px}
 @media (max-width:520px){.head{flex-direction:column}.head .stage{width:100%;height:220px}.actions{flex-direction:column}}
@@ -59,6 +63,9 @@ const SCRIPT = `
 (function(){
   var app = document.getElementById("app");
   var state = { data: null, pick: 0, view: "best", mounted: false };
+  // The app's factory icon (components/icons/factory.tsx) and a truck.
+  var FACTORY = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5.86073 8.8356C5.9411 8.35341 6.35829 8 6.84713 8H9.15287C9.64171 8 10.0589 8.35341 10.1393 8.8356L12 20H4L5.86073 8.8356Z"/><path d="M19 3H10C8.89543 3 8 3.89543 8 5"/><path d="M15 14V11.4985C15 11.0867 14.5302 10.8515 14.2005 11.0981L10.9219 13.5508L12 20H20V11.4603C20 11.0558 19.5447 10.8188 19.2133 11.0507L15 14Z"/></svg>';
+  var TRUCK = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h11v10H3zM14 9h4l3 3v4h-7"/><circle cx="7" cy="17.5" r="1.8"/><circle cx="17" cy="17.5" r="1.8"/></svg>';
   var COLORS = { print: "var(--print)", min: "var(--min)", ship: "var(--ship)", fee: "var(--fee)" };
 
   function h(tag, attrs, kids){
@@ -79,6 +86,18 @@ const SCRIPT = `
   }
   function money(cents){ return "$" + (Math.round(cents) / 100).toFixed(2); }
   function pct(part, whole){ return whole > 0 ? Math.round(part / whole * 100) : 0; }
+  // "Arrives Oct 17–21": the date it reaches them, not how long the
+  // printer takes. Dates come from the server as YYYY-MM-DD (UTC).
+  function arrival(q, short){
+    if (!q.arrivesEarliest || !q.arrivesLatest) return days(q);
+    var a = new Date(q.arrivesEarliest + "T12:00:00Z"), b = new Date(q.arrivesLatest + "T12:00:00Z");
+    var md = { month: "short", day: "numeric", timeZone: "UTC" };
+    var first = a.toLocaleDateString("en-US", md);
+    var range = q.arrivesEarliest === q.arrivesLatest ? first
+      : a.getUTCMonth() === b.getUTCMonth() ? first + "–" + b.getUTCDate()
+      : first + " – " + b.toLocaleDateString("en-US", md);
+    return (short ? "arrives " : "Arrives ") + range;
+  }
   function days(q){
     var a = q.productionTimeFastDays, b = q.productionTimeSlowDays;
     if (a == null && b == null) return null;
@@ -197,7 +216,8 @@ const SCRIPT = `
         h("div", { style: "display:flex;flex-direction:column;gap:3px;min-width:0" }, [
           h("span", { "class": "muted", style: "font-size:12px" }, [label]),
           h("span", { style: "font-size:15px;font-weight:600" }, [title(q)]),
-          h("span", { style: "font-size:13px;color:var(--ink-2)" }, [q.vendorName + (days(q) ? " · " + days(q) : "")]),
+          h("span", { "class": "vendor" }, [h("span", { html: FACTORY }), q.vendorName]),
+          arrival(q) ? h("span", { "class": "eta" }, [h("span", { html: TRUCK }), arrival(q)]) : null,
           alsoIn(o) ? h("span", { "class": "muted", style: "font-size:12.5px" }, [alsoIn(o)]) : null
         ]),
         h("div", { style: "display:flex;flex-direction:column;align-items:flex-end" }, [
@@ -231,8 +251,8 @@ const SCRIPT = `
       return h("button", { "class": "row", type: "button", "aria-pressed": String(i === state.pick), onclick: function(){ state.pick = i; state.view = "best"; render(); } }, [
         h("div", { "class": "r1" }, [
           h("div", { "class": "who" }, [
-            h("span", { "class": "name" }, [q.vendorName, i === 0 ? h("span", { "class": "pill", style: "background:var(--pick-bg);color:var(--pick-ink);font-size:11.5px;padding:3px 9px" }, ["Cheapest"]) : null]),
-            h("span", { "class": "sub" }, [sub + (days(q) ? " · " + days(q) : "")])
+            h("span", { "class": "name" }, [h("span", { "class": "fac", html: FACTORY }), q.vendorName, i === 0 ? h("span", { "class": "pill", style: "background:var(--pick-bg);color:var(--pick-ink);font-size:11.5px;padding:3px 9px" }, ["Cheapest"]) : null]),
+            h("span", { "class": "sub" }, [sub + (arrival(q, true) ? " · " + arrival(q, true) : "")])
           ]),
           h("span", { "class": "price rounded" }, [money(pr.total)])
         ]),

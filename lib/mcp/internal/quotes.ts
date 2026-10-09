@@ -16,6 +16,7 @@ import { getVendorMinimums } from "@/lib/craftcloud/vendor-minimums";
 import { pickMinimumProbes } from "@/components/print/material-picker/vendor-minimums";
 import { logError } from "@/lib/logger";
 import {
+  arrivalWindow,
   byBuyerTotal,
   quoteTotals,
   vendorsToProbe,
@@ -43,6 +44,11 @@ export interface AgentQuote extends QuoteTotals {
   shippingPriceCents: number | null;
   productionTimeFastDays: number | null;
   productionTimeSlowDays: number | null;
+  /** Business days in transit for shippingId. */
+  shippingDays: number | null;
+  /** Estimated delivery window if ordered now (YYYY-MM-DD, UTC). */
+  arrivesEarliest: string | null;
+  arrivesLatest: string | null;
 }
 
 export interface GetQuoteInput {
@@ -220,6 +226,9 @@ export async function getQuoteForUser(
         shipping?.price != null ? Math.round(shipping.price * 100) : null,
       productionTimeFastDays: q.productionTimeFast ?? null,
       productionTimeSlowDays: q.productionTimeSlow ?? null,
+      shippingDays: shipping?.deliveryTime ?? null,
+      arrivesEarliest: null,
+      arrivesLatest: null,
     });
   }
 
@@ -298,9 +307,11 @@ export async function getQuoteForUser(
     );
   }
 
+  const now = new Date();
   const priced: AgentQuote[] = quotes.map((q) => ({
     ...q,
     ...quoteTotals(q, quantity, minimums),
+    ...(arrivalWindow(q, now) ?? {}),
   }));
   priced.sort(byBuyerTotal);
   const geometry = assetRow.asset.geometryData ?? undefined;

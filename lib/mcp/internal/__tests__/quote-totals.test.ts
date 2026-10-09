@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { byBuyerTotal, quoteTotals, vendorsToProbe } from "../quote-totals";
+import { addBusinessDays, arrivalWindow, byBuyerTotal, quoteTotals, vendorsToProbe } from "../quote-totals";
 
 const noMinimums = new Map<string, number>();
 
@@ -86,5 +86,27 @@ describe("vendorsToProbe", () => {
     const quotes = [q("a", 300, "pla"), q("x", 900, "nylon"), q("y", 800, "nylon")];
     const minimums = new Map([["a", 0]]);
     expect(vendorsToProbe(quotes, 1, minimums, new Set(["a", "x"]))).toEqual(["y"]);
+  });
+});
+
+describe("arrivalWindow", () => {
+  // Thursday 2026-10-08.
+  const thu = new Date(Date.UTC(2026, 9, 8, 15));
+
+  it("adds production and shipping business days, skipping weekends", () => {
+    expect(addBusinessDays(thu, 1).toISOString().slice(0, 10)).toBe("2026-10-09");
+    expect(addBusinessDays(thu, 2).toISOString().slice(0, 10)).toBe("2026-10-12");
+    expect(
+      arrivalWindow({ productionTimeFastDays: 5, productionTimeSlowDays: 7, shippingDays: 3 }, thu)
+    ).toEqual({ arrivesEarliest: "2026-10-20", arrivesLatest: "2026-10-22" });
+  });
+
+  it("is null without a shipping time, and uses one production time when the other is missing", () => {
+    expect(
+      arrivalWindow({ productionTimeFastDays: 5, productionTimeSlowDays: 7, shippingDays: null }, thu)
+    ).toBeNull();
+    expect(
+      arrivalWindow({ productionTimeFastDays: null, productionTimeSlowDays: 4, shippingDays: 1 }, thu)
+    ).toEqual({ arrivesEarliest: "2026-10-15", arrivesLatest: "2026-10-15" });
   });
 });
