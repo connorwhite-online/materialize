@@ -49,6 +49,8 @@ export interface GetQuoteInput {
   userId: string;
   fileAssetId: string;
   materialId?: string;
+  /** Several materials in one request, e.g. a family across processes. */
+  materialIds?: string[];
   currency?: "USD" | "EUR" | "GBP";
   countryCode?: string;
   quantity?: number;
@@ -120,13 +122,24 @@ export async function getQuoteForUser(
   const quantity = input.quantity ?? 1;
 
   let materialConfigIds: string[] | undefined;
-  if (input.materialId) {
+  const wanted = [
+    ...new Set([
+      ...(input.materialId ? [input.materialId] : []),
+      ...(input.materialIds ?? []),
+    ]),
+  ];
+  if (wanted.length) {
     const catalog = await getCraftCloudCatalog();
-    const material = catalog.materialById.get(input.materialId);
-    if (!material) return { error: "Unknown materialId" };
-    materialConfigIds = (material.finishGroups ?? []).flatMap((fg) =>
-      fg.materialConfigs.map((c) => c.id)
-    );
+    materialConfigIds = [];
+    for (const id of wanted) {
+      const material = catalog.materialById.get(id);
+      if (!material) return { error: `Unknown materialId: ${id}` };
+      materialConfigIds.push(
+        ...(material.finishGroups ?? []).flatMap((fg) =>
+          fg.materialConfigs.map((c) => c.id)
+        )
+      );
+    }
   }
 
   let priceId: string;
