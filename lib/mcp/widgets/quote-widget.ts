@@ -23,7 +23,7 @@ const STYLES = `
 .panel{border-radius:22px;border:1px solid var(--line);padding:16px;display:flex;flex-direction:column;gap:14px}
 .top{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}
 .total{font-size:34px;font-weight:750;letter-spacing:-0.02em;line-height:1.1}
-.items{display:flex;flex-direction:column;gap:12px}
+.items{display:flex;flex-direction:column;gap:9px}
 .item{display:flex;flex-direction:column;gap:6px}
 .item .line{display:flex;align-items:center;gap:10px}
 .item .line .lbl{flex:1}
@@ -41,7 +41,8 @@ const STYLES = `
 .row .sub{font-size:13px;color:var(--ink-2)}
 .row .price{font-size:20px;font-weight:750}
 .stack{display:flex;height:10px;border-radius:999px;background:var(--track);gap:2px;overflow:hidden}
-.stack>i{display:block;height:10px;border-radius:999px}
+.panel .stack{height:12px}
+.stack>i{display:block;height:100%;border-radius:999px}
 .note{margin:0;display:flex;gap:8px;align-items:center;font-size:12.5px;color:var(--warn-ink)}
 .legend{display:flex;flex-wrap:wrap;gap:14px;font-size:12.5px;color:var(--ink-2)}
 .legend span{display:flex;align-items:center;gap:6px}
@@ -113,19 +114,22 @@ const SCRIPT = `
     return out.slice(0, 6);
   }
 
-  function lineItem(color, label, cents, total, extra){
-    var p = pct(cents, total);
+  function lineItem(color, label, cents, total, note, hollow){
     return h("div", { "class": "item" }, [
       h("div", { "class": "line" }, [
-        h("span", { "class": "dot", style: "background:" + color }),
+        h("span", { "class": "dot", style: hollow ? "border:2px solid " + color : "background:" + color }),
         h("span", { "class": "lbl" }, [label]),
-        h("span", { "class": "pct" }, [extra || (p + "%")]),
+        h("span", { "class": "pct" }, [note || (pct(cents, total) + "%")]),
         h("span", { "class": "amt" }, [money(cents)])
-      ]),
-      extra ? null : h("div", { "class": "bar", role: "img", "aria-label": label + " " + p + " percent of the total" }, [
-        h("i", { style: "width:" + Math.max(p, 0.5) + "%;background:" + color })
       ])
     ]);
+  }
+  // The same stacked bar the comparison uses, on this option's own total.
+  function stackBar(pr){
+    var segs = [["print", pr.print], ["min", pr.min], ["ship", pr.ship], ["fee", pr.fee]]
+      .filter(function(s){ return s[1] > 0; })
+      .map(function(s){ return h("i", { style: "width:" + (s[1] / pr.total * 100) + "%;min-width:6px;background:" + COLORS[s[0]] }); });
+    return h("div", { "class": "stack", role: "img", "aria-label": "Printing " + pct(pr.print, pr.total) + "%, vendor minimum " + pct(pr.min, pr.total) + "%, shipping " + pct(pr.ship, pr.total) + "%, service fee " + pct(pr.fee, pr.total) + "%" }, segs);
   }
 
   function header(d){
@@ -175,12 +179,7 @@ const SCRIPT = `
     var label = state.pick === 0 ? "Best price" : "Option " + (state.pick + 1);
     var minLine = pr.min > 0
       ? lineItem(COLORS.min, "Vendor minimum", pr.min, pr.total)
-      : h("div", { "class": "item" }, [h("div", { "class": "line" }, [
-          h("span", { "class": "dot", style: "border:2px solid var(--min)" }),
-          h("span", { "class": "lbl" }, ["Vendor minimum"]),
-          h("span", { "class": "pct" }, [q.minimumKnown === false ? "not confirmed" : "none for this vendor"]),
-          h("span", { "class": "amt" }, [money(0)])
-        ])]);
+      : lineItem(COLORS.min, "Vendor minimum", 0, pr.total, q.minimumKnown === false ? "not confirmed" : "none for this vendor", true);
     return h("section", { "class": "panel", "aria-label": "Price breakdown" }, [
       h("div", { "class": "top" }, [
         h("div", { style: "display:flex;flex-direction:column;gap:3px;min-width:0" }, [
@@ -195,10 +194,12 @@ const SCRIPT = `
       ]),
       h("div", { "class": "items" }, [
         lineItem(COLORS.print, "Printing", pr.print, pr.total),
+        pr.min > 0 ? minLine : null,
         lineItem(COLORS.ship, "Shipping", pr.ship, pr.total),
         lineItem(COLORS.fee, "Materialize service fee", pr.fee, pr.total),
-        minLine
-      ])
+        pr.min > 0 ? null : minLine
+      ]),
+      stackBar(pr)
     ]);
   }
 
