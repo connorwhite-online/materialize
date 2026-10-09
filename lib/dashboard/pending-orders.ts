@@ -42,6 +42,13 @@ export type PendingOrder = {
   fileCount: number;
   /** ISO timestamp — when the order row was created / started. */
   createdAt: string;
+  /**
+   * The emailed confirmation capability, for awaiting_agent_approval
+   * orders only. /orders/[id]/confirm 404s without it, so the home tile
+   * has to carry it; the viewer is the order's owner, who was already
+   * emailed this same link.
+   */
+  confirmationToken?: string | null;
 };
 
 /** Always a count: "1 file" / "3 files". */
@@ -103,6 +110,7 @@ async function loadPendingOrdersOnce(userId: string): Promise<PendingOrder[]> {
       material: printOrders.material,
       fileAssetId: printOrders.fileAssetId,
       createdAt: printOrders.createdAt,
+      confirmationToken: printOrders.confirmationToken,
     })
     .from(printOrders)
     .where(
@@ -148,6 +156,8 @@ async function loadPendingOrdersOnce(userId: string): Promise<PendingOrder[]> {
       fileAssetId: d.fileAssetId,
       fileCount: multiFiles ? Math.max(multiFiles.size, 1) : 1,
       createdAt: d.createdAt.toISOString(),
+      confirmationToken:
+        d.status === "awaiting_agent_approval" ? d.confirmationToken : null,
     };
   });
 
@@ -155,8 +165,8 @@ async function loadPendingOrdersOnce(userId: string): Promise<PendingOrder[]> {
 }
 
 export function pendingOrderHref(order: PendingOrder): string {
-  if (order.status === "awaiting_agent_approval") {
-    return `/orders/${order.id}/confirm`;
+  if (order.status === "awaiting_agent_approval" && order.confirmationToken) {
+    return `/orders/${order.id}/confirm?token=${encodeURIComponent(order.confirmationToken)}`;
   }
   if (order.status === "awaiting_production_payment") {
     return `/orders/${order.id}/pay-production`;

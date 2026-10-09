@@ -64,6 +64,7 @@ export default async function OrderDetailPage(props: {
       originalFilename: fileAssets.originalFilename,
       fileAssetId: printOrders.fileAssetId,
       assetFormat: fileAssets.format,
+      confirmationToken: printOrders.confirmationToken,
     })
     .from(printOrders)
     .leftJoin(fileAssets, eq(printOrders.fileAssetId, fileAssets.id))
@@ -223,6 +224,30 @@ export default async function OrderDetailPage(props: {
             </div>
           )}
         </div>
+      )}
+
+      {/* An agent drafted this order and it waits on the owner. The
+          confirm page needs the emailed token, so link it from here
+          rather than leave the email as the only way in. */}
+      {order.status === "awaiting_agent_approval" && order.confirmationToken && (
+        <Alert className="mt-6">
+          <p className="text-sm font-medium">Waiting for your approval</p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            An agent prepared this order. Nothing is charged or sent to the
+            manufacturer until you review and pay.
+          </p>
+          <Button
+            size="sm"
+            className="mt-3"
+            render={
+              <Link
+                href={`/orders/${order.id}/confirm?token=${encodeURIComponent(order.confirmationToken)}`}
+              />
+            }
+          >
+            Review and pay
+          </Button>
+        </Alert>
       )}
 
       {/* Two-step checkout limbo: the 3% service fee is authorized
