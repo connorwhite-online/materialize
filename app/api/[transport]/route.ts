@@ -145,6 +145,16 @@ const requestAuth = new AsyncLocalStorage<{ auth?: MaterializeAuthInfo }>();
 
 async function verifyAndRecord(req: Request, bearerToken: string | undefined) {
   const auth = await verifyMaterializeToken(req, bearerToken);
+  if (!auth) {
+    // Temporary, while ChatGPT's tool discovery 401s after a good
+    // sign-in: which of its requests is refused, and with what.
+    logError("mcp.auth.rejected", {
+      method: req.method,
+      hasBearer: Boolean(bearerToken),
+      bearerIsPat: bearerToken?.startsWith("mtl_pat_") ?? false,
+      userAgent: req.headers.get("user-agent"),
+    });
+  }
   const slot = requestAuth.getStore();
   if (slot) slot.auth = auth;
   return auth;
