@@ -25,9 +25,9 @@ function versionedUri(name: string, html: string): string {
  * price table and material table under it, repeating every number.
  */
 export const QUOTE_WIDGET_DESCRIPTION =
-  "Shows the user an interactive card: the part in 3D with its name and size, the cheapest option's all-in price broken into printing, shipping, vendor minimum and service fee, and a comparison of every option. Don't repeat these prices or list the options in a table; add one or two sentences of advice, such as which option you'd pick and why.";
+  "Shows the user an interactive card: the part in 3D with its name and size, the recommended option's all-in price broken into printing, shipping, vendor minimum and service fee, its arrival dates, and a comparison of every option. Don't repeat these prices or list the options in a table; add one or two sentences of advice, such as which option you'd pick and why.";
 export const MATERIALS_WIDGET_DESCRIPTION =
-  "Shows the user an interactive card: each shortlisted material with strength, flex, detail and heat meters, its description and cautions, and what was ruled out. Don't repeat the shortlist or the ratings in a table; add one or two sentences on which you'd pick for their part and why.";
+  "Shows the user an interactive card: each shortlisted material with strength, flex, detail and heat meters, its description, cautions and price for the user's file, and what was ruled out. Don't repeat the shortlist or the ratings in a table; add one or two sentences on which you'd pick for their part and why.";
 
 // The description travels with the template, so it's part of the hash too.
 export const QUOTE_WIDGET_URI = versionedUri("quote", quoteWidgetHtml() + QUOTE_WIDGET_DESCRIPTION);

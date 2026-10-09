@@ -45,7 +45,7 @@ import {
   addProjectInlineImageForUser,
   setProjectCoverPhotoForUser,
 } from "@/lib/mcp/internal/projects";
-import { getQuoteForUser } from "@/lib/mcp/internal/quotes";
+import { cheapestByMaterial, getQuoteForUser } from "@/lib/mcp/internal/quotes";
 import {
   MATERIALS_WIDGET_URI,
   QUOTE_WIDGET_URI,
@@ -575,7 +575,7 @@ const handler = createMcpHandler(
       {
         title: "Recommend materials for a part",
         description:
-          "Shortlist materials for what the part must do, with why each fits, what to watch out for, and the materialId to pass to materialize_get_quote. Say what matters (useCase, or minimum scores 1-5 for strength, flexibility, detail, heatResistance, a price ceiling, a preference) and, if you have one, the fileAssetId so materials the part can't be made in (too big, too thin) are ruled out. Ask the user what the part will do before guessing: a bracket, a figurine and a phone case want different materials. ruledOut says which requirement removed each material. Where the host shows Materialize's materials card (ChatGPT, Claude), the card already shows the shortlist and ratings: don't repeat them in a table, say which you'd pick and why.",
+          "Shortlist materials for what the part must do, with why each fits, what to watch out for, and the materialId to pass to materialize_get_quote. Say what matters (useCase, or minimum scores 1-5 for strength, flexibility, detail, heatResistance, a price ceiling, a preference) and, if you have one, the fileAssetId so materials the part can't be made in (too big, too thin) are ruled out. Ask the user what the part will do before guessing: a bracket, a figurine and a phone case want different materials. ruledOut says which requirement removed each material. Where the host shows Materialize's materials card (ChatGPT, Claude), the card already shows the shortlist and ratings: don't repeat them in a table, say which you'd pick and why. With a fileAssetId, each pick also carries `price.fromCents`: the cheapest all-in price to print that file in it (US shipping), so prices can guide the choice.",
         _meta: widgetToolMeta(MATERIALS_WIDGET_URI, {
           invoking: "Shortlisting materials…",
           invoked: "Materials ready",
@@ -637,9 +637,44 @@ const handler = createMcpHandler(
               message: result.error,
             });
           }
+          // With a file, price each pick for it, so the user and the agent
+          // see what each material costs while still choosing one.
+          let picks: Array<(typeof result.picks)[number] & { price?: unknown }> = result.picks;
+          const ids = result.picks.map((p) => p.craftCloudMaterialId).filter((id): id is string => !!id);
+          if (args.fileAssetId && ids.length) {
+            try {
+              const quote = await getQuoteForUser({
+                userId: auth.userId,
+                fileAssetId: args.fileAssetId,
+                materialIds: ids,
+                currency: "USD",
+                maxOptions: 200,
+              });
+              if (!("error" in quote)) {
+                const best = cheapestByMaterial(quote.quotes);
+                picks = result.picks.map((p) => {
+                  const q = p.craftCloudMaterialId ? best.get(p.craftCloudMaterialId) : undefined;
+                  return q
+                    ? {
+                        ...p,
+                        price: {
+                          fromCents: q.totalCents,
+                          vendorName: q.vendorName,
+                          process: q.process,
+                          arrivesEarliest: q.arrivesEarliest,
+                          arrivesLatest: q.arrivesLatest,
+                        },
+                      }
+                    : p;
+                });
+              }
+            } catch (err) {
+              logError("mcp.recommend.prices", err);
+            }
+          }
           // useCase titles the material widget.
-          return cardResult({ ...result, useCase: args.useCase ?? null }, extra,
-            "The user is looking at this shortlist in Materialize's materials card: each material's strength, flex, detail and heat ratings, description and cautions, and what was ruled out. Reply in one or two sentences on which you'd pick and why. Don't restate the shortlist or ratings in a table."
+          return cardResult({ ...result, picks, useCase: args.useCase ?? null }, extra,
+            "The user is looking at this shortlist in Materialize's materials card: each material's strength, flex, detail and heat ratings, description, cautions, price for their file when known, and what was ruled out. Reply in one or two sentences on which you'd pick and why. Don't restate the shortlist, ratings or prices in a table."
           );
         } catch (err) {
           return scopeOrInternal(err, "materialize_recommend_material");
@@ -1525,7 +1560,7 @@ const handler = createMcpHandler(
       {
         title: "Get prices for a print",
         description:
-          "Server-side polls CraftCloud for prices on a registered fileAsset. Returns quotes sorted by what the buyer pays, with vendor, finish, color, lead time. `lead` names the option to recommend first: the cheapest industrial print (SLS, MJF, SLA…) when it costs at most twice the cheapest, with the cheaper FDM print as its `alternative`; otherwise the cheapest, with industrial as the upgrade. Present it the same way. totalCents is the price to tell the user: production x quantity, plus the vendor's minimum-order top-up (minimumFeeCents), shipping, and Materialize's service fee (serviceFeeCents). priceCents is the per-unit production price only; never present it as the price. Pass the returned priceId/quoteId/materialConfigId/shippingId and the per-unit priceCents as materialPriceCents into materialize_create_order. Quotes and orders are USD-only for now. Where the host shows Materialize's quote card (ChatGPT, Claude), the card already lists the prices and compares the options: don't repeat them in a table, give a sentence or two of advice instead.",
+          "Server-side polls CraftCloud for prices on a registered fileAsset. Returns quotes sorted by what the buyer pays, with vendor, finish, color, lead time. `lead` names the option to recommend first: the cheapest industrial print (SLS, MJF, SLA…) when it costs at most twice the cheapest, with the cheaper FDM print as its `alternative`; otherwise the cheapest, with industrial as the upgrade. Present it the same way. totalCents is the price to tell the user: production x quantity, plus the vendor's minimum-order top-up (minimumFeeCents), shipping, and Materialize's service fee (serviceFeeCents). priceCents is the per-unit production price only; never present it as the price. Pass the returned priceId/quoteId/materialConfigId/shippingId and the per-unit priceCents as materialPriceCents into materialize_create_order. Quotes and orders are USD-only for now. Shipping is priced per destination country (a ZIP code doesn't change it). Where the host shows Materialize's quote card (ChatGPT, Claude), the card already lists the prices and compares the options: don't repeat them in a table, give a sentence or two of advice instead.",
         _meta: widgetToolMeta(QUOTE_WIDGET_URI, {
           invoking: "Getting live quotes…",
           invoked: "Quotes ready",
@@ -1585,7 +1620,7 @@ const handler = createMcpHandler(
             logError("mcp.quote.widgetModelLink", err);
           }
           return cardResult({ ...result, part: { ...result.part, model } }, extra,
-            "The user is looking at these quotes in Materialize's quote card: the part in 3D, the recommended option's price breakdown, a one-tap cheaper or upgrade option, and a comparison of every option. Reply in one or two sentences of advice. Don't restate the prices or list the options in a table."
+            "The user is looking at these quotes in Materialize's quote card: the part in 3D, the recommended option's price breakdown and arrival dates, and a comparison of every option. Reply in one or two sentences of advice. Don't restate the prices, list the options in a table, or describe the materials again. Shipping is priced for the destination country and doesn't depend on the ZIP code, so don't caveat ZIP-specific rates."
           );
         } catch (err) {
           return scopeOrInternal(err, "materialize_get_quote");

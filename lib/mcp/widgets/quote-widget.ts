@@ -45,9 +45,6 @@ const STYLES = `
 .eta{color:var(--good-ink);font-weight:600}
 .row .name .fac{color:var(--ink-2)}
 .proc{font-size:11px;font-weight:700;letter-spacing:0.04em;color:var(--ink-2);background:var(--soft-2);border-radius:999px;padding:2px 8px}
-.alt{all:unset;box-sizing:border-box;cursor:pointer;display:flex;align-items:center;gap:12px;border-radius:20px;background:var(--soft);padding:12px 14px;font-size:14px}
-.alt:focus-visible{outline:2px solid var(--print);outline-offset:2px}
-.alt-ico{width:32px;height:32px;border-radius:999px;background:var(--bg);display:flex;align-items:center;justify-content:center;flex-shrink:0;color:var(--ink-2)}
 .legend{display:flex;flex-wrap:wrap;gap:14px;font-size:12.5px;color:var(--ink-2)}
 .legend span{display:flex;align-items:center;gap:6px}
 @media (max-width:520px){.head{flex-direction:column}.head .stage{width:100%;height:220px}.actions{flex-direction:column}}
@@ -296,33 +293,6 @@ const SCRIPT = `
     ]);
   }
 
-  // One tap to the other side of the trade-off: the cheaper FDM print
-  // beside a recommended industrial one, or the upgrade beside the cheapest.
-  function altChip(d, opts){
-    var lead = d.lead, cur = (opts[state.pick] || opts[0]).q;
-    if (!lead || !lead.alternative) return null;
-    var targetId = cur.quoteId === lead.quoteId ? lead.alternative.quoteId
-      : cur.quoteId === lead.alternative.quoteId ? lead.quoteId : null;
-    if (!targetId) return null;
-    var i = indexOfQuote(opts, targetId);
-    if (i < 0) return null;
-    var t = opts[i].q, qty = d.quantity || 1;
-    var delta = parts(t, qty).total - parts(cur, qty).total;
-    var cheaper = delta < 0;
-    var text = cheaper
-      ? "Save " + money(-delta) + " with " + t.materialName + (t.process ? " (" + t.process + ")" : "")
-      : "Upgrade to " + t.materialName + (t.process ? " (" + t.process + ")" : "") + " for " + money(delta) + " more";
-    var why = cheaper ? "Fine for prototypes; visible layer lines" : "Stronger in every direction, no layer lines";
-    return h("button", { "class": "alt", type: "button", onclick: function(){ state.pick = i; render(); } }, [
-      h("span", { "class": "alt-ico", html: cheaper ? '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v14M6 11l6 6 6-6"/></svg>' : '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 21V7M6 13l6-6 6 6"/></svg>' }),
-      h("span", { style: "display:flex;flex-direction:column;gap:1px;flex:1;min-width:0;text-align:left" }, [
-        h("span", { style: "font-weight:600" }, [text]),
-        h("span", { "class": "muted", style: "font-size:12.5px" }, [why + (arrival(t, true) ? " · " + arrival(t, true) : "")])
-      ]),
-      h("span", { "class": "price rounded", style: "font-size:17px;font-weight:700" }, [money(parts(t, qty).total)])
-    ]);
-  }
-
   function render(){
     var d = state.data;
     var quotes = (d && d.quotes) || [];
@@ -349,10 +319,10 @@ const SCRIPT = `
       } }, [state.view === "compare" ? "Show breakdown" : "Compare " + opts.length + " options"]) : null
     ]);
     var main = state.view === "compare" ? compare(d, opts) : best(d, opts);
-    var alt = state.view === "best" ? altChip(d, opts) : null;
+
     // warnings are written for the model (catalog gaps, unchecked
     // minimums), not the buyer; the card flags an unchecked minimum itself.
-    app.replaceChildren.apply(app, kids.concat([main, alt, actions]).filter(Boolean));
+    app.replaceChildren.apply(app, kids.concat([main, actions]).filter(Boolean));
     if (!state.mounted && d.part && d.part.model) {
       state.mounted = true;
       var stage = document.getElementById("stage");
