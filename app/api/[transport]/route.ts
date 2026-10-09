@@ -67,6 +67,8 @@ import { LICENSE_ENUM_VALUES } from "@/lib/licenses";
 import { DESIGN_TAG_OPTIONS } from "@/lib/validations/file";
 import { deriveAppUrl } from "@/lib/utils/request-url";
 import { logError } from "@/lib/logger";
+import { clerkClient } from "@clerk/nextjs/server";
+import { primaryEmail } from "@/lib/clerk-email";
 import { shippingPhoneSchema } from "@/lib/validations/address";
 import { TOOL_ANNOTATIONS } from "@/lib/mcp/tool-annotations";
 
@@ -142,6 +144,21 @@ const OWNER_ONLY_TOOLS = [
 ];
 
 const requestAuth = new AsyncLocalStorage<{ auth?: MaterializeAuthInfo }>();
+
+/**
+ * The signed-in user's primary email, so an agent doesn't have to ask
+ * for something the account already has (ChatGPT stopped the order
+ * review case to ask for it). Null when Clerk has none or is unreachable.
+ */
+async function accountEmail(userId: string): Promise<string | null> {
+  try {
+    const client = await clerkClient();
+    return primaryEmail(await client.users.getUser(userId));
+  } catch (err) {
+    logError("mcp.accountEmail", err);
+    return null;
+  }
+}
 
 async function verifyAndRecord(req: Request, bearerToken: string | undefined) {
   const auth = await verifyMaterializeToken(req, bearerToken);
@@ -1504,7 +1521,13 @@ const handler = createMcpHandler(
           materialPriceCents: z.number().int().min(1),
           shippingPriceCents: z.number().int().min(0),
           shippingAddress: z.object({
-            email: z.string().email(),
+            email: z
+              .string()
+              .email()
+              .optional()
+              .describe(
+                "Where order emails go. Omit to use the signed-in account's email; only ask the user if they want a different one."
+              ),
             firstName: z.string().min(1),
             lastName: z.string().min(1),
             address: z.string().min(1),
@@ -1530,6 +1553,15 @@ const handler = createMcpHandler(
         try {
           const auth = readAuthExtra(extra);
           requireScope(auth, "orders:create");
+          const email =
+            input.shippingAddress.email ?? (await accountEmail(auth.userId));
+          if (!email) {
+            return errorResult({
+              code: "email_required",
+              message:
+                "This account has no email address on file. Ask the user for one and pass shippingAddress.email.",
+            });
+          }
           const result = await createAgentInitiatedOrder({
             userId: auth.userId,
             initiatedByTokenId: auth.tokenId,
@@ -1546,7 +1578,7 @@ const handler = createMcpHandler(
             materialPriceCents: input.materialPriceCents,
             shippingPriceCents: input.shippingPriceCents,
             currency: "USD",
-            shippingAddress: input.shippingAddress,
+            shippingAddress: { ...input.shippingAddress, email },
           });
           if ("error" in result) {
             return errorResult({
