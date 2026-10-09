@@ -9,6 +9,16 @@ import { WIDGET_CDN, WIDGET_MIME_TYPE } from "./shell";
 export { MATERIALS_WIDGET_URI, QUOTE_WIDGET_URI };
 
 /**
+ * What each card already shows, read by the host's model alongside the
+ * result. Without it ChatGPT rendered the card and then wrote its own
+ * price table and material table under it, repeating every number.
+ */
+export const QUOTE_WIDGET_DESCRIPTION =
+  "Shows the user an interactive card: the part in 3D with its name and size, the cheapest option's all-in price broken into printing, shipping, vendor minimum and service fee, and a comparison of every option. Don't repeat these prices or list the options in a table; add one or two sentences of advice, such as which option you'd pick and why.";
+export const MATERIALS_WIDGET_DESCRIPTION =
+  "Shows the user an interactive card: each shortlisted material with strength, flex, detail and heat meters, its description and cautions, and what was ruled out. Don't repeat the shortlist or the ratings in a table; add one or two sentences on which you'd pick for their part and why.";
+
+/**
  * Tool `_meta` that points a tool at its widget. `ui.resourceUri` is the
  * MCP Apps key; `openai/outputTemplate` is ChatGPT's alias for it.
  */
@@ -41,8 +51,8 @@ interface ResourceServer {
  */
 export function registerWidgets(server: ResourceServer) {
   const widgets: Array<[string, string, string, () => string]> = [
-    ["materialize-quote-widget", QUOTE_WIDGET_URI, "Print quote with a 3D preview and price breakdown", quoteWidgetHtml],
-    ["materialize-materials-widget", MATERIALS_WIDGET_URI, "Material shortlist with property meters", materialsWidgetHtml],
+    ["materialize-quote-widget", QUOTE_WIDGET_URI, QUOTE_WIDGET_DESCRIPTION, quoteWidgetHtml],
+    ["materialize-materials-widget", MATERIALS_WIDGET_URI, MATERIALS_WIDGET_DESCRIPTION, materialsWidgetHtml],
   ];
   for (const [name, uri, description, html] of widgets) {
     server.registerResource(name, uri, { mimeType: WIDGET_MIME_TYPE, description }, async () => {
