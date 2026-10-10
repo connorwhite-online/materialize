@@ -405,7 +405,7 @@ const handler = createMcpHandler(
             .string()
             .optional()
             .describe(
-              "Optional family filter, matched loosely against group names, e.g. 'Plastics', 'Nylons', 'Resins', 'Metals'"
+              "Optional family filter, e.g. 'Standard Plastics', 'Nylons', 'Resins', 'Metals'"
             ),
           query: z.string().optional().describe(
             "Substring match against material names (case-insensitive)"
@@ -1066,11 +1066,7 @@ const handler = createMcpHandler(
           "Create a project, optionally bundling N existing files the agent owns. Files are optional: pass none for a project with no 3D-printable parts (boards, wiring, code) and attach an enclosure later. Projects can carry a build guide (long-form markdown how-to), a BOM, wiring diagrams, a firmware repo URL, and curator photos — set those at create time or via the followup tools (materialize_update_project, materialize_set_project_bom, materialize_add_project_circuit_*, materialize_add_project_photo, materialize_add_project_inline_image).",
         inputSchema: {
           name: z.string().min(1).max(200),
-          fileIds: z
-            .array(z.string().uuid())
-            .max(50)
-            .optional()
-            .describe("Files to bundle, by fileId (not fileAssetId) from materialize_list_files or materialize_import_model."),
+          fileIds: z.array(z.string().uuid()).max(50).optional(),
           description: z.string().max(5000).nullable().optional(),
           buildGuide: z
             .string()
@@ -1082,10 +1078,7 @@ const handler = createMcpHandler(
             ),
           priceCents: z.number().int().min(0).optional(),
           license: z.enum(LICENSE_ENUM_VALUES).optional(),
-          visibility: z
-            .enum(["public", "private"])
-            .optional()
-            .describe("Defaults to private (a draft only the user sees). Pass public to publish it."),
+          visibility: z.enum(["public", "private"]).optional(),
           tags: z.array(z.string().min(1).max(32)).max(20).optional(),
           repoUrl: z
             .string()
@@ -1646,7 +1639,7 @@ const handler = createMcpHandler(
       {
         title: "Order a print",
         description:
-          "Creates a draft order against the user's account. The user is notified by email and approves and pays via the returned confirmationUrl before the order is placed with the vendor (status awaiting_user_approval; materialize_get_order reports it as awaiting_agent_approval until the user confirms). The one exception is a user who has set up an agent spending policy on materialize.cc: an order within its limits is charged to their saved card immediately (status auto_approved) and can be cancelled from the emailed link until cancellationDeadline. The response's amountDueCents is what the user pays, broken down as productionCents + minimumFeeCents (the vendor's minimum-order top-up) + shippingCents + serviceFeeCents. USD only. Idempotency is keyed on (user, idempotencyKey).",
+          "Creates a draft order against the user's account. The user is notified by email and approves and pays via the returned confirmationUrl before the order is placed with the vendor (status awaiting_user_approval). The one exception is a user who has set up an agent spending policy on materialize.cc: an order within its limits is charged to their saved card immediately (status auto_approved) and can be cancelled from the emailed link until cancellationDeadline. The response's amountDueCents is what the user pays, broken down as productionCents + minimumFeeCents (the vendor's minimum-order top-up) + shippingCents + serviceFeeCents. USD only. Idempotency is keyed on (user, idempotencyKey).",
         inputSchema: {
           priceId: z
             .string()

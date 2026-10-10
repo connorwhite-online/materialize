@@ -98,3 +98,11 @@ Seven acknowledgments: directory guidelines, first-party API usage, financial tr
 - `materialize_create_order` says when an order is charged without the approval step (spending policy), and `materialize_get_order` no longer promises tracking numbers the status sync can't provide.
 - Unexpected errors name the tool and the support address instead of a bare "Internal error", which the checklist calls out as a rejection.
 - `/support/claude` is the public documentation page.
+
+## After the ChatGPT review closes
+
+The ChatGPT plugin serves the same tool list, and OpenAI's review scans tool metadata, so these description edits from the Claude test run wait until it is approved:
+
+- `materialize_create_project`: describe `fileIds` as fileIds (not fileAssetIds) from `materialize_list_files` / `materialize_import_model`, and `visibility` as defaulting to a private draft.
+- `materialize_list_materials`: the `group` filter now matches loosely, so the example can say "e.g. 'Plastics', 'Resins'".
+- `materialize_create_order`: note that `materialize_get_order` reports a pending draft as `awaiting_agent_approval`.
