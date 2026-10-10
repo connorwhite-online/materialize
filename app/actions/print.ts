@@ -43,7 +43,6 @@ import {
   createOrder,
   createStripeCheckout,
   getOrderStatus,
-  getPrice,
   isMockCheckoutMode,
   CraftCloudApiError,
 } from "@/lib/craftcloud/client";
@@ -56,7 +55,7 @@ import { logError } from "@/lib/logger";
 import { userCanPrintAsset } from "@/lib/entitlement";
 import { promoteStudioDraftsForAssets } from "@/lib/studio-drafts";
 import { dedupeShippingByShipId } from "@/lib/pricing/shipping";
-import type { Address, Currency } from "@/lib/craftcloud/types";
+import type { Address, Currency, PriceResponse } from "@/lib/craftcloud/types";
 import { calcServiceFee } from "@/lib/fees";
 import { rememberCheckoutPhone } from "@/lib/users/checkout-phone";
 import {
@@ -66,9 +65,12 @@ import {
 import { getOrCreateStripeCustomer } from "@/lib/stripe/customers";
 import { persistSavedFeeCard } from "@/lib/stripe/handle-print-order-payment";
 import { mintPayProductionToken } from "@/lib/orders/pay-production-token";
-
-const QUOTE_EXPIRED_ERROR =
-  "This quote has expired. Please pick a material again — prices may have changed.";
+import {
+  fetchPriceSnapshot,
+  reconcileQuote,
+  reconcileQuoteInSnapshot,
+  shippingOptionsOf,
+} from "@/lib/pricing/reconcile-quote";
 
 /**
  * What completePrintOrder hands back:
@@ -109,89 +111,6 @@ export type CompletePrintOrderResult =
     }
   | { error: string };
 
-// Rounding-only tolerance: getPrice() returns dollars as a float;
-// converting to cents can introduce a fractional-cent difference
-// between what the client displayed and what we re-derive here.
-// Anything beyond this is treated as a tampered or stale price, never
-// a legitimate business discount (MTR-130).
-const PRICE_RECONCILE_TOLERANCE_CENTS = 1;
-
-/**
- * Re-derive the authoritative per-unit material price for a quote
- * from CraftCloud (via the priceId the client already polled to
- * stability) instead of trusting the client-supplied materialPrice.
- * Money-critical — do not weaken the tolerance without a documented
- * policy decision (see MTR-130's STOP condition on divergence
- * tolerance).
- *
- * Returns an error when:
- *   - priceId is unknown/expired to CraftCloud, or
- *   - quoteId can't be found in that price response (consumed/stale), or
- *   - the claimed price diverges from the authoritative one beyond a
- *     rounding tolerance, or
- *   - `expectedQuantity` is given and diverges from the quote's own
- *     baked-in quantity (MONEY-1).
- */
-async function reconcileMaterialPrice(params: {
-  priceId: string;
-  quoteId: string;
-  claimedPriceCents: number;
-  /**
-   * When provided, also verify the CraftCloud quote's own baked-in
-   * quantity matches the quantity we're about to bill. A cart line's
-   * `quoteId` and `quantity` columns can drift apart if a quantity
-   * change's re-quote fails partway (see cart-context.tsx
-   * updateQuantity) — the quoteId still encodes the OLD quantity
-   * while cartItems.quantity holds the NEW one. checkoutVendorGroup
-   * bills `quantity * price` but CraftCloud produces whatever the
-   * quoteId itself bakes in, so a mismatch here must hard-block
-   * checkout rather than silently overcharge or undercharge
-   * (MONEY-1). Only checkoutVendorGroup passes this — createPrintOrder
-   * mints its quote and quantity together in one call and can't drift.
-   */
-  expectedQuantity?: number;
-}): Promise<{ ok: true; priceCents: number } | { ok: false; error: string }> {
-  let snapshot;
-  try {
-    snapshot = await getPrice(params.priceId);
-  } catch (error) {
-    if (error instanceof CraftCloudApiError && error.isQuoteExpired()) {
-      return { ok: false, error: QUOTE_EXPIRED_ERROR };
-    }
-    throw error;
-  }
-
-  const quote = snapshot.quotes?.find((q) => q.quoteId === params.quoteId);
-  if (!quote) {
-    return { ok: false, error: QUOTE_EXPIRED_ERROR };
-  }
-
-  if (
-    params.expectedQuantity !== undefined &&
-    quote.quantity !== params.expectedQuantity
-  ) {
-    return {
-      ok: false,
-      error:
-        "This item's quantity is out of sync with its saved price. Please refresh and try again.",
-    };
-  }
-
-  const authoritativeCents = Math.round(quote.price * 100);
-  if (
-    Math.abs(authoritativeCents - params.claimedPriceCents) >
-    PRICE_RECONCILE_TOLERANCE_CENTS
-  ) {
-    return {
-      ok: false,
-      error:
-        "Pricing has changed since you selected this option. Please refresh and try again.",
-    };
-  }
-
-  return { ok: true, priceCents: authoritativeCents };
-}
-
 /**
  * Lightweight check for vendor minimum production prices. Creates a
  * CraftCloud cart (free, disposable reservation) purely to inspect
@@ -203,6 +122,13 @@ async function reconcileMaterialPrice(params: {
  * `checkoutVendorGroup` re-creates its own cart and applies the same
  * adjustment, so this check is informational only.
  */
+const cartPricingInput = z.object({
+  quoteId: z.string().min(1).max(200),
+  vendorId: z.string().min(1).max(100),
+  shippingId: z.string().min(1).max(200),
+  currency: z.string().max(3).optional(),
+});
+
 export async function checkCartPricing(params: {
   quoteId: string;
   vendorId: string;
@@ -212,14 +138,19 @@ export async function checkCartPricing(params: {
   | { minimumProductionFee: number; vendorMinimumPrice: number }
   | { error: string }
 > {
+  // Unauthenticated (anon buyers use it), so at least bound what reaches
+  // CraftCloud.
+  const parsed = cartPricingInput.safeParse(params);
+  if (!parsed.success) return { error: "Invalid request" };
   try {
     const cart = await createCart({
-      shippingIds: [params.shippingId],
-      currency: params.currency,
-      quotes: [{ id: params.quoteId }],
+      shippingIds: [parsed.data.shippingId],
+      // Checkout is USD-only; see lib/pricing/reconcile-quote.ts.
+      currency: "USD",
+      quotes: [{ id: parsed.data.quoteId }],
     });
 
-    const minimum = cart.minimumProductionPrice?.[params.vendorId];
+    const minimum = cart.minimumProductionPrice?.[parsed.data.vendorId];
     return {
       minimumProductionFee: minimum?.productionFee ?? 0,
       vendorMinimumPrice: minimum?.price ?? 0,
@@ -338,16 +269,21 @@ export async function createPrintOrder(params: {
       return { error: "File not found" };
     }
 
-    // Re-derive the authoritative per-unit price from CraftCloud
-    // instead of trusting the client-supplied materialPrice — a
-    // tampered request must not flow into the charge (MTR-130).
-    const claimedMaterialSubtotal = Math.round(data.materialPrice * 100);
-    const reconciled = await reconcileMaterialPrice({
+    // Re-derive everything we bill from CraftCloud's own snapshot of
+    // this quote rather than trusting the client: the per-unit price
+    // (MTR-130), the quantity the quoteId bakes in (CraftCloud builds the
+    // cart from the quoteId, so a client quantity of 1 against a qty-100
+    // quote would bill 1 and print 100), the vendor (the minimum-fee
+    // lookup keys on it) and the shipping price for the chosen option.
+    const reconciled = await reconcileQuote({
       priceId: data.priceId,
       quoteId: data.quoteId,
-      claimedPriceCents: claimedMaterialSubtotal,
+      claimedPriceCents: Math.round(data.materialPrice * 100),
+      expectedQuantity: data.quantity,
+      shippingId: data.shippingId,
     });
     if (!reconciled.ok) return { error: reconciled.error };
+    const { quote } = reconciled;
 
     // Create Craft Cloud cart. The v5 API only wants { id: quoteId }
     // in each entry — the quote already encodes vendor, material,
@@ -355,7 +291,7 @@ export async function createPrintOrder(params: {
     // trips additionalProperties: false and 400s.
     const cart = await createCart({
       shippingIds: [data.shippingId],
-      currency: data.currency,
+      currency: quote.currency ?? data.currency,
       quotes: [{ id: data.quoteId }],
     });
 
@@ -363,18 +299,18 @@ export async function createPrintOrder(params: {
     // start their machines below a threshold — CraftCloud adds a
     // `productionFee` to bridge the gap. Include it in our totals
     // so the Stripe charge matches what the user was shown.
-    const minimum = cart.minimumProductionPrice?.[data.vendorId];
+    const minimum = cart.minimumProductionPrice?.[quote.vendorId];
     const productionFeeCents = Math.round((minimum?.productionFee ?? 0) * 100);
 
     const materialSubtotal = reconciled.priceCents;
-    const shippingSubtotal = Math.round(data.shippingPrice * 100);
+    const shippingSubtotal = reconciled.shipping!.priceCents;
     // Service fee is 3% of the pre-shipping subtotal — charging
     // a platform fee on freight would make our cut scale with
     // unrelated logistics costs. Shipping is still part of
     // totalPrice (it's money the user owes) but sits outside the
     // service-fee base.
     const preShippingTotal =
-      materialSubtotal * data.quantity + productionFeeCents;
+      materialSubtotal * quote.quantity + productionFeeCents;
     const totalPrice = preShippingTotal + shippingSubtotal;
     const serviceFee = calcServiceFee(preShippingTotal, getCheckoutModel());
 
@@ -389,10 +325,13 @@ export async function createPrintOrder(params: {
         serviceFee,
         materialSubtotal,
         shippingSubtotal,
-        quantity: data.quantity,
-        material: data.materialConfigId,
-        vendor: data.vendorId,
-        vendorName: data.vendorName ?? null,
+        quantity: quote.quantity,
+        material: quote.materialConfigId,
+        vendor: quote.vendorId,
+        // Display-only; only trust the client's name when it was naming
+        // the vendor the quote is actually for.
+        vendorName:
+          data.vendorId === quote.vendorId ? (data.vendorName ?? null) : null,
         status: "cart_created",
         // Persisted model drives all later branching — see the
         // checkoutModel note above createPrintOrder.
@@ -511,29 +450,49 @@ export async function checkoutVendorGroup(
 
     if (items.length === 0) return { error: "No items in cart for this vendor" };
 
-    // Re-derive each item's authoritative per-unit price from
-    // CraftCloud (via the priceId captured when it was added to cart)
-    // instead of trusting the stored cartItems.materialPrice at
-    // checkout time — a tampered add-to-cart write, or a price that
-    // simply went stale between add and checkout, must not silently
-    // flow into the Stripe charge (MTR-130). Legacy rows written
-    // before the priceId column existed have no way to reconcile —
-    // skip them (best-effort) rather than blocking checkout on an
-    // existing cart.
+    // Re-derive each item's per-unit price, quantity and vendor from
+    // CraftCloud's snapshot of its priceId instead of trusting the
+    // stored cart row (MTR-130, MONEY-1). Rows with no priceId (legacy
+    // rows, or ones a client re-priced without one) can't be verified,
+    // so they block checkout instead of being charged as written.
+    if (items.some((i) => !i.priceId)) {
+      return {
+        error:
+          "One or more items in this cart need a fresh quote. Remove them and re-add them from the quote page.",
+      };
+    }
+    // One getPrice per distinct priceId, in parallel.
+    const priceIds = [...new Set(items.map((i) => i.priceId!))];
+    const fetched = await Promise.all(
+      priceIds.map((id) => fetchPriceSnapshot(id))
+    );
+    const snapshots = new Map<string, PriceResponse>();
+    for (let n = 0; n < priceIds.length; n++) {
+      const result = fetched[n];
+      if (!result.ok) return { error: result.error };
+      snapshots.set(priceIds[n], result.snapshot);
+    }
+
     const reconciledMaterialCentsById = new Map<string, number>();
+    const configIdById = new Map<string, string>();
     for (const item of items) {
-      if (!item.priceId) continue;
-      const reconciled = await reconcileMaterialPrice({
-        priceId: item.priceId,
+      const reconciled = reconcileQuoteInSnapshot(snapshots.get(item.priceId!)!, {
         quoteId: item.quoteId,
         claimedPriceCents: item.materialPrice,
         expectedQuantity: item.quantity,
       });
       if (!reconciled.ok) return { error: reconciled.error };
+      if (reconciled.quote.vendorId !== vendorId) {
+        return {
+          error:
+            "This cart is out of sync with its quotes. Remove the items and re-add them from the quote page.",
+        };
+      }
       reconciledMaterialCentsById.set(item.id, reconciled.priceCents);
+      configIdById.set(item.id, reconciled.quote.materialConfigId);
     }
     const materialCentsFor = (item: (typeof items)[number]) =>
-      reconciledMaterialCentsById.get(item.id) ?? item.materialPrice;
+      reconciledMaterialCentsById.get(item.id)!;
 
     const shippingIds = [...new Set(items.map((i) => i.shippingId))];
     const currency = items[0].currency as Currency;
@@ -543,6 +502,28 @@ export async function checkoutVendorGroup(
       currency,
       quotes: items.map((i) => ({ id: i.quoteId })),
     });
+
+    // Shipping is priced by CraftCloud, never by the stored row: prefer
+    // the cart's own priced shipping list, then any snapshot in the
+    // group (a later item inherits the first item's shippingId in
+    // addToCart, so it may only live in the first item's snapshot).
+    const shippingCentsById = new Map<string, number>();
+    for (const shippingId of shippingIds) {
+      const option =
+        cart.shippings?.find(
+          (s) => s.shippingId === shippingId && s.vendorId === vendorId
+        ) ??
+        [...snapshots.values()]
+          .flatMap(shippingOptionsOf)
+          .find((s) => s.shippingId === shippingId && s.vendorId === vendorId);
+      if (!option) {
+        return {
+          error:
+            "Shipping for this cart has changed. Remove the items and re-add them from the quote page.",
+        };
+      }
+      shippingCentsById.set(shippingId, Math.round(option.price * 100));
+    }
 
     // Vendor minimum production fee — same logic as createPrintOrder.
     const minimum = cart.minimumProductionPrice?.[vendorId];
@@ -558,7 +539,12 @@ export async function checkoutVendorGroup(
       (sum, i) => sum + materialCentsFor(i) * i.quantity,
       0
     );
-    const totalShipping = dedupeShippingByShipId(items);
+    const totalShipping = dedupeShippingByShipId(
+      items.map((i) => ({
+        shippingId: i.shippingId,
+        shippingPrice: shippingCentsById.get(i.shippingId)!,
+      }))
+    );
     // See createPrintOrder — service fee is 3% of the pre-shipping
     // subtotal so freight doesn't inflate our cut.
     const preShippingTotal = totalMaterial + productionFeeCents;
@@ -602,7 +588,7 @@ export async function checkoutVendorGroup(
         quoteId: i.quoteId,
         vendorId: i.vendorId,
         vendorName: i.vendorName ?? null,
-        materialConfigId: i.materialConfigId,
+        materialConfigId: configIdById.get(i.id)!,
         quantity: i.quantity,
         materialSubtotal: materialCentsFor(i),
         shippingSubtotal: 0,

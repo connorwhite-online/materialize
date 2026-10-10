@@ -8,57 +8,7 @@ import { revalidatePath } from "next/cache";
 import { addToCartSchema } from "@/lib/validations/print";
 import { userCanPrintAsset } from "@/lib/entitlement";
 import { logError } from "@/lib/logger";
-import { getPrice, CraftCloudApiError } from "@/lib/craftcloud/client";
-
-const QUOTE_EXPIRED_ERROR =
-  "This quote has expired. Please pick a material again — prices may have changed.";
-
-// Rounding-only tolerance — see the identical constant + rationale in
-// app/actions/print.ts (duplicated rather than extracted into a shared
-// helper; MTR-162 tracks that extraction as a deliberate follow-up
-// AFTER this money-critical change lands). MTR-130.
-const PRICE_RECONCILE_TOLERANCE_CENTS = 1;
-
-/**
- * Re-derive the authoritative per-unit material price for a quote
- * from CraftCloud instead of trusting the client-supplied
- * materialPrice. See app/actions/print.ts's twin for the full
- * rationale — kept in sync there.
- */
-async function reconcileMaterialPrice(params: {
-  priceId: string;
-  quoteId: string;
-  claimedPriceCents: number;
-}): Promise<{ ok: true; priceCents: number } | { ok: false; error: string }> {
-  let snapshot;
-  try {
-    snapshot = await getPrice(params.priceId);
-  } catch (error) {
-    if (error instanceof CraftCloudApiError && error.isQuoteExpired()) {
-      return { ok: false, error: QUOTE_EXPIRED_ERROR };
-    }
-    throw error;
-  }
-
-  const quote = snapshot.quotes?.find((q) => q.quoteId === params.quoteId);
-  if (!quote) {
-    return { ok: false, error: QUOTE_EXPIRED_ERROR };
-  }
-
-  const authoritativeCents = Math.round(quote.price * 100);
-  if (
-    Math.abs(authoritativeCents - params.claimedPriceCents) >
-    PRICE_RECONCILE_TOLERANCE_CENTS
-  ) {
-    return {
-      ok: false,
-      error:
-        "Pricing has changed since you selected this option. Please refresh and try again.",
-    };
-  }
-
-  return { ok: true, priceCents: authoritativeCents };
-}
+import { reconcileQuote } from "@/lib/pricing/reconcile-quote";
 
 export type CartItemWithMeta = {
   id: string;
@@ -109,34 +59,6 @@ export async function addToCart(params: {
       return { error: "File not found" };
     }
 
-    // Re-derive the authoritative per-unit price from CraftCloud
-    // instead of trusting the client-supplied materialPrice — a
-    // tampered add-to-cart write must not persist into the cart row
-    // that checkoutVendorGroup later sums into the charge (MTR-130).
-    const reconciled = await reconcileMaterialPrice({
-      priceId: data.priceId,
-      quoteId: data.quoteId,
-      claimedPriceCents: Math.round(data.materialPrice * 100),
-    });
-    if (!reconciled.ok) return { error: reconciled.error };
-
-    // Reject cart lines in a different currency than what's already
-    // in the cart. CraftCloud quotes are currency-scoped and
-    // checkoutVendorGroup only sends one currency per cart create —
-    // mixing would silently ignore all but the first item's currency
-    // (and likely 400 at the CraftCloud boundary). Force the user to
-    // clear or finish the existing cart first.
-    const [anyExisting] = await db
-      .select({ currency: cartItems.currency })
-      .from(cartItems)
-      .where(eq(cartItems.userId, userId));
-
-    if (anyExisting && anyExisting.currency !== data.currency) {
-      return {
-        error: `Your cart is in ${anyExisting.currency}. Clear it or finish that order before adding ${data.currency} items.`,
-      };
-    }
-
     // One shipping option per vendor cart. CraftCloud bills shipping
     // once per vendor-group order, and `checkoutVendorGroup` collapses
     // the group's shippingIds — so a second item for a vendor the user
@@ -159,10 +81,52 @@ export async function addToCart(params: {
       )
       .limit(1);
 
+    // Re-derive the price, quantity, vendor and material from
+    // CraftCloud's snapshot of the quote instead of trusting the client
+    // — a tampered add-to-cart write must not persist into the cart row
+    // that checkoutVendorGroup later sums into the charge (MTR-130).
+    const reconciled = await reconcileQuote({
+      priceId: data.priceId,
+      quoteId: data.quoteId,
+      claimedPriceCents: Math.round(data.materialPrice * 100),
+      expectedQuantity: data.quantity,
+      // Inherited shipping was priced when the group's first item was
+      // added; only a fresh choice needs pricing here.
+      shippingId: existingForVendor ? undefined : data.shippingId,
+    });
+    if (!reconciled.ok) return { error: reconciled.error };
+    const { quote } = reconciled;
+    if (
+      quote.vendorId !== data.vendorId ||
+      quote.materialConfigId !== data.materialConfigId
+    ) {
+      return {
+        error:
+          "This quote doesn't match the selected option. Please refresh and try again.",
+      };
+    }
+
+    // Reject cart lines in a different currency than what's already
+    // in the cart. CraftCloud quotes are currency-scoped and
+    // checkoutVendorGroup only sends one currency per cart create —
+    // mixing would silently ignore all but the first item's currency
+    // (and likely 400 at the CraftCloud boundary). Force the user to
+    // clear or finish the existing cart first.
+    const [anyExisting] = await db
+      .select({ currency: cartItems.currency })
+      .from(cartItems)
+      .where(eq(cartItems.userId, userId));
+
+    if (anyExisting && anyExisting.currency !== data.currency) {
+      return {
+        error: `Your cart is in ${anyExisting.currency}. Clear it or finish that order before adding ${data.currency} items.`,
+      };
+    }
+
     const shippingIdToUse = existingForVendor?.shippingId ?? data.shippingId;
     const shippingPriceCents = existingForVendor
       ? existingForVendor.shippingPrice
-      : Math.round(data.shippingPrice * 100);
+      : reconciled.shipping!.priceCents;
 
     // Merge duplicates atomically: a "duplicate" is
     // (userId, fileAssetId, quoteId) — the quoteId already encodes
@@ -172,8 +136,8 @@ export async function addToCart(params: {
     // double-clicked Add — both requests passed the existence check
     // and both inserted. The (user, file, quote) UNIQUE INDEX added
     // in migration 0005 makes ON CONFLICT DO UPDATE the right shape
-    // here: postgres serializes the upsert and bumps the keeper row's
-    // quantity instead of producing a sibling row.
+    // here: postgres serializes the upsert and updates the keeper row
+    // instead of producing a sibling row.
     const [item] = await db
       .insert(cartItems)
       .values({
@@ -194,7 +158,12 @@ export async function addToCart(params: {
       .onConflictDoUpdate({
         target: [cartItems.userId, cartItems.fileAssetId, cartItems.quoteId],
         set: {
-          quantity: sql`LEAST(100, ${cartItems.quantity} + EXCLUDED.quantity)`,
+          // The same quoteId bakes in the same quantity, so a duplicate
+          // add (double-click) keeps that quantity. Summing them, as this
+          // used to, left the row's quantity out of step with its quote
+          // and checkout refused it (MONEY-1). Changing quantity goes
+          // through repriceCartItem, which re-quotes.
+          quantity: sql`EXCLUDED.quantity`,
           // Bump updatedAt so cart-staleness UI reflects the latest
           // touch (the `$onUpdate` only fires on full UPDATE statements,
           // not the implicit one inside ON CONFLICT DO UPDATE).
@@ -283,6 +252,8 @@ export async function updateCartItemQuantity(
 export async function repriceCartItem(params: {
   cartItemId: string;
   quantity: number;
+  /** The priceId the re-quote came from, so it can be reconciled. */
+  priceId: string;
   quoteId: string;
   /** Re-quoted per-unit material price, in dollars. */
   materialPrice: number;
@@ -298,12 +269,16 @@ export async function repriceCartItem(params: {
     ) {
       return { error: "Invalid quantity" };
     }
-    if (!params.quoteId || !(params.materialPrice > 0)) {
+    if (!params.priceId || !params.quoteId || !(params.materialPrice > 0)) {
       return { error: "Invalid quote" };
     }
 
     const [item] = await db
-      .select({ id: cartItems.id })
+      .select({
+        id: cartItems.id,
+        vendorId: cartItems.vendorId,
+        materialConfigId: cartItems.materialConfigId,
+      })
       .from(cartItems)
       .where(
         and(eq(cartItems.id, params.cartItemId), eq(cartItems.userId, userId))
@@ -311,22 +286,32 @@ export async function repriceCartItem(params: {
 
     if (!item) return { error: "Cart item not found" };
 
+    // The client hands back the re-quoted price; verify it (and that the
+    // quote is for this line's vendor, material and the new quantity)
+    // against CraftCloud before it's stored. This used to write the
+    // client's price with a null priceId, which checkout then charged
+    // unverified.
+    const reconciled = await reconcileQuote({
+      priceId: params.priceId,
+      quoteId: params.quoteId,
+      claimedPriceCents: Math.round(params.materialPrice * 100),
+      expectedQuantity: params.quantity,
+    });
+    if (!reconciled.ok) return { error: reconciled.error };
+    if (
+      reconciled.quote.vendorId !== item.vendorId ||
+      reconciled.quote.materialConfigId !== item.materialConfigId
+    ) {
+      return { error: "Invalid quote" };
+    }
+
     await db
       .update(cartItems)
       .set({
         quantity: params.quantity,
         quoteId: params.quoteId,
-        // The caller re-quotes at the new quantity but doesn't hand
-        // back the priceId that quote came from — null it out rather
-        // than leaving the OLD priceId paired with the NEW quoteId.
-        // checkoutVendorGroup's reconciliation (MTR-130) looks up
-        // quoteId inside getPrice(priceId)'s response; a stale
-        // priceId would never contain the new quoteId and would
-        // false-reject checkout. A null priceId instead falls into
-        // the same best-effort "can't reconcile, trust as written"
-        // bucket as any other legacy row.
-        priceId: null,
-        materialPrice: Math.round(params.materialPrice * 100),
+        priceId: params.priceId,
+        materialPrice: reconciled.priceCents,
         updatedAt: new Date(),
       })
       .where(eq(cartItems.id, params.cartItemId));

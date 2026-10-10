@@ -53,13 +53,26 @@ const mockGetOrderStatus = vi.fn(
 // $10 — tests that pass materialPrice: 10 with quoteId: "quote-1"
 // (the existing suite's convention) reconcile cleanly without any
 // per-test setup.
+const priceSnapshot = (quantity = 1) => ({
+  priceId: "price-1",
+  allComplete: true,
+  quotes: [
+    {
+      quoteId: "quote-1",
+      price: 10,
+      currency: "USD",
+      quantity,
+      vendorId: "vendor-1",
+      materialConfigId: "pla-white",
+    },
+  ],
+  shipping: [
+    { shippingId: "ship-1", vendorId: "vendor-1", price: 5, currency: "USD" },
+    { shippingId: "ship-x", vendorId: "vendor-1", price: 25, currency: "USD" },
+  ],
+});
 const mockGetPrice = vi.fn((..._args: unknown[]) =>
-  Promise.resolve({
-    priceId: "price-1",
-    allComplete: true,
-    quotes: [{ quoteId: "quote-1", price: 10, currency: "USD" }],
-    shipping: [],
-  })
+  Promise.resolve(priceSnapshot())
 );
 
 vi.mock("@/lib/craftcloud/client", () => ({
@@ -154,6 +167,7 @@ describe("createPrintOrder", () => {
   });
 
   it("creates a cart and inserts order record", async () => {
+    mockGetPrice.mockResolvedValueOnce(priceSnapshot(2));
     const result = await createPrintOrder({
       fileAssetId: "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11",
       priceId: "price-1",
@@ -307,7 +321,7 @@ describe("createPrintOrder", () => {
       allComplete: true,
       quotes: [{ quoteId: "some-other-quote", price: 10, currency: "USD" }],
       shipping: [],
-    });
+    } as never);
 
     const result = await createPrintOrder({
       fileAssetId: "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11",
@@ -347,6 +361,81 @@ describe("createPrintOrder", () => {
 
     if (!("error" in result)) throw new Error("expected error");
     expect(result.error).toMatch(/expired|pick a material/i);
+    expect(mockCreateCart).not.toHaveBeenCalled();
+  });
+});
+
+describe("createPrintOrder — server-derived quote terms", () => {
+  const base = {
+    fileAssetId: "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11",
+    priceId: "price-1",
+    quoteId: "quote-1",
+    vendorId: "vendor-1",
+    materialConfigId: "pla-white",
+    shippingId: "ship-1",
+    quantity: 1,
+    materialPrice: 10,
+    shippingPrice: 5,
+    currency: "USD" as const,
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(userCanPrintAsset).mockResolvedValue(true);
+  });
+
+  it("charges CraftCloud's shipping price, not the client's", async () => {
+    const result = await createPrintOrder({ ...base, shippingPrice: 0 });
+    expect(result).toHaveProperty("orderId");
+    expect(mockDbInsertValues).toHaveBeenCalledWith(
+      expect.objectContaining({ shippingSubtotal: 500, totalPrice: 1500 })
+    );
+  });
+
+  it("prices the shipping option actually chosen (express can't ride a standard price)", async () => {
+    await createPrintOrder({ ...base, shippingId: "ship-x", shippingPrice: 5 });
+    expect(mockDbInsertValues).toHaveBeenCalledWith(
+      expect.objectContaining({ shippingSubtotal: 2500 })
+    );
+  });
+
+  it("rejects a shippingId that isn't in the quote's snapshot", async () => {
+    const result = await createPrintOrder({ ...base, shippingId: "ship-nope" });
+    expect(result).toHaveProperty("error");
+    expect(mockCreateCart).not.toHaveBeenCalled();
+  });
+
+  it("rejects a quantity that differs from the quote's own quantity", async () => {
+    mockGetPrice.mockResolvedValueOnce(priceSnapshot(100));
+    const result = await createPrintOrder({ ...base, quantity: 1 });
+    if (!("error" in result)) throw new Error("expected error");
+    expect(result.error).toMatch(/quantity/i);
+    expect(mockCreateCart).not.toHaveBeenCalled();
+  });
+
+  it("reads the vendor minimum off the quote's vendor, not the client's vendorId", async () => {
+    mockCreateCart.mockResolvedValueOnce({
+      cartId: "cart-123",
+      currency: "USD",
+      minimumProductionPrice: { "vendor-1": { price: 33, productionFee: 23 } },
+    } as never);
+    await createPrintOrder({ ...base, vendorId: "someone-else" });
+    expect(mockDbInsertValues).toHaveBeenCalledWith(
+      expect.objectContaining({
+        vendor: "vendor-1",
+        // 1000 material + 2300 minimum top-up + 500 shipping
+        totalPrice: 3800,
+      })
+    );
+  });
+
+  it("refuses a quote that isn't in USD (every charge is in USD)", async () => {
+    const snap = priceSnapshot();
+    snap.quotes[0].currency = "GBP";
+    mockGetPrice.mockResolvedValueOnce(snap);
+    const result = await createPrintOrder(base);
+    if (!("error" in result)) throw new Error("expected error");
+    expect(result.error).toMatch(/USD/);
     expect(mockCreateCart).not.toHaveBeenCalled();
   });
 });

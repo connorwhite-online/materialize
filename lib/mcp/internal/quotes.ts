@@ -136,7 +136,11 @@ export async function getQuoteForUser(
     };
   }
 
-  const currency = input.currency ?? "USD";
+  // Orders are always charged in USD (materialize_create_order and the
+  // web checkout both bill Stripe in USD), so quotes are too: a EUR or
+  // GBP quote couldn't be ordered. `input.currency` stays in the schema
+  // for compatibility; the quote's own `currency` field says USD.
+  const currency = "USD" as const;
   const countryCode = input.countryCode ?? "US";
   const quantity = input.quantity ?? 1;
 

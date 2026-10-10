@@ -24,7 +24,9 @@ describe("quotesRequestSchema", () => {
     });
     expect(result.success).toBe(true);
     if (result.success) {
-      expect(result.data.currency).toBe("EUR");
+      // Quotes are always USD (checkout charges in USD); the country
+      // still drives shipping.
+      expect(result.data.currency).toBe("USD");
       expect(result.data.countryCode).toBe("DE");
       expect(result.data.quantity).toBe(5);
       expect("modelId" in result.data).toBe(true);
