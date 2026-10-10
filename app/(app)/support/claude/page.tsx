@@ -6,7 +6,7 @@ import { SUPPORT_EMAIL } from "@/lib/legal";
 export const metadata: Metadata = {
   title: "Materialize in Claude",
   description:
-    "Connect Materialize to Claude to check 3D models, pick materials, price prints and order them from a conversation.",
+    "Connect Materialize to Claude to host, share and print your 3D models from a conversation.",
   alternates: { canonical: "/support/claude" },
 };
 
@@ -23,12 +23,12 @@ export default function ClaudeConnectorPage() {
   return (
     <LegalPage title="Materialize in Claude" showUpdated={false}>
       <p>
-        The Materialize connector lets Claude get your 3D models professionally
-        printed and shipped. Claude can check a model for problems before you
-        pay, recommend materials for what the part has to do, compare prices
-        from print shops, and prepare an order you approve on materialize.cc.
-        It also manages the files and hardware projects in your Materialize
-        library.
+        The Materialize connector lets Claude print and host your 3D models.
+        Claude can add models to your Materialize library, publish and share
+        them with a link, and build pages for your hardware projects. When you
+        want a part made, it can check the model for problems, recommend
+        materials, compare prices from professional print shops, and prepare
+        an order you approve on materialize.cc.
       </p>
 
       <h2>Connect</h2>
@@ -51,6 +51,10 @@ export default function ClaudeConnectorPage() {
 
       <h2>Things to ask</h2>
       <ul>
+        <li>
+          &ldquo;Upload this model to Materialize, publish it under CC BY and
+          give me a link to share.&rdquo;
+        </li>
         <li>
           &ldquo;Print this bracket I attached in something strong and heat
           resistant, and tell me what it costs shipped to the US.&rdquo;
