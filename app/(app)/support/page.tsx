@@ -57,14 +57,14 @@ export default function SupportPage() {
         </li>
         <li>
           Using Claude? See <Link href="/support/claude">Materialize in
-          Claude</Link> for how to connect and what it can do.
+          Claude</Link>{" "}for how to connect and what it can do.
         </li>
       </ul>
 
       <h2>Account and privacy</h2>
       <p>
         To get a copy of your data or delete your account, email us. See the{" "}
-        <Link href="/privacy">Privacy Policy</Link> and{" "}
+        <Link href="/privacy">Privacy Policy</Link>{" "}and{" "}
         <Link href="/terms">Terms of Service</Link>.
       </p>
     </LegalPage>

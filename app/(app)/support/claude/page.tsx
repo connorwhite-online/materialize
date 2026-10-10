@@ -35,7 +35,7 @@ export default function ClaudeConnectorPage() {
       <ul>
         <li>
           In Claude, open <strong>Customize → Connectors</strong>, find{" "}
-          <strong>Materialize</strong> and click <strong>Connect</strong>.
+          <strong>Materialize</strong>{" "}and click <strong>Connect</strong>.
         </li>
         <li>
           Sign in to Materialize (or create a free account) and approve the
@@ -112,7 +112,7 @@ export default function ClaudeConnectorPage() {
         doesn&apos;t see your conversation beyond what Claude sends to a tool.
         When you order, your model and shipping details go to CraftCloud and
         the print shop that makes it. See the{" "}
-        <Link href="/privacy">Privacy Policy</Link> for details.
+        <Link href="/privacy">Privacy Policy</Link>{" "}for details.
       </p>
 
       <h2>Disconnect</h2>
@@ -125,11 +125,11 @@ export default function ClaudeConnectorPage() {
       <h2>Troubleshooting</h2>
       <ul>
         <li>
-          <strong>Sign-in loops or fails:</strong> disconnect and connect again
+          <strong>Sign-in loops or fails:</strong>{" "}disconnect and connect again
           from Claude&apos;s connector settings.
         </li>
         <li>
-          <strong>No prices for a model:</strong> run the printability check;
+          <strong>No prices for a model:</strong>{" "}run the printability check;
           broken meshes and parts too large for every printer get no quotes.
         </li>
         <li>
