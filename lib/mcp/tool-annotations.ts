@@ -14,8 +14,10 @@ import type { ToolAnnotations } from "@modelcontextprotocol/sdk/types.js";
  * - idempotentHint: repeating the same call has no further effect.
  * - openWorldHint: reaches the open internet. OpenAI's plugin guidance
  *   is explicit that a bounded service isn't open-world just because it
- *   is hosted elsewhere, so CraftCloud quotes and orders are not; only
- *   importing a model from an arbitrary URL is.
+ *   is hosted elsewhere, so CraftCloud quotes and orders are not.
+ *   Importing a model from an arbitrary URL is, and so is any tool that
+ *   can publish a listing to the public web (the ones taking a
+ *   `visibility`): OpenAI's scan flagged those four as open-world.
  *
  * `annotateTools` (route.ts) refuses to register a tool missing from
  * this table, so a new tool can't ship unannotated.
@@ -55,10 +57,11 @@ export const TOOL_ANNOTATIONS: Record<string, ToolAnnotations> = {
 
   // Files. Presigning mints a URL and writes no row.
   materialize_request_upload_url: { ...CREATE, idempotentHint: true },
-  materialize_register_upload: CREATE,
+  // Can publish the file publicly (metadata.visibility).
+  materialize_register_upload: { ...CREATE, openWorldHint: true },
   // Downloads from a caller-supplied URL, so it reaches outside.
   materialize_import_model: { ...CREATE, openWorldHint: true },
-  materialize_update_file: OVERWRITE,
+  materialize_update_file: { ...OVERWRITE, openWorldHint: true },
   materialize_list_files: READ,
   materialize_delete_file: DELETE,
 
@@ -68,10 +71,11 @@ export const TOOL_ANNOTATIONS: Record<string, ToolAnnotations> = {
   materialize_set_file_cover_photo: { ...CREATE, idempotentHint: true },
 
   // Projects
-  materialize_create_project: CREATE,
+  // Projects take a visibility too.
+  materialize_create_project: { ...CREATE, openWorldHint: true },
   materialize_list_projects: READ,
   materialize_get_project: READ,
-  materialize_update_project: OVERWRITE,
+  materialize_update_project: { ...OVERWRITE, openWorldHint: true },
   materialize_delete_project: DELETE,
   materialize_set_project_bom: OVERWRITE,
   materialize_request_circuit_upload_url: { ...CREATE, idempotentHint: true },
