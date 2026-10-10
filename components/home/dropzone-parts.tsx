@@ -2,11 +2,13 @@
 
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import type * as THREE from "three";
+import { cn } from "@/lib/utils";
 import { bakeIsometric, type BakedDrawing } from "@/lib/isometric/bake";
 import { paletteKey, type IsometricPalette } from "@/lib/isometric/palette";
 import { useIsometricPalette } from "@/lib/isometric/use-isometric-palette";
 import { PART_BUILDERS, type IsometricPartKind } from "./isometric-parts";
 import {
+  DROPZONE_GRID,
   DROPZONE_PARTS,
   DROPZONE_PARTS_LINE_WIDTH,
   DROPZONE_PARTS_MOBILE_MAX_WIDTH,
@@ -157,6 +159,12 @@ export function DropzoneParts() {
       aria-hidden
       className="pointer-events-none absolute inset-0 z-0 overflow-hidden"
     >
+      <div
+        className={cn(
+          "absolute inset-0",
+          DROPZONE_GRID === "dots" ? "mz-drafting-dots" : "mz-drafting-grid"
+        )}
+      />
       {box &&
         DROPZONE_PARTS.map((spec) => (
           <Part key={spec.kind} spec={spec} box={box} palette={palette} />

@@ -33,14 +33,23 @@ export interface DropzonePart {
  */
 export const DROPZONE_PARTS_LINE_WIDTH = 1.25;
 
+/** Background grid behind the parts: drafting dots or a line grid. */
+export const DROPZONE_GRID: "dots" | "lines" = "dots";
+
 export const DROPZONE_PARTS_MOBILE_MAX_WIDTH = 520;
 export const DROPZONE_PARTS_MOBILE_SCALE = 0.72;
 
+/**
+ * Six parts scattered across the well, a few bleeding off its edges —
+ * the well is a window onto a bench of parts, not a frame around three.
+ * The chip owns the centre band; nothing sits behind it. Phones keep
+ * four, pushed further out so the chip stays clear.
+ */
 export const DROPZONE_PARTS: readonly DropzonePart[] = [
   {
     kind: "thruster",
-    position: [-0.4, 0.04],
-    mobilePosition: [-0.66, 0.12],
+    position: [-0.42, 0.06],
+    mobilePosition: [-0.7, 0.3],
     size: 0.7,
     yaw: 0.35,
     floatPx: 2,
@@ -49,8 +58,8 @@ export const DROPZONE_PARTS: readonly DropzonePart[] = [
   },
   {
     kind: "manifold",
-    position: [0.6, 0.08],
-    mobilePosition: [0.66, 0.18],
+    position: [0.6, 0.12],
+    mobilePosition: [0.72, 0.36],
     size: 0.62,
     yaw: 0,
     floatPx: 2.5,
@@ -59,15 +68,44 @@ export const DROPZONE_PARTS: readonly DropzonePart[] = [
   },
   {
     kind: "impeller",
-    // Between the chip and the manifold on desktop. A phone's well is
-    // ~120px tall with the chip filling the middle, and there's no
-    // slot left that doesn't crowd it, so the phone shows two parts.
-    position: [0.29, -0.1],
+    position: [0.3, -0.14],
     mobilePosition: null,
     size: 0.46,
     yaw: 0,
     floatPx: 1.5,
     floatSpeed: 0.5,
     phase: 2.1,
+  },
+  {
+    kind: "rotor",
+    // Cropped by the left edge.
+    position: [-0.94, -0.3],
+    mobilePosition: [-0.95, -0.55],
+    size: 0.85,
+    yaw: 0,
+    floatPx: 1.5,
+    floatSpeed: 0.45,
+    phase: 0.9,
+  },
+  {
+    kind: "injector",
+    position: [-0.16, -0.62],
+    mobilePosition: null,
+    size: 0.42,
+    yaw: 0.4,
+    floatPx: 1.2,
+    floatSpeed: 0.58,
+    phase: 2.8,
+  },
+  {
+    kind: "duct",
+    // Cropped by the right and bottom edges.
+    position: [0.97, -0.55],
+    mobilePosition: [0.92, -0.62],
+    size: 0.8,
+    yaw: 0.6,
+    floatPx: 2,
+    floatSpeed: 0.5,
+    phase: 1.7,
   },
 ];

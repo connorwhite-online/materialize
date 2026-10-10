@@ -16,7 +16,13 @@ import * as THREE from "three";
  * only. Pure three.js, no React: unit-tested without a canvas.
  */
 
-export type IsometricPartKind = "thruster" | "impeller" | "manifold";
+export type IsometricPartKind =
+  | "thruster"
+  | "impeller"
+  | "manifold"
+  | "rotor"
+  | "injector"
+  | "duct";
 
 function finish(geometry: THREE.BufferGeometry) {
   geometry.center();
@@ -199,6 +205,131 @@ export function makeManifoldGeometry({ pipe = 0.075 } = {}) {
   return finish(mergeGeometries(parts));
 }
 
+/** A flat annulus (washer) extruded along +Z. */
+function annulus(outer: number, inner: number, depth: number, segments = 64) {
+  const shape = new THREE.Shape();
+  shape.absarc(0, 0, outer, 0, Math.PI * 2, false);
+  const hole = new THREE.Path();
+  hole.absarc(0, 0, inner, 0, Math.PI * 2, true);
+  shape.holes.push(hole);
+  return new THREE.ExtrudeGeometry(shape, {
+    depth,
+    bevelEnabled: false,
+    curveSegments: segments,
+  });
+}
+
+/**
+ * Integrally shrouded axial rotor: hub, nine twisted blades and a tip
+ * ring, printed as one piece — no dovetails, no brazed shroud.
+ */
+export function makeRotorGeometry({ blades = 9 } = {}) {
+  const parts: THREE.BufferGeometry[] = [];
+  const hub = new THREE.CylinderGeometry(0.15, 0.15, 0.2, 48);
+  parts.push(hub);
+  const bore = new THREE.CylinderGeometry(0.06, 0.06, 0.24, 32, 1, true);
+  parts.push(bore);
+  const ring = annulus(0.5, 0.45, 0.14, 96);
+  ring.rotateX(-Math.PI / 2);
+  ring.translate(0, -0.07, 0);
+  parts.push(ring);
+  for (let i = 0; i < blades; i++) {
+    // Radial span along +X, chord along Z, thin in Y; twisted so the
+    // pitch flattens toward the tip.
+    const blade = new THREE.BoxGeometry(0.32, 0.018, 0.13, 10, 1, 1);
+    blade.translate(0.15 + 0.16, 0, 0);
+    const pos = blade.getAttribute("position");
+    const v = new THREE.Vector3();
+    for (let k = 0; k < pos.count; k++) {
+      v.fromBufferAttribute(pos, k);
+      const t = (v.x - 0.15) / 0.32;
+      v.applyAxisAngle(new THREE.Vector3(1, 0, 0), 0.95 - 0.55 * t);
+      pos.setXYZ(k, v.x, v.y, v.z);
+    }
+    blade.rotateY((i / blades) * Math.PI * 2);
+    parts.push(blade);
+  }
+  return finish(mergeGeometries(parts));
+}
+
+/**
+ * Injector plate: a thick disk drilled with three rings of orifices
+ * (fed by internal galleries you can't machine), a central boss and a
+ * flanged feed pipe rising from it.
+ */
+export function makeInjectorGeometry() {
+  const parts: THREE.BufferGeometry[] = [];
+  const face = new THREE.Shape();
+  face.absarc(0, 0, 0.5, 0, Math.PI * 2, false);
+  for (const [r, n] of [
+    [0.2, 8],
+    [0.3, 14],
+    [0.4, 20],
+  ] as const) {
+    for (let i = 0; i < n; i++) {
+      const a = (i / n) * Math.PI * 2 + r;
+      const hole = new THREE.Path();
+      hole.absarc(Math.cos(a) * r, Math.sin(a) * r, 0.022, 0, Math.PI * 2, true);
+      face.holes.push(hole);
+    }
+  }
+  const plate = new THREE.ExtrudeGeometry(face, {
+    depth: 0.1,
+    bevelEnabled: false,
+    curveSegments: 72,
+  });
+  plate.rotateX(-Math.PI / 2);
+  parts.push(plate);
+  const boss = new THREE.CylinderGeometry(0.12, 0.14, 0.1, 48);
+  boss.translate(0, 0.15, 0);
+  parts.push(boss);
+  const pipe = new THREE.CylinderGeometry(0.06, 0.06, 0.36, 32);
+  pipe.translate(0, 0.38, 0);
+  parts.push(pipe);
+  const flange = new THREE.CylinderGeometry(0.11, 0.11, 0.04, 40);
+  flange.translate(0, 0.56, 0);
+  parts.push(flange);
+  return finish(mergeGeometries(parts));
+}
+
+/**
+ * Ducted elbow: a 90° bend of round duct with a flange at each end and
+ * three stiffening bands, printed hollow in one go.
+ */
+export function makeDuctGeometry({ bend = 0.36, radius = 0.13 } = {}) {
+  const parts: THREE.BufferGeometry[] = [];
+  const pts: THREE.Vector3[] = [];
+  for (let i = 0; i <= 32; i++) {
+    const a = (i / 32) * (Math.PI / 2);
+    pts.push(new THREE.Vector3(Math.cos(a) * bend, Math.sin(a) * bend, 0));
+  }
+  const path = new THREE.CatmullRomCurve3(pts);
+  parts.push(new THREE.TubeGeometry(path, 48, radius, 32, false));
+  for (const t of [0, 1]) {
+    const f = annulus(radius * 1.55, radius * 0.92, 0.035, 48);
+    // annulus faces +Z; aim it along the path tangent at the end.
+    const dir = path.getTangent(t);
+    f.applyQuaternion(
+      new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, 1), dir)
+    );
+    const at = path.getPoint(t);
+    const back = dir.clone().multiplyScalar(t === 0 ? 0 : -0.035);
+    f.translate(at.x + back.x, at.y + back.y, at.z + back.z);
+    parts.push(f);
+  }
+  for (const t of [0.3, 0.5, 0.7]) {
+    const band = new THREE.TorusGeometry(radius * 1.02, 0.012, 10, 48);
+    const dir = path.getTangent(t);
+    band.applyQuaternion(
+      new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, 1), dir)
+    );
+    const at = path.getPoint(t);
+    band.translate(at.x, at.y, at.z);
+    parts.push(band);
+  }
+  return finish(mergeGeometries(parts));
+}
+
 export const PART_BUILDERS: Record<
   IsometricPartKind,
   () => THREE.BufferGeometry
@@ -206,6 +337,9 @@ export const PART_BUILDERS: Record<
   thruster: () => makeThrusterGeometry(),
   impeller: () => makeImpellerGeometry(),
   manifold: () => makeManifoldGeometry(),
+  rotor: () => makeRotorGeometry(),
+  injector: () => makeInjectorGeometry(),
+  duct: () => makeDuctGeometry(),
 };
 
 /**
