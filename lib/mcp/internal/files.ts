@@ -20,7 +20,7 @@ import {
   putObject,
 } from "@/lib/storage";
 import { fetchModelBytes, ModelFetchError } from "./fetch-model";
-import { measureGeometry } from "./geometry";
+import { hasDimensions, measureGeometry } from "./geometry";
 import { notUnsavedStudioDraft } from "@/lib/studio-drafts";
 import { isCurrentAsset } from "@/lib/files/current-version";
 import { uploadModel } from "@/lib/craftcloud/client";
@@ -674,11 +674,11 @@ async function uploadAssetToCraftCloud(params: {
       .update(fileAssets)
       .set({
         craftCloudModelId: model.id,
-        geometryData: model.geometry
+        geometryData: hasDimensions(model.geometry)
           ? {
-              dimensions: model.geometry.dimensions,
-              volume: model.geometry.volume,
-              triangleCount: model.geometry.triangleCount,
+              dimensions: model.geometry!.dimensions,
+              volume: model.geometry!.volume,
+              triangleCount: model.geometry!.triangleCount,
             }
           : (measureGeometry(buffer, format, params.unit) ?? undefined),
       })
