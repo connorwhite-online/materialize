@@ -15,7 +15,7 @@ export default function SupportPage() {
   return (
     <LegalPage title="Support" showUpdated={false}>
       <p>
-        Email <a href={mail}>{SUPPORT_EMAIL}</a> and we&apos;ll get back to you,
+        Email <a href={mail}>{SUPPORT_EMAIL}</a>{" "}and we&apos;ll get back to you,
         usually within one business day. For an order, include its order
         number or the email you checked out with.
       </p>
