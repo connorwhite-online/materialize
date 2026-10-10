@@ -47,20 +47,20 @@ export const DROPZONE_PARTS_MOBILE_SCALE = 0.72;
  */
 export const DROPZONE_PARTS: readonly DropzonePart[] = [
   {
-    kind: "engine",
+    kind: "joint",
     position: [-0.42, 0.04],
     mobilePosition: [-0.72, 0.28],
-    size: 0.82,
+    size: 0.72,
     yaw: 0,
     floatPx: 2,
     floatSpeed: 0.55,
     phase: 0.4,
   },
   {
-    kind: "gyroid",
+    kind: "exchanger",
     position: [0.58, 0.16],
     mobilePosition: [0.72, 0.34],
-    size: 0.5,
+    size: 0.66,
     yaw: 0,
     floatPx: 2.5,
     floatSpeed: 0.62,

@@ -2,9 +2,9 @@ import * as THREE from "three";
 
 /**
  * Parts for the authed-home dropzone backdrop: a playful bench of
- * machine components that lean additive — fan, chunky gear, gyroid
- * heat-exchanger core, tube-wall rocket engine, print-in-place hinge,
- * spring on its seats. Simple enough to read as
+ * machine components that lean additive — fan, chunky gear, twisted-
+ * tube heat exchanger, universal joint, living-hinge case, spring on
+ * its seats. Simple enough to read as
  * sketches at ~60px, specific enough to read as real parts.
  *
  * Each builder returns a BufferGeometry with largest extent 1, centred
@@ -17,19 +17,19 @@ import * as THREE from "three";
 export type IsometricPartKind =
   | "fan"
   | "gear"
-  | "gyroid"
-  | "engine"
+  | "exchanger"
+  | "joint"
   | "hinge"
   | "spring";
 
-function finish(geometry: THREE.BufferGeometry, { keepNormals = false } = {}) {
+function finish(geometry: THREE.BufferGeometry) {
   geometry.center();
   geometry.computeBoundingBox();
   const size = new THREE.Vector3();
   geometry.boundingBox!.getSize(size);
   const s = 1 / Math.max(size.x, size.y, size.z);
   geometry.scale(s, s, s);
-  if (!keepNormals) geometry.computeVertexNormals();
+  geometry.computeVertexNormals();
   geometry.computeBoundingBox();
   return geometry;
 }
@@ -138,235 +138,167 @@ export function makeGearGeometry({
   return finish(merged);
 }
 
-/**
- * Naive surface nets over a scalar field (negative = solid). Returns a
- * non-indexed geometry with normals taken from the field's gradient, so
- * the curved surface shades smoothly instead of faceting.
- */
-function surfaceNets(
-  field: (x: number, y: number, z: number) => number,
-  n: number,
-  min: number,
-  max: number
-) {
-  const step = (max - min) / n;
-  const N = n + 1;
-  const vals = new Float32Array(N * N * N);
-  const at = (i: number, j: number, k: number) => i + N * (j + N * k);
-  for (let k = 0; k < N; k++)
-    for (let j = 0; j < N; j++)
-      for (let i = 0; i < N; i++)
-        vals[at(i, j, k)] = field(min + i * step, min + j * step, min + k * step);
+function roundedRectShape(w: number, h: number, r: number) {
+  const shape = new THREE.Shape();
+  const x0 = -w / 2;
+  const y0 = -h / 2;
+  shape.moveTo(x0 + r, y0);
+  shape.lineTo(x0 + w - r, y0);
+  shape.absarc(x0 + w - r, y0 + r, r, -Math.PI / 2, 0, false);
+  shape.lineTo(x0 + w, y0 + h - r);
+  shape.absarc(x0 + w - r, y0 + h - r, r, 0, Math.PI / 2, false);
+  shape.lineTo(x0 + r, y0 + h);
+  shape.absarc(x0 + r, y0 + h - r, r, Math.PI / 2, Math.PI, false);
+  shape.lineTo(x0, y0 + r);
+  shape.absarc(x0 + r, y0 + r, r, Math.PI, (Math.PI * 3) / 2, false);
+  return shape;
+}
 
-  const cellVert = new Int32Array(n * n * n).fill(-1);
-  const verts: number[] = [];
-  const cAt = (i: number, j: number, k: number) => i + n * (j + n * k);
-  const corners = [
-    [0, 0, 0], [1, 0, 0], [0, 1, 0], [1, 1, 0],
-    [0, 0, 1], [1, 0, 1], [0, 1, 1], [1, 1, 1],
-  ];
-  const edges = [
-    [0, 1], [2, 3], [4, 5], [6, 7], [0, 2], [1, 3],
-    [4, 6], [5, 7], [0, 4], [1, 5], [2, 6], [3, 7],
-  ];
-  for (let k = 0; k < n; k++)
-    for (let j = 0; j < n; j++)
-      for (let i = 0; i < n; i++) {
-        const v = corners.map(([a, b, c]) => vals[at(i + a, j + b, k + c)]);
-        const inside = v.map((x) => x < 0);
-        if (inside.every(Boolean) || !inside.some(Boolean)) continue;
-        let sx = 0, sy = 0, sz = 0, cnt = 0;
-        for (const [e0, e1] of edges) {
-          if (inside[e0] === inside[e1]) continue;
-          const t = v[e0] / (v[e0] - v[e1]);
-          const c0 = corners[e0];
-          const c1 = corners[e1];
-          sx += c0[0] + (c1[0] - c0[0]) * t;
-          sy += c0[1] + (c1[1] - c0[1]) * t;
-          sz += c0[2] + (c1[2] - c0[2]) * t;
-          cnt++;
-        }
-        cellVert[cAt(i, j, k)] = verts.length / 3;
-        verts.push(
-          min + (i + sx / cnt) * step,
-          min + (j + sy / cnt) * step,
-          min + (k + sz / cnt) * step
-        );
-      }
-
-  const pos: number[] = [];
-  const nor: number[] = [];
-  const h = step * 0.5;
-  const grad = (x: number, y: number, z: number) =>
-    new THREE.Vector3(
-      field(x + h, y, z) - field(x - h, y, z),
-      field(x, y + h, z) - field(x, y - h, z),
-      field(x, y, z + h) - field(x, y, z - h)
-    ).normalize();
-  // One gradient per net vertex, shared by every triangle that uses it.
-  const vnorm: THREE.Vector3[] = [];
-  for (let v = 0; v < verts.length / 3; v++) {
-    vnorm.push(grad(verts[v * 3], verts[v * 3 + 1], verts[v * 3 + 2]));
-  }
-  const pa = new THREE.Vector3();
-  const pb = new THREE.Vector3();
-  const pc = new THREE.Vector3();
-  const tri = (a: number, b: number, c: number) => {
-    pa.fromArray(verts, a * 3);
-    pb.fromArray(verts, b * 3);
-    pc.fromArray(verts, c * 3);
-    const fn = new THREE.Vector3().subVectors(pb, pa).cross(new THREE.Vector3().subVectors(pc, pa));
-    const avg = vnorm[a].clone().add(vnorm[b]).add(vnorm[c]);
-    // Outward = up the field gradient (field is negative inside).
-    const order = fn.dot(avg) < 0 ? [a, c, b] : [a, b, c];
-    for (const idx of order) {
-      pos.push(verts[idx * 3], verts[idx * 3 + 1], verts[idx * 3 + 2]);
-      nor.push(vnorm[idx].x, vnorm[idx].y, vnorm[idx].z);
-    }
-  };
-  const quad = (a: number, b: number, c: number, d: number) => {
-    if (a < 0 || b < 0 || c < 0 || d < 0) return;
-    tri(a, b, c);
-    tri(a, c, d);
-  };
-  for (let k = 0; k < N; k++)
-    for (let j = 0; j < N; j++)
-      for (let i = 0; i < N; i++) {
-        const s0 = vals[at(i, j, k)] < 0;
-        if (i < n && j > 0 && k > 0 && j < n && k < n && s0 !== vals[at(i + 1, j, k)] < 0)
-          quad(cellVert[cAt(i, j - 1, k - 1)], cellVert[cAt(i, j, k - 1)], cellVert[cAt(i, j, k)], cellVert[cAt(i, j - 1, k)]);
-        if (j < n && i > 0 && k > 0 && i < n && k < n && s0 !== vals[at(i, j + 1, k)] < 0)
-          quad(cellVert[cAt(i - 1, j, k - 1)], cellVert[cAt(i, j, k - 1)], cellVert[cAt(i, j, k)], cellVert[cAt(i - 1, j, k)]);
-        if (k < n && i > 0 && j > 0 && i < n && j < n && s0 !== vals[at(i, j, k + 1)] < 0)
-          quad(cellVert[cAt(i - 1, j - 1, k)], cellVert[cAt(i, j - 1, k)], cellVert[cAt(i, j, k)], cellVert[cAt(i - 1, j, k)]);
-      }
-  const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
-  geometry.setAttribute("normal", new THREE.Float32BufferAttribute(nor, 3));
-  return geometry;
+/** A rounded tray (floor + wall ring) of `depth`, open on +Z. */
+function tray(w: number, h: number, r: number, depth: number, wall: number) {
+  const floor = new THREE.ExtrudeGeometry(roundedRectShape(w, h, r), {
+    depth: wall,
+    bevelEnabled: false,
+    curveSegments: 8,
+  });
+  const ring = roundedRectShape(w, h, r);
+  const inner = new THREE.Path();
+  inner.setFromPoints(roundedRectShape(w - wall * 2, h - wall * 2, Math.max(r - wall, 0.01)).getPoints(8));
+  ring.holes.push(inner);
+  const walls = new THREE.ExtrudeGeometry(ring, {
+    depth: depth - wall,
+    bevelEnabled: false,
+    curveSegments: 8,
+  });
+  walls.translate(0, 0, wall);
+  return mergeGeometries([floor, walls]);
 }
 
 /**
- * Gyroid heat-exchanger core: a block cut through by a gyroid — the
- * triply periodic surface that splits a volume into two interwoven
- * channel networks, hot and cold, and can only be printed.
+ * Twisted-tube heat exchanger: three tubes braided around each other
+ * between two square headers, with a port on each header. The braid is
+ * what a bent-tube build can't do — and the turbulence it causes is the
+ * point.
  */
-export function makeGyroidGeometry({ periods = 1.5, gap = 0.36, resolution = 40 } = {}) {
-  const half = 1;
-  const k = (Math.PI * 2 * periods) / (half * 2);
-  const field = (x: number, y: number, z: number) => {
-    const g =
-      Math.sin(k * x) * Math.cos(k * y) +
-      Math.sin(k * y) * Math.cos(k * z) +
-      Math.sin(k * z) * Math.cos(k * x);
-    // Solid everywhere except a gyroid-shaped gap: the gap is the
-    // dividing wall's negative — two interwoven channel networks cut
-    // through a block — so every face shows the swirl as slots and the
-    // block keeps a clean square outline.
-    const channels = gap - Math.abs(g);
-    const box = (Math.max(Math.abs(x), Math.abs(y), Math.abs(z)) - half * 0.94) * 6;
-    return Math.max(channels, box);
-  };
-  return finish(surfaceNets(field, resolution, -half, half), { keepNormals: true });
-}
-
-/**
- * Tube-wall rocket engine: injector dome, chamber, throat and bell,
- * with coolant tubes running nozzle-to-throat into a manifold ring at
- * each end — one printed part where the classic
- * build brazes hundreds of tubes.
- */
-export function makeEngineGeometry({ tubes = 10 } = {}) {
+export function makeExchangerGeometry({ tubes = 3, turns = 1.25 } = {}) {
   const parts: THREE.BufferGeometry[] = [];
-  const bell = (y: number) => 0.11 + 0.26 * (1 - y / 0.5) ** 1.6;
-  const profile: THREE.Vector2[] = [new THREE.Vector2(0, 1.02)];
-  for (let i = 1; i <= 10; i++) {
-    const t = i / 10;
-    profile.push(new THREE.Vector2(0.22 * Math.sin((t * Math.PI) / 2), 1.02 - 0.12 * (1 - Math.cos((t * Math.PI) / 2))));
+  const span = 0.84;
+  const header = 0.32;
+  for (const sx of [-1, 1]) {
+    const h = new THREE.ExtrudeGeometry(roundedRectShape(header, header, 0.06), {
+      depth: 0.08,
+      bevelEnabled: false,
+      curveSegments: 8,
+    });
+    h.rotateY(Math.PI / 2);
+    h.translate(sx * (span / 2) + (sx > 0 ? 0 : -0.08), 0, 0);
+    parts.push(h);
+    const port = new THREE.CylinderGeometry(0.05, 0.05, 0.12, 24);
+    port.rotateZ(Math.PI / 2);
+    port.translate(sx * (span / 2 + 0.14), 0, 0);
+    parts.push(port);
+    const portFlange = new THREE.CylinderGeometry(0.08, 0.08, 0.03, 32);
+    portFlange.rotateZ(Math.PI / 2);
+    portFlange.translate(sx * (span / 2 + 0.2), 0, 0);
+    parts.push(portFlange);
   }
-  profile.push(new THREE.Vector2(0.22, 0.72));
-  for (let i = 1; i <= 8; i++) {
-    const t = i / 8;
-    profile.push(new THREE.Vector2(0.22 - 0.11 * (1 - Math.cos((t * Math.PI) / 2)), 0.72 - 0.22 * t));
-  }
-  for (let i = 1; i <= 24; i++) {
-    const y = 0.5 - (0.5 * i) / 24;
-    profile.push(new THREE.Vector2(bell(y) - 0.01, y));
-  }
-  profile.push(new THREE.Vector2(bell(0) - 0.03, 0), new THREE.Vector2(0.1, 0.45));
-  parts.push(new THREE.LatheGeometry(profile, 64));
-
-  const tube = 0.026;
   for (let i = 0; i < tubes; i++) {
-    const a = (i / tubes) * Math.PI * 2;
+    const phase = (i / tubes) * Math.PI * 2;
     const pts: THREE.Vector3[] = [];
-    for (let s = 0; s <= 20; s++) {
-      const y = 0.04 + (0.44 * s) / 20;
-      const r = bell(y) + tube * 0.6;
-      pts.push(new THREE.Vector3(Math.cos(a) * r, y, Math.sin(a) * r));
+    for (let s = 0; s <= 64; s++) {
+      const t = s / 64;
+      const a = phase + t * turns * Math.PI * 2;
+      // Braid radius eases in from the header so each tube meets it square.
+      const r = 0.085 * Math.sin(t * Math.PI) ** 0.35;
+      pts.push(new THREE.Vector3(-span / 2 + t * span, Math.cos(a) * r, Math.sin(a) * r));
     }
-    parts.push(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 24, tube, 14, false));
+    parts.push(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 96, 0.042, 16, false));
   }
-  for (const [y, rr] of [
-    [0.04, bell(0.04) + tube * 1.5],
-    [0.48, bell(0.48) + tube * 1.5],
-  ]) {
-    const ring = new THREE.TorusGeometry(rr, tube * 1.7, 14, 72);
-    ring.rotateX(Math.PI / 2);
-    ring.translate(0, y, 0);
-    parts.push(ring);
-  }
-  // One propellant feed off the dome, flanged.
-  const feed = new THREE.CylinderGeometry(0.05, 0.05, 0.14, 24);
-  feed.translate(0, 1.08, 0);
-  const cap = new THREE.CylinderGeometry(0.085, 0.085, 0.035, 32);
-  cap.translate(0, 1.16, 0);
-  parts.push(feed, cap);
-  const merged = mergeGeometries(parts);
-  merged.rotateZ(-0.3);
-  return finish(merged);
+  return finish(mergeGeometries(parts));
 }
 
 /**
- * Print-in-place hinge: two leaves whose knuckles interlock around a
- * captive pin, printed assembled and already free to swing. Opened to
- * ~120° so the knuckles read.
+ * Living-hinge case: a rounded tray and its lid printed as one piece,
+ * joined by a thin flexing strip instead of pins — a hinge that only
+ * exists because the plastic is printed thin. Shown propped open, with
+ * a snap tab on the lid.
  */
-export function makeHingeGeometry({ knuckles = 5, length = 1 } = {}) {
+export function makeLivingHingeGeometry({ open = 2.1 } = {}) {
   const parts: THREE.BufferGeometry[] = [];
-  const r = 0.09;
-  const leafW = 0.42;
-  const t = 0.05;
-  const seg = length / knuckles;
-  const leaf = (angle: number, odd: boolean) => {
-    const shape = new THREE.Shape();
-    shape.moveTo(0, -length / 2);
-    shape.lineTo(leafW - 0.08, -length / 2);
-    shape.absarc(leafW - 0.08, -length / 2 + 0.08, 0.08, -Math.PI / 2, 0, false);
-    shape.lineTo(leafW, length / 2 - 0.08);
-    shape.absarc(leafW - 0.08, length / 2 - 0.08, 0.08, 0, Math.PI / 2, false);
-    shape.lineTo(0, length / 2);
-    shape.closePath();
-    for (const y of [-length * 0.28, length * 0.28]) shape.holes.push(circlePath(0.04, leafW * 0.62, y));
-    const g = new THREE.ExtrudeGeometry(shape, { depth: t, bevelEnabled: false, curveSegments: 16 });
-    g.translate(0, 0, -t / 2);
-    // Leaf lies in XY, spine along Y at x = 0; swing it about Y.
-    g.rotateY(angle);
-    parts.push(g);
-    for (let i = 0; i < knuckles; i++) {
-      if ((i % 2 === 1) !== odd) continue;
-      const k = new THREE.CylinderGeometry(r, r, seg * 0.92, 32);
-      k.translate(0, -length / 2 + seg * (i + 0.5), 0);
-      parts.push(k);
-    }
+  const w = 0.9;
+  const d = 0.56;
+  const r = 0.1;
+  const base = tray(w, d, r, 0.2, 0.04);
+  base.rotateX(-Math.PI / 2);
+  parts.push(base);
+  const hingeZ = -d / 2;
+  // Lid: shallower tray, hinged at the back edge, swung open.
+  const lid = tray(w, d, r, 0.09, 0.04);
+  lid.rotateX(-Math.PI / 2);
+  lid.scale(1, -1, 1);
+  const tab = new THREE.BoxGeometry(0.18, 0.06, 0.03);
+  tab.translate(0, -0.06, d / 2 + 0.015);
+  const lidGroup = mergeGeometries([lid, tab]);
+  lidGroup.translate(0, 0, -hingeZ);
+  lidGroup.rotateX(-open);
+  lidGroup.translate(0, 0.2, hingeZ);
+  parts.push(lidGroup);
+  // The flexure itself: a thin strip bridging base and lid.
+  const strip = new THREE.CylinderGeometry(0.03, 0.03, w * 0.86, 24, 1, false, 0, Math.PI);
+  strip.rotateZ(Math.PI / 2);
+  strip.translate(0, 0.2, hingeZ - 0.005);
+  parts.push(strip);
+  return finish(mergeGeometries(parts));
+}
+
+/**
+ * Universal joint: two forked yokes on their shafts, coupled by a
+ * cross-shaped spider, the upper shaft broken out at an angle. Print it
+ * assembled and it articulates off the bed.
+ */
+export function makeJointGeometry({ angle = 0.45 } = {}) {
+  const parts: THREE.BufferGeometry[] = [];
+  const yoke = (out: THREE.BufferGeometry[]) => {
+    const shaft = new THREE.CylinderGeometry(0.075, 0.075, 0.42, 32);
+    shaft.translate(0, -0.37, 0);
+    const hub = new THREE.CylinderGeometry(0.12, 0.12, 0.08, 40);
+    hub.translate(0, -0.2, 0);
+    const ear = new THREE.Shape();
+    ear.moveTo(-0.07, -0.16);
+    ear.lineTo(0.07, -0.16);
+    ear.lineTo(0.07, 0);
+    ear.absarc(0, 0, 0.07, 0, Math.PI, false);
+    ear.closePath();
+    ear.holes.push(circlePath(0.03));
+    const ears = [-1, 1].map((sx) => {
+      const g = new THREE.ExtrudeGeometry(ear, { depth: 0.05, bevelEnabled: false, curveSegments: 20 });
+      g.rotateY(Math.PI / 2);
+      g.translate(sx > 0 ? 0.12 : -0.17, 0, 0);
+      return g;
+    });
+    out.push(shaft, hub, ...ears);
   };
-  leaf(0, false);
-  leaf((Math.PI * 2) / 3, true);
-  const pin = new THREE.CylinderGeometry(r * 0.45, r * 0.45, length + 0.06, 20);
-  parts.push(pin);
-  const merged = mergeGeometries(parts);
-  merged.rotateX(Math.PI / 2);
-  return finish(merged);
+  const lower: THREE.BufferGeometry[] = [];
+  yoke(lower);
+  parts.push(mergeGeometries(lower));
+  const upperParts: THREE.BufferGeometry[] = [];
+  yoke(upperParts);
+  const upper = mergeGeometries(upperParts);
+  upper.rotateX(Math.PI);
+  upper.rotateY(Math.PI / 2);
+  upper.rotateZ(angle);
+  parts.push(upper);
+  // Spider: a block with four trunnion arms.
+  parts.push(new THREE.BoxGeometry(0.1, 0.1, 0.1));
+  const armX = new THREE.CylinderGeometry(0.028, 0.028, 0.36, 16);
+  armX.rotateZ(Math.PI / 2);
+  parts.push(armX);
+  const armZ = new THREE.CylinderGeometry(0.028, 0.028, 0.36, 16);
+  armZ.rotateX(Math.PI / 2);
+  armZ.rotateY(0);
+  armZ.applyMatrix4(new THREE.Matrix4().makeRotationZ(angle));
+  parts.push(armZ);
+  return finish(mergeGeometries(parts));
 }
 
 /**
@@ -410,9 +342,9 @@ export const PART_BUILDERS: Record<
 > = {
   fan: () => makeRotorGeometry(),
   gear: () => makeGearGeometry(),
-  gyroid: () => makeGyroidGeometry(),
-  engine: () => makeEngineGeometry(),
-  hinge: () => makeHingeGeometry(),
+  exchanger: () => makeExchangerGeometry(),
+  joint: () => makeJointGeometry(),
+  hinge: () => makeLivingHingeGeometry(),
   spring: () => makeSpringGeometry(),
 };
 
