@@ -428,7 +428,7 @@ const handler = createMcpHandler(
             finishes: Array<{ id: string; name: string }>;
           }> = [];
           for (const g of catalog.groups) {
-            if (group && g.name.toLowerCase() !== group.toLowerCase()) continue;
+            if (group && !g.name.toLowerCase().includes(group.toLowerCase())) continue;
             for (const m of g.materials) {
               if (q && !m.name.toLowerCase().includes(q)) continue;
               out.push({
