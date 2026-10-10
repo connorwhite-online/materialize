@@ -21,7 +21,7 @@ The connector is the same MCP server the ChatGPT plugin uses (`app/api/[transpor
 
 > Subject: Pre-submission question: connector that creates paid orders for physical goods
 >
-> Hi, we're about to submit Materialize (materialize.cc, remote MCP at https://www.materialize.cc/api/mcp) to the connector directory. Materialize gets 3D models professionally printed and shipped.
+> Hi, we're about to submit Materialize (materialize.cc, remote MCP at https://www.materialize.cc/api/mcp) to the connector directory. Materialize lets people print and host their 3D models: publish and share them, and get them professionally printed and shipped.
 >
 > One tool, `materialize_create_order`, creates a print order. By default it never moves money: it returns a draft, and the user reviews and pays on materialize.cc through Stripe Checkout. A user can opt in to an agent spending policy (per-order and per-period limits they set on our site), in which case an order within the limits is charged to their saved card and can be cancelled during a window they choose. The tool is annotated `destructiveHint: true`, so Claude always asks before calling it.
 >
@@ -42,14 +42,14 @@ Auto-synced. 31 of the 34 tools show for an ordinary account; the three `materia
 ### 3. Listing
 
 - **Server name:** Materialize
-- **One-liner** (≤200): Get 3D models professionally printed and shipped: check printability, pick a material, compare prices from print shops and order from the chat.
+- **One-liner** (≤200): Print and host your 3D models: publish and share them with a link, check printability, compare prices from professional print shops and order prints from the chat.
 - **Description** (≤2,000):
 
-  > Materialize turns a 3D model into a finished part. Attach an STL, OBJ, 3MF or STEP file (or link one) and Claude can check it for problems that make prints fail, recommend materials for what the part has to do, and compare all-in prices from professional print shops: FDM, SLS, MJF, resin and metal, with shipping, vendor minimums and our service fee included. Prices and material shortlists appear as interactive cards with a 3D view of your part.
+  > Materialize is where your 3D models live and get made. Claude can add a model to your library from a file you attach (STL, OBJ, 3MF, STEP) or a link, publish it with a description, license and photos, and share it with a link, or keep it private. Hardware projects get their own pages with the files, a parts list, wiring diagrams and a build guide.
   >
-  > When you're ready, Claude prepares the order and Materialize emails you a link to review and pay on materialize.cc. Nothing is charged until you approve it, unless you've set up a spending policy yourself. Claude can then track the order's status.
+  > When you want a part in hand, Claude can check the model for problems that make prints fail, recommend materials for what the part has to do, and compare all-in prices from professional print shops: FDM, SLS, MJF, resin and metal, with shipping, vendor minimums and our service fee included. Prices and material shortlists appear as interactive cards with a 3D view of your part.
   >
-  > Materialize is also a home for your models and hardware projects. Claude can organize your library, publish files, and build project pages with a parts list, wiring diagrams and photos.
+  > Claude prepares the order and Materialize emails you a link to review and pay on materialize.cc. Nothing is charged until you approve it, unless you've set up a spending policy yourself. Claude can then track the order's status.
   >
   > Requires a free Materialize account. Prices are in US dollars.
 
@@ -63,7 +63,7 @@ Auto-synced. 31 of the 34 tools show for an ordinary account; the three `materia
 
 ### 4. Use cases
 
-- **Primary use cases:** price and order a 3D print of a model from the chat; check a model's printability before ordering; choose a material for a functional part; track print orders; manage a library of models and hardware projects.
+- **Primary use cases:** host, publish and share 3D models and hardware projects from the chat; price and order a 3D print of a model; check a model's printability before ordering; choose a material for a functional part; track print orders.
 - **Prerequisites:** a free Materialize account (created during sign-in). Paying for a print needs a card at checkout.
 - **Reads, writes or both:** both.
 
