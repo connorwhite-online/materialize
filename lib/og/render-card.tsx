@@ -105,8 +105,8 @@ type CardProps = {
 
 const MARK_HEIGHT = 56;
 const MARK_INSET = 56;
-// The "M" is the wordmark's first glyph — the one the mobile nav pill and
-// the Apple touch icon wear — NOT the legacy standalone MARK_PATH.
+// The "M" is the wordmark's first glyph — the same artwork as MARK_PATH
+// and the Apple touch icon.
 const MARK_WIDTH = Math.round((MARK_HEIGHT * WORDMARK_MARK_WIDTH) / 100);
 
 /** The brand "M" as satori-safe inline SVG (path from logo-paths.ts). */
