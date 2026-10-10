@@ -67,10 +67,10 @@ export const DROPZONE_PARTS: readonly DropzonePart[] = [
     phase: 1.2,
   },
   {
-    kind: "hinge",
+    kind: "flexure",
     position: [0.3, -0.14],
     mobilePosition: null,
-    size: 0.46,
+    size: 0.6,
     yaw: 0,
     floatPx: 1.5,
     floatSpeed: 0.5,

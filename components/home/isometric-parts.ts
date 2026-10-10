@@ -3,7 +3,7 @@ import * as THREE from "three";
 /**
  * Parts for the authed-home dropzone backdrop: a playful bench of
  * machine components that lean additive — fan, chunky gear, twisted-
- * tube heat exchanger, universal joint, living-hinge case, spring on
+ * tube heat exchanger, clevis yoke, compliant flexure stage, spring on
  * its seats. Simple enough to read as
  * sketches at ~60px, specific enough to read as real parts.
  *
@@ -19,7 +19,7 @@ export type IsometricPartKind =
   | "gear"
   | "exchanger"
   | "joint"
-  | "hinge"
+  | "flexure"
   | "spring";
 
 function finish(geometry: THREE.BufferGeometry) {
@@ -154,26 +154,6 @@ function roundedRectShape(w: number, h: number, r: number) {
   return shape;
 }
 
-/** A rounded tray (floor + wall ring) of `depth`, open on +Z. */
-function tray(w: number, h: number, r: number, depth: number, wall: number) {
-  const floor = new THREE.ExtrudeGeometry(roundedRectShape(w, h, r), {
-    depth: wall,
-    bevelEnabled: false,
-    curveSegments: 8,
-  });
-  const ring = roundedRectShape(w, h, r);
-  const inner = new THREE.Path();
-  inner.setFromPoints(roundedRectShape(w - wall * 2, h - wall * 2, Math.max(r - wall, 0.01)).getPoints(8));
-  ring.holes.push(inner);
-  const walls = new THREE.ExtrudeGeometry(ring, {
-    depth: depth - wall,
-    bevelEnabled: false,
-    curveSegments: 8,
-  });
-  walls.translate(0, 0, wall);
-  return mergeGeometries([floor, walls]);
-}
-
 /**
  * Twisted-tube heat exchanger: three tubes braided around each other
  * between two square headers, with a port on each header. The braid is
@@ -218,87 +198,88 @@ export function makeExchangerGeometry({ tubes = 3, turns = 1.25 } = {}) {
 }
 
 /**
- * Living-hinge case: a rounded tray and its lid printed as one piece,
- * joined by a thin flexing strip instead of pins — a hinge that only
- * exists because the plastic is printed thin. Shown propped open, with
- * a snap tab on the lid.
+ * Compliant flexure stage: one solid frame whose centre shuttle hangs
+ * on two pairs of thin parallel leaf springs. It moves without a single
+ * joint or fastener — a mechanism that exists because it's printed as
+ * one piece.
  */
-export function makeLivingHingeGeometry({ open = 2.1 } = {}) {
-  const parts: THREE.BufferGeometry[] = [];
-  const w = 0.9;
-  const d = 0.56;
-  const r = 0.1;
-  const base = tray(w, d, r, 0.2, 0.04);
-  base.rotateX(-Math.PI / 2);
-  parts.push(base);
-  const hingeZ = -d / 2;
-  // Lid: shallower tray, hinged at the back edge, swung open.
-  const lid = tray(w, d, r, 0.09, 0.04);
-  lid.rotateX(-Math.PI / 2);
-  lid.scale(1, -1, 1);
-  const tab = new THREE.BoxGeometry(0.18, 0.06, 0.03);
-  tab.translate(0, -0.06, d / 2 + 0.015);
-  const lidGroup = mergeGeometries([lid, tab]);
-  lidGroup.translate(0, 0, -hingeZ);
-  lidGroup.rotateX(-open);
-  lidGroup.translate(0, 0.2, hingeZ);
-  parts.push(lidGroup);
-  // The flexure itself: a thin strip bridging base and lid.
-  const strip = new THREE.CylinderGeometry(0.03, 0.03, w * 0.86, 24, 1, false, 0, Math.PI);
-  strip.rotateZ(Math.PI / 2);
-  strip.translate(0, 0.2, hingeZ - 0.005);
-  parts.push(strip);
-  return finish(mergeGeometries(parts));
+export function makeFlexureGeometry({ thickness = 0.16 } = {}) {
+  const w = 1;
+  const h = 0.66;
+  const bar = 0.1;
+  const frame = roundedRectShape(w, h, 0.08);
+  const opening = new THREE.Path();
+  opening.setFromPoints(roundedRectShape(w - bar * 2, h - bar * 2, 0.03).getPoints(6));
+  frame.holes.push(opening);
+  // Mounting holes in the frame corners.
+  for (const sx of [-1, 1]) {
+    for (const sy of [-1, 1]) {
+      frame.holes.push(circlePath(0.025, sx * (w / 2 - bar / 2), sy * (h / 2 - bar / 2)));
+    }
+  }
+  const extrude = (shape: THREE.Shape, depth = thickness) =>
+    new THREE.ExtrudeGeometry(shape, { depth, bevelEnabled: false, curveSegments: 16 });
+  const parts: THREE.BufferGeometry[] = [extrude(frame)];
+
+  // Shuttle: a block in the middle with a bore.
+  const shuttle = roundedRectShape(0.22, 0.2, 0.03);
+  shuttle.holes.push(circlePath(0.045));
+  parts.push(extrude(shuttle));
+
+  // Leaf springs: thin beams from the shuttle out to the frame's sides,
+  // a pair above and a pair below, so the shuttle slides straight.
+  const inner = w / 2 - bar;
+  for (const y of [-0.075, 0.075, -0.17, 0.17]) {
+    if (Math.abs(y) > h / 2 - bar - 0.012) continue;
+    const beam = new THREE.Shape();
+    beam.moveTo(-inner - 0.005, y - 0.009);
+    beam.lineTo(inner + 0.005, y - 0.009);
+    beam.lineTo(inner + 0.005, y + 0.009);
+    beam.lineTo(-inner - 0.005, y + 0.009);
+    beam.closePath();
+    parts.push(extrude(beam, thickness * 0.7));
+  }
+  const merged = mergeGeometries(parts);
+  merged.rotateX(-Math.PI / 2);
+  return finish(merged);
 }
 
 /**
- * Universal joint: two forked yokes on their shafts, coupled by a
- * cross-shaped spider, the upper shaft broken out at an angle. Print it
- * assembled and it articulates off the bed.
+ * Clevis yoke: the forked end of an articulating joint on its shaft —
+ * two ears with a cross-bored pin and a hub, the part a linkage or
+ * actuator pivots on.
  */
-export function makeJointGeometry({ angle = 0.45 } = {}) {
+export function makeJointGeometry() {
   const parts: THREE.BufferGeometry[] = [];
-  const yoke = (out: THREE.BufferGeometry[]) => {
-    const shaft = new THREE.CylinderGeometry(0.075, 0.075, 0.42, 32);
-    shaft.translate(0, -0.37, 0);
-    const hub = new THREE.CylinderGeometry(0.12, 0.12, 0.08, 40);
-    hub.translate(0, -0.2, 0);
-    const ear = new THREE.Shape();
-    ear.moveTo(-0.07, -0.16);
-    ear.lineTo(0.07, -0.16);
-    ear.lineTo(0.07, 0);
-    ear.absarc(0, 0, 0.07, 0, Math.PI, false);
-    ear.closePath();
-    ear.holes.push(circlePath(0.03));
-    const ears = [-1, 1].map((sx) => {
-      const g = new THREE.ExtrudeGeometry(ear, { depth: 0.05, bevelEnabled: false, curveSegments: 20 });
-      g.rotateY(Math.PI / 2);
-      g.translate(sx > 0 ? 0.12 : -0.17, 0, 0);
-      return g;
-    });
-    out.push(shaft, hub, ...ears);
-  };
-  const lower: THREE.BufferGeometry[] = [];
-  yoke(lower);
-  parts.push(mergeGeometries(lower));
-  const upperParts: THREE.BufferGeometry[] = [];
-  yoke(upperParts);
-  const upper = mergeGeometries(upperParts);
-  upper.rotateX(Math.PI);
-  upper.rotateY(Math.PI / 2);
-  upper.rotateZ(angle);
-  parts.push(upper);
-  // Spider: a block with four trunnion arms.
-  parts.push(new THREE.BoxGeometry(0.1, 0.1, 0.1));
-  const armX = new THREE.CylinderGeometry(0.028, 0.028, 0.36, 16);
-  armX.rotateZ(Math.PI / 2);
-  parts.push(armX);
-  const armZ = new THREE.CylinderGeometry(0.028, 0.028, 0.36, 16);
-  armZ.rotateX(Math.PI / 2);
-  armZ.rotateY(0);
-  armZ.applyMatrix4(new THREE.Matrix4().makeRotationZ(angle));
-  parts.push(armZ);
-  return finish(mergeGeometries(parts));
+  const shaft = new THREE.CylinderGeometry(0.11, 0.11, 0.5, 40);
+  shaft.translate(0, -0.47, 0);
+  const hub = new THREE.CylinderGeometry(0.19, 0.19, 0.12, 48);
+  hub.translate(0, -0.18, 0);
+  parts.push(shaft, hub);
+  const ear = new THREE.Shape();
+  ear.moveTo(-0.12, -0.18);
+  ear.lineTo(0.12, -0.18);
+  ear.lineTo(0.12, 0.06);
+  ear.absarc(0, 0.06, 0.12, 0, Math.PI, false);
+  ear.closePath();
+  ear.holes.push(circlePath(0.05, 0, 0.06));
+  for (const sx of [-1, 1]) {
+    const g = new THREE.ExtrudeGeometry(ear, { depth: 0.07, bevelEnabled: false, curveSegments: 24 });
+    g.rotateY(Math.PI / 2);
+    g.translate(sx > 0 ? 0.12 : -0.19, 0, 0);
+    parts.push(g);
+  }
+  // The pin, through both ears, with a head on one side.
+  const pin = new THREE.CylinderGeometry(0.035, 0.035, 0.48, 20);
+  pin.rotateZ(Math.PI / 2);
+  pin.translate(0, 0.06, 0);
+  const head = new THREE.CylinderGeometry(0.06, 0.06, 0.04, 24);
+  head.rotateZ(Math.PI / 2);
+  head.translate(0.26, 0.06, 0);
+  parts.push(pin, head);
+  const merged = mergeGeometries(parts);
+  merged.rotateZ(-0.25);
+  return finish(merged);
 }
 
 /**
@@ -344,7 +325,7 @@ export const PART_BUILDERS: Record<
   gear: () => makeGearGeometry(),
   exchanger: () => makeExchangerGeometry(),
   joint: () => makeJointGeometry(),
-  hinge: () => makeLivingHingeGeometry(),
+  flexure: () => makeFlexureGeometry(),
   spring: () => makeSpringGeometry(),
 };
 
