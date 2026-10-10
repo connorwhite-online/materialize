@@ -1,6 +1,8 @@
+import Image from "next/image";
 import Link from "next/link";
 import type { LucideIcon } from "lucide-react";
 import {
+  BoxIcon,
   CheckCircle2Icon,
   CircleAlertIcon,
   CreditCardIcon,
@@ -9,9 +11,12 @@ import {
   TruckIcon,
 } from "lucide-react";
 import { Factory } from "@/components/icons/factory";
+import { isSessionGatedImageSrc } from "@/lib/images/session-gated-src";
+import { cn } from "@/lib/utils";
 import {
   formatOrderDate,
   formatOrderFileCount,
+  orderNeedsAttention,
   pendingOrderHref,
   type PendingOrder,
   type PendingOrderStatus,
@@ -57,38 +62,83 @@ const PENDING_STATUS: Record<PendingOrderStatus, StatusMeta> = {
   },
 };
 
+/** Thumbnail well: the part's captured preview, or a box glyph. */
+function PartThumb({ order }: { order: PendingOrder }) {
+  const extra = order.fileCount - 1;
+  return (
+    <div className="relative size-11 shrink-0" aria-hidden>
+      <div className="flex size-full items-center justify-center overflow-hidden rounded-lg border border-border bg-muted text-muted-foreground">
+        {order.thumbnailUrl ? (
+          <Image
+            src={order.thumbnailUrl}
+            alt=""
+            width={44}
+            height={44}
+            unoptimized={isSessionGatedImageSrc(order.thumbnailUrl)}
+            // A few KB each, at most a dozen, and the carousel's
+            // overflow keeps lazy-loading from ever firing for them.
+            loading="eager"
+            className="size-full scale-125 object-contain"
+          />
+        ) : (
+          <BoxIcon className="size-4" size={16} strokeWidth={1.75} />
+        )}
+      </div>
+      {extra > 0 ? (
+        <span className="absolute -right-1.5 -bottom-1.5 rounded-full border border-border bg-card px-1 text-[10px] font-medium leading-4 text-foreground tabular-nums">
+          +{extra}
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
 export function PendingOrderTile({ order }: { order: PendingOrder }) {
   const { label, Icon } = PENDING_STATUS[order.status] ?? {
     label: order.status,
     Icon: CreditCardIcon,
   };
+  const attention = orderNeedsAttention(order.status);
 
-  const dateLine = formatOrderDate(order.createdAt);
+  const title = order.title ?? formatOrderFileCount(order.fileCount);
+  const meta = [
+    order.title && order.fileCount > 1
+      ? formatOrderFileCount(order.fileCount)
+      : order.quantity > 1
+        ? `×${order.quantity}`
+        : null,
+    formatOrderDate(order.createdAt) || null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
 
   return (
     <Link
       href={pendingOrderHref(order)}
-      className="group flex w-52 shrink-0 flex-col gap-2 rounded-2xl border border-border bg-card p-3 transition-colors hover:border-primary/40"
+      className="group flex w-52 shrink-0 flex-col gap-2.5 rounded-2xl border border-border bg-card p-3 transition-colors hover:border-primary/40"
     >
-      <div className="flex items-center gap-2">
-        <div
-          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-border bg-muted text-muted-foreground"
-          aria-hidden
-        >
-          <Icon className="size-4" size={16} />
+      <div className="flex min-w-0 items-center gap-2.5">
+        <PartThumb order={order} />
+        <div className="min-w-0 space-y-0.5">
+          <p className="truncate text-sm font-medium leading-tight group-hover:text-primary">
+            {title}
+          </p>
+          {meta ? (
+            <p className="truncate text-xs text-muted-foreground">{meta}</p>
+          ) : null}
         </div>
-        <p className="truncate text-xs font-medium text-muted-foreground">
-          {label}
-        </p>
       </div>
-      <div className="min-w-0 space-y-0.5">
-        <p className="truncate text-sm font-medium leading-tight group-hover:text-primary">
-          {formatOrderFileCount(order.fileCount)}
-        </p>
-        {dateLine ? (
-          <p className="truncate text-xs text-muted-foreground">{dateLine}</p>
-        ) : null}
-      </div>
+      <span
+        className={cn(
+          "inline-flex w-fit max-w-full items-center gap-1.5 rounded-full px-2 py-0.5 text-[11px] font-medium",
+          attention
+            ? "bg-primary text-primary-foreground"
+            : "bg-muted text-muted-foreground"
+        )}
+      >
+        <Icon className="size-3 shrink-0" size={12} />
+        <span className="truncate">{label}</span>
+      </span>
     </Link>
   );
 }

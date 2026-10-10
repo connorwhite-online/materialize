@@ -1,7 +1,7 @@
 import "server-only";
 
 import { db } from "@/lib/db";
-import { printOrders, printOrderItems } from "@/lib/db/schema";
+import { fileAssets, files, printOrders, printOrderItems } from "@/lib/db/schema";
 import { eq, desc, and, inArray } from "drizzle-orm";
 import { withDbRetry } from "@/lib/db/retry";
 import { visibleOrdersFilter } from "@/lib/print/order-visibility";
@@ -40,6 +40,15 @@ export type PendingOrder = {
   material: string | null;
   fileAssetId: string | null;
   fileCount: number;
+  /**
+   * The (first) ordered part: listing name, else the upload's filename.
+   * Null when the asset is gone.
+   */
+  title: string | null;
+  /** Listing thumbnail for that part, when one was ever captured. */
+  thumbnailUrl: string | null;
+  /** Units of the (first) part. */
+  quantity: number;
   /** ISO timestamp — when the order row was created / started. */
   createdAt: string;
   /**
@@ -55,6 +64,13 @@ export type PendingOrder = {
 export function formatOrderFileCount(fileCount: number): string {
   const n = Math.max(1, fileCount);
   return n === 1 ? "1 file" : `${n} files`;
+}
+
+/** "bracket.stl" → "bracket"; listing names pass through unchanged. */
+export function displayPartName(name: string | null | undefined): string | null {
+  const trimmed = name?.trim();
+  if (!trimmed) return null;
+  return trimmed.replace(/\.(stl|obj|3mf|step|stp|amf)$/i, "");
 }
 
 /** Short calendar date for the card meta line. */
@@ -111,6 +127,7 @@ async function loadPendingOrdersOnce(userId: string): Promise<PendingOrder[]> {
       fileAssetId: printOrders.fileAssetId,
       createdAt: printOrders.createdAt,
       confirmationToken: printOrders.confirmationToken,
+      quantity: printOrders.quantity,
     })
     .from(printOrders)
     .where(
@@ -130,12 +147,15 @@ async function loadPendingOrdersOnce(userId: string): Promise<PendingOrder[]> {
           .select({
             printOrderId: printOrderItems.printOrderId,
             fileAssetId: printOrderItems.fileAssetId,
+            quantity: printOrderItems.quantity,
           })
           .from(printOrderItems)
           .where(inArray(printOrderItems.printOrderId, multiItemIds))
+          .orderBy(printOrderItems.createdAt)
       : [];
 
   const fileIdsByOrder = new Map<string, Set<string>>();
+  const firstItemByOrder = new Map<string, { fileAssetId: string; quantity: number }>();
   for (const item of multiItemMeta) {
     let set = fileIdsByOrder.get(item.printOrderId);
     if (!set) {
@@ -143,18 +163,50 @@ async function loadPendingOrdersOnce(userId: string): Promise<PendingOrder[]> {
       fileIdsByOrder.set(item.printOrderId, set);
     }
     set.add(item.fileAssetId);
+    if (!firstItemByOrder.has(item.printOrderId)) {
+      firstItemByOrder.set(item.printOrderId, item);
+    }
   }
+
+  // One lookup for every card's lead part: name + thumbnail. A plain
+  // DB join — deliberately no CraftCloud catalog call on the home page.
+  const leadAssetIds = [
+    ...new Set(
+      draftsRaw
+        .map((d) => d.fileAssetId ?? firstItemByOrder.get(d.id)?.fileAssetId)
+        .filter((id): id is string => Boolean(id))
+    ),
+  ];
+  const partRows =
+    leadAssetIds.length > 0
+      ? await db
+          .select({
+            assetId: fileAssets.id,
+            originalFilename: fileAssets.originalFilename,
+            name: files.name,
+            thumbnailUrl: files.thumbnailUrl,
+          })
+          .from(fileAssets)
+          .leftJoin(files, eq(files.id, fileAssets.fileId))
+          .where(inArray(fileAssets.id, leadAssetIds))
+      : [];
+  const partByAsset = new Map(partRows.map((r) => [r.assetId, r]));
 
   const mapped: PendingOrder[] = draftsRaw.map((d) => {
     const multiFiles = !d.fileAssetId
       ? fileIdsByOrder.get(d.id)
       : undefined;
+    const first = firstItemByOrder.get(d.id);
+    const part = partByAsset.get(d.fileAssetId ?? first?.fileAssetId ?? "");
     return {
       id: d.id,
       status: d.status as PendingOrderStatus,
       material: d.material,
       fileAssetId: d.fileAssetId,
       fileCount: multiFiles ? Math.max(multiFiles.size, 1) : 1,
+      title: displayPartName(part?.name ?? part?.originalFilename),
+      thumbnailUrl: part?.thumbnailUrl ?? null,
+      quantity: Math.max(1, d.quantity ?? first?.quantity ?? 1),
       createdAt: d.createdAt.toISOString(),
       confirmationToken:
         d.status === "awaiting_agent_approval" ? d.confirmationToken : null,

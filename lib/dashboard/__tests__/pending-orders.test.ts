@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
+  displayPartName,
   formatOrderDate,
   formatOrderFileCount,
   orderNeedsAttention,
@@ -15,6 +16,9 @@ function order(overrides: Partial<PendingOrder> = {}): PendingOrder {
     material: null,
     fileAssetId: null,
     fileCount: 1,
+    title: null,
+    thumbnailUrl: null,
+    quantity: 1,
     createdAt: "2026-08-30T12:00:00.000Z",
     ...overrides,
   };
@@ -103,5 +107,14 @@ describe("pendingOrderHref", () => {
     expect(pendingOrderHref(order({ status: "auto_approved" }))).toBe(
       "/dashboard/orders/ord-1"
     );
+  });
+});
+
+describe("displayPartName", () => {
+  it("drops a mesh extension from an upload filename", () => {
+    expect(displayPartName("bracket.STL")).toBe("bracket");
+    expect(displayPartName("Fan shroud v2")).toBe("Fan shroud v2");
+    expect(displayPartName("  ")).toBeNull();
+    expect(displayPartName(null)).toBeNull();
   });
 });

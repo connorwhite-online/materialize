@@ -25,6 +25,9 @@ function order(overrides: Partial<PendingOrder> = {}): PendingOrder {
     material: "cc-config-uuid",
     fileAssetId: "asset-1",
     fileCount: 1,
+    title: null,
+    thumbnailUrl: null,
+    quantity: 1,
     createdAt: "2026-08-30T12:00:00.000Z",
     ...overrides,
   };
@@ -43,7 +46,7 @@ describe("PendingOrderTile", () => {
     expect(source).not.toContain("getMaterialById");
   });
 
-  it("renders status, file count, and date — no material, vendor, or total", () => {
+  it("falls back to the file count when the part has no name — no material, vendor, or total", () => {
     const html = renderToStaticMarkup(
       <PendingOrderTile order={order()} />
     );
@@ -56,6 +59,30 @@ describe("PendingOrderTile", () => {
     expect(html).not.toContain("Panashape");
     expect(html).not.toMatch(/\$\d+\.\d{2}/);
     expect(html).toContain("<svg");
+  });
+
+  it("leads with the part's name and thumbnail", () => {
+    const html = renderToStaticMarkup(
+      <PendingOrderTile
+        order={order({
+          title: "Fan shroud",
+          thumbnailUrl: "/api/thumbnails/file-1",
+          quantity: 2,
+        })}
+      />
+    );
+    expect(html).toContain("Fan shroud");
+    expect(html).toContain("/api/thumbnails/file-1");
+    expect(html).toContain("×2");
+    expect(html).not.toContain("1 file");
+  });
+
+  it("badges extra parts on a multi-file order", () => {
+    const html = renderToStaticMarkup(
+      <PendingOrderTile order={order({ title: "Fan shroud", fileCount: 3 })} />
+    );
+    expect(html).toContain("+2");
+    expect(html).toContain("3 files");
   });
 
   it("shows a plural file count for multi-item orders", () => {
