@@ -147,7 +147,17 @@ export function runRenders(run: CadRunResult, max = 3): { view: string; png: str
 }
 
 export type SaveCadResult =
-  | { ok: true; generationId: string; title: string | null; fileSlug: string | null; projectSlug: string | null }
+  | {
+      ok: true;
+      generationId: string;
+      title: string | null;
+      fileSlug: string | null;
+      projectSlug: string | null;
+      /** The primary part, for materialize_inspect_model. */
+      fileAssetId: string;
+      /** Every part of an assembly (absent for a single part). */
+      parts?: Array<{ name: string; fileAssetId: string }>;
+    }
   | { ok: false; error: string; run?: CadRunResult };
 
 /**
@@ -203,5 +213,9 @@ export async function saveCadForAgent(opts: {
     title: persisted.title ?? opts.name,
     fileSlug: persisted.fileSlug ?? null,
     projectSlug: persisted.projectSlug ?? null,
+    fileAssetId: persisted.fileAssetId,
+    ...(persisted.parts && persisted.parts.length > 1
+      ? { parts: persisted.parts.map((p) => ({ name: p.name, fileAssetId: p.fileAssetId })) }
+      : {}),
   };
 }

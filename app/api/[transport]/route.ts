@@ -46,7 +46,9 @@ import {
   setProjectCoverPhotoForUser,
 } from "@/lib/mcp/internal/projects";
 import { cheapestByMaterial, getQuoteForUser } from "@/lib/mcp/internal/quotes";
+import { inspectModelForUser, MAX_INSPECT_PARTS } from "@/lib/mcp/internal/inspect";
 import {
+  INSPECTOR_WIDGET_URI,
   MATERIALS_WIDGET_URI,
   QUOTE_WIDGET_URI,
   registerWidgets,
@@ -175,7 +177,12 @@ const OWNER_ONLY_TOOLS = [
   "materialize_cad_reference",
   "materialize_cad_run",
   "materialize_cad_save",
+  // In-chat inspector: owner-only while it's tried out live, and kept out
+  // of the listing a plugin reviewer sees.
+  "materialize_inspect_model",
 ];
+/** Widget templates only an owner-only tool renders. */
+const OWNER_ONLY_RESOURCES = ["materialize-inspector-widget"];
 
 const requestAuth = new AsyncLocalStorage<{ auth?: MaterializeAuthInfo }>();
 
@@ -244,11 +251,17 @@ async function verifyAndRecord(req: Request, bearerToken: string | undefined) {
  * directory reviewer or a ChatGPT user never sees tools that can only
  * refuse them. Presentation only: each tool still enforces its own gate.
  */
-async function hideUnavailableTools(tools: Map<string, unknown>) {
+async function hideUnavailableTools(
+  tools: Map<string, unknown>,
+  resources: Map<string, unknown> = new Map()
+) {
   const userId = requestAuth.getStore()?.auth?.extra?.userId;
   if (!userId || (await hasCadAccess(userId))) return;
   for (const name of OWNER_ONLY_TOOLS) {
     (tools.get(name) as { disable?: () => void } | undefined)?.disable?.();
+  }
+  for (const name of OWNER_ONLY_RESOURCES) {
+    (resources.get(name) as { disable?: () => void } | undefined)?.disable?.();
   }
 }
 
@@ -301,7 +314,7 @@ const MCP_SERVER_INSTRUCTIONS = [
 const handler = createMcpHandler(
   async (server) => {
     const tools = annotateTools(server);
-    registerWidgets(server as unknown as Parameters<typeof registerWidgets>[0]);
+    const widgets = registerWidgets(server as unknown as Parameters<typeof registerWidgets>[0]);
 
     /* -------------------- CAD (agent writes, Materialize runs) -------------------- */
 
@@ -389,6 +402,46 @@ const handler = createMcpHandler(
           return jsonResult(saved);
         } catch (err) {
           return cadOrInternal(err, "materialize_cad_save");
+        }
+      }
+    );
+
+    server.registerTool(
+      "materialize_inspect_model",
+      {
+        title: "Inspect a model in 3D",
+        description:
+          "Open a model, or the parts of an assembly, in Materialize's 3D inspector in the chat: the user can cut through it on any axis, measure between points in mm, and explode an assembly, beside its size, volume, thinnest wall and printing problems. Pass every part's fileAssetId to see them together in their shared coordinates. Use it after materialize_cad_save, materialize_import_model or materialize_register_upload, and again after each revision so the user can check the change. What the user cuts or measures is sent back to you as context for their next message.",
+        _meta: widgetToolMeta(INSPECTOR_WIDGET_URI, {
+          invoking: "Opening the inspector…",
+          invoked: "Inspector ready",
+        }),
+        inputSchema: {
+          fileAssetIds: z
+            .array(z.string().uuid())
+            .min(1)
+            .max(MAX_INSPECT_PARTS)
+            .describe("One fileAssetId, or each part of an assembly"),
+          title: z.string().min(1).max(120).optional().describe("Heading for the view; defaults to the file name"),
+        },
+      },
+      async ({ fileAssetIds, title }, extra) => {
+        try {
+          const auth = readAuthExtra(extra);
+          requireScope(auth, "files:read");
+          await assertCadAccess(auth.userId);
+          const result = await inspectModelForUser({ userId: auth.userId, fileAssetIds, title });
+          if ("error" in result) {
+            return errorResult({
+              code: result.error === "Forbidden" ? "forbidden" : "not_found",
+              message: result.error,
+            });
+          }
+          return cardResult(result, extra,
+            "The user is looking at the model in Materialize's 3D inspector, with its size, volume, thinnest wall and any printing problems listed under it. Don't restate those; in a sentence or two, say what's worth checking (a cut through a thin section, a fit between parts). When they ask for a change, revise the model, save it, and inspect the new version."
+          );
+        } catch (err) {
+          return cadOrInternal(err, "materialize_inspect_model");
         }
       }
     );
@@ -1840,7 +1893,7 @@ const handler = createMcpHandler(
       }
     );
 
-    await hideUnavailableTools(tools);
+    await hideUnavailableTools(tools, widgets);
   },
   {
     serverInfo: {

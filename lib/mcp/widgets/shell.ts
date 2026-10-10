@@ -243,7 +243,25 @@ window.mzViewer = {
 /** A cube outline shown until (or instead of) the 3D view. */
 export const FALLBACK_ICON = `<svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" aria-hidden="true"><path d="M12 2.5 20.5 7v10L12 21.5 3.5 17V7z"/><path d="M3.5 7 12 11.5 20.5 7M12 11.5v10"/></svg>`;
 
-export function widgetDocument(opts: { title: string; body: string; script: string; styles?: string }): string {
+export function widgetDocument(opts: {
+  title: string;
+  body: string;
+  script: string;
+  styles?: string;
+  /**
+   * Display modes the page supports, declared at `ui/initialize` (a host
+   * must not switch a view into a mode it didn't declare). Omitted, the
+   * bridge is byte-for-byte unchanged, so existing widgets keep their
+   * content-hashed URIs.
+   */
+  displayModes?: Array<"inline" | "fullscreen" | "pip">;
+}): string {
+  const bridge = opts.displayModes
+    ? BRIDGE.replace(
+        "appCapabilities: {}",
+        "appCapabilities: { availableDisplayModes: " + JSON.stringify(opts.displayModes) + " }"
+      )
+    : BRIDGE;
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -255,7 +273,7 @@ export function widgetDocument(opts: { title: string; body: string; script: stri
 </head>
 <body>
 ${opts.body}
-<script>${BRIDGE}</script>
+<script>${bridge}</script>
 <script>${VIEWER}</script>
 <script>${opts.script}</script>
 </body>
