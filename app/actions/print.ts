@@ -37,6 +37,7 @@ import { eq, and, isNull, isNotNull, desc } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { z } from "zod";
 import { revalidatePath } from "next/cache";
+import { headers } from "next/headers";
 import { deriveAppUrl } from "@/lib/utils/request-url";
 import {
   createCart,
@@ -51,6 +52,12 @@ import { getStripe } from "@/lib/stripe";
 import { printOrderSchema } from "@/lib/validations/print";
 import { checkoutAddressSchema } from "@/lib/validations/address";
 import { logError } from "@/lib/logger";
+import {
+  consumeRateLimit,
+  RATE_LIMITED_MESSAGE,
+  RATE_LIMITS,
+  rateLimitCallerKey,
+} from "@/lib/rate-limit";
 import { userCanPrintAsset } from "@/lib/entitlement";
 import { promoteStudioDraftsForAssets } from "@/lib/studio-drafts";
 import { dedupeShippingByShipId } from "@/lib/pricing/shipping";
@@ -122,6 +129,20 @@ export type CompletePrintOrderResult =
  * `checkoutVendorGroup` re-creates its own cart and applies the same
  * adjustment, so this check is informational only.
  */
+/**
+ * Shared cap for the two unauthenticated cart probes below: each one
+ * creates a throwaway CraftCloud cart, so an unbounded caller costs us
+ * upstream goodwill rather than anything of ours.
+ */
+async function cartProbeAllowed(): Promise<boolean> {
+  const { userId } = await auth();
+  const limited = await consumeRateLimit(
+    RATE_LIMITS.cartProbe,
+    rateLimitCallerKey(await headers(), userId)
+  );
+  return limited.ok;
+}
+
 const cartPricingInput = z.object({
   quoteId: z.string().min(1).max(200),
   vendorId: z.string().min(1).max(100),
@@ -142,6 +163,7 @@ export async function checkCartPricing(params: {
   // CraftCloud.
   const parsed = cartPricingInput.safeParse(params);
   if (!parsed.success) return { error: "Invalid request" };
+  if (!(await cartProbeAllowed())) return { error: RATE_LIMITED_MESSAGE };
   try {
     const cart = await createCart({
       shippingIds: [parsed.data.shippingId],
@@ -186,6 +208,7 @@ export async function checkVendorMinimums(
 ): Promise<{ minimums: Record<string, number> } | { error: string }> {
   const parsed = vendorMinimumsInput.safeParse(input);
   if (!parsed.success) return { error: "Invalid request" };
+  if (!(await cartProbeAllowed())) return { error: RATE_LIMITED_MESSAGE };
   try {
     const minimums = await getVendorMinimums(
       parsed.data.probes,

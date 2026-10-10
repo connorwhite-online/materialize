@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { auth } from "@clerk/nextjs/server";
 import { unstable_cache } from "next/cache";
 import { db } from "@/lib/db";
 import {
@@ -14,6 +15,12 @@ import { getCraftCloudCatalog } from "@/lib/craftcloud/catalog";
 import { arrayTextIlike } from "@/lib/db/search";
 import { categoryIdsMatchingQuery } from "@/lib/categories";
 import { logError } from "@/lib/logger";
+import {
+  consumeRateLimit,
+  RATE_LIMITS,
+  rateLimitCallerKey,
+  rateLimitedResponse,
+} from "@/lib/rate-limit";
 import { rankSearchRows } from "@/lib/discovery";
 
 const PER_CATEGORY_LIMIT = 8;
@@ -319,6 +326,15 @@ export async function GET(request: Request) {
       materials: [],
     });
   }
+
+  // Counted after the length check: below-threshold keystrokes return
+  // above without touching the database.
+  const { userId } = await auth();
+  const limited = await consumeRateLimit(
+    RATE_LIMITS.search,
+    rateLimitCallerKey(request.headers, userId)
+  );
+  if (!limited.ok) return rateLimitedResponse(limited.retryAfterSeconds);
 
   const q = rawQ;
   const isPrefixOnly = q.length < PREFIX_ONLY_LENGTH;

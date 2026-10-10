@@ -21,6 +21,24 @@ vi.mock("@/lib/craftcloud/catalog", () => ({
 }));
 
 const mockLogError = vi.fn();
+const { consumeRateLimitMock } = vi.hoisted(() => ({
+  consumeRateLimitMock: vi.fn(async () => ({ ok: true }) as const),
+}));
+vi.mock("@/lib/rate-limit", () => ({
+  RATE_LIMITS: {
+    quoteStart: { name: "quote-start", limit: 1, windowMs: 1 },
+    quotePoll: { name: "quote-poll", limit: 1, windowMs: 1 },
+    modelUpload: { name: "model-upload", limit: 1, windowMs: 1 },
+  },
+  consumeRateLimit: consumeRateLimitMock,
+  rateLimitCallerKey: () => "ip:test",
+  rateLimitedResponse: (s: number) =>
+    Response.json({ error: "Too many requests" }, {
+      status: 429,
+      headers: { "Retry-After": String(s) },
+    }),
+}));
+
 vi.mock("@/lib/logger", () => ({
   logError: (...args: unknown[]) => mockLogError(...args),
 }));
@@ -335,11 +353,22 @@ describe("GET /api/craftcloud/quotes/poll", () => {
       })
     );
     const pending = GET(pollRequest("?priceId=price-1"));
-    await Promise.resolve();
+    await vi.waitFor(() => expect(mockGetPrice).toHaveBeenCalled());
     // Catalog fetch started before getPrice settled.
     expect(mockGetCraftCloudCatalog).toHaveBeenCalled();
     expect(mockGetProviderIndex).toHaveBeenCalled();
     resolvePrice({ quotes: [], shipping: [], allComplete: true });
     expect((await pending).status).toBe(200);
+  });
+
+  it("429s a rate-limited caller before calling CraftCloud", async () => {
+    consumeRateLimitMock.mockResolvedValueOnce({
+      ok: false,
+      retryAfterSeconds: 30,
+    } as never);
+    const res = await GET(pollRequest("?priceId=price-1"));
+    expect(res.status).toBe(429);
+    expect(res.headers.get("Retry-After")).toBe("30");
+    expect(mockGetPrice).not.toHaveBeenCalled();
   });
 });

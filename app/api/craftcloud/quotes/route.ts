@@ -8,6 +8,12 @@ import { getCraftCloudCatalog } from "@/lib/craftcloud/catalog";
 import { quotesRequestSchema } from "@/lib/validations/print";
 import { logError } from "@/lib/logger";
 import { invalidJsonResponse, readJsonObject } from "@/lib/http/json-body";
+import {
+  consumeRateLimit,
+  RATE_LIMITS,
+  rateLimitCallerKey,
+  rateLimitedResponse,
+} from "@/lib/rate-limit";
 
 /**
  * Start a CraftCloud price request and return its id immediately.
@@ -19,6 +25,12 @@ import { invalidJsonResponse, readJsonObject } from "@/lib/http/json-body";
 export async function POST(request: Request) {
   try {
     const { userId } = await auth();
+
+    const limited = await consumeRateLimit(
+      RATE_LIMITS.quoteStart,
+      rateLimitCallerKey(request.headers, userId)
+    );
+    if (!limited.ok) return rateLimitedResponse(limited.retryAfterSeconds);
 
     const body = await readJsonObject(request);
     if (!body) return invalidJsonResponse();

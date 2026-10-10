@@ -2008,3 +2008,25 @@ export const anonUploadGrants = pgTable(
     uniqueIndex("anon_upload_grants_storage_key_uq").on(table.storageKey),
   ]
 );
+
+// Fixed-window request counters for the per-caller rate limits on
+// public, upstream-costly endpoints (lib/rate-limit). One row per
+// (bucket, window); `bucket` is "<surface>:<caller key>" where the
+// caller key is a user id or a salted IP hash — never a raw address.
+// Rows are only useful for the window they count; the daily
+// cleanup-orphan-uploads cron prunes anything older than a day.
+export const rateLimitCounters = pgTable(
+  "rate_limit_counters",
+  {
+    bucket: text("bucket").notNull(),
+    windowStart: timestamp("window_start", { withTimezone: true }).notNull(),
+    count: integer("count").notNull().default(0),
+  },
+  (table) => [
+    uniqueIndex("rate_limit_counters_bucket_window_uq").on(
+      table.bucket,
+      table.windowStart
+    ),
+    index("rate_limit_counters_window_idx").on(table.windowStart),
+  ]
+);

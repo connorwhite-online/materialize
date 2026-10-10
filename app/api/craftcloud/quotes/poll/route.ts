@@ -1,9 +1,16 @@
+import { auth } from "@clerk/nextjs/server";
 import { CraftCloudApiError, getPrice } from "@/lib/craftcloud/client";
 import {
   getCraftCloudCatalog,
   getProviderIndex,
 } from "@/lib/craftcloud/catalog";
 import { logError } from "@/lib/logger";
+import {
+  consumeRateLimit,
+  RATE_LIMITS,
+  rateLimitCallerKey,
+  rateLimitedResponse,
+} from "@/lib/rate-limit";
 
 /**
  * Snapshot the current state of a CraftCloud price request. The
@@ -29,6 +36,13 @@ export async function GET(request: Request) {
     if (!PRICE_ID_PATTERN.test(priceId)) {
       return Response.json({ error: "Invalid priceId" }, { status: 400 });
     }
+
+    const { userId } = await auth();
+    const limited = await consumeRateLimit(
+      RATE_LIMITS.quotePoll,
+      rateLimitCallerKey(request.headers, userId)
+    );
+    if (!limited.ok) return rateLimitedResponse(limited.retryAfterSeconds);
 
     // Enrich every quote with catalog metadata — material, finish
     // group, color, provider name, etc. Quotes whose materialConfigId

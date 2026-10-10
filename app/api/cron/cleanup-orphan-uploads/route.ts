@@ -8,11 +8,13 @@ import {
 import { db } from "@/lib/db";
 import {
   anonUploadGrants,
+  rateLimitCounters,
   disputes,
   fileAssets,
   ownershipClaimIntents,
 } from "@/lib/db/schema";
 import { ANON_UPLOAD_PREFIX } from "@/lib/uploads/anon-grants";
+import { RATE_LIMIT_RETENTION_MS } from "@/lib/rate-limit";
 import {
   and,
   eq,
@@ -236,6 +238,21 @@ export async function GET(request: Request) {
       grantsDeleted = removed.length;
     } catch (error) {
       logError("cron/cleanup-orphan-uploads.grants", error);
+    }
+
+    // Rate-limit counters only mean anything inside their window. No
+    // RETURNING: busy days leave many rows and nobody needs their keys.
+    try {
+      await db
+        .delete(rateLimitCounters)
+        .where(
+          lt(
+            rateLimitCounters.windowStart,
+            new Date(now - RATE_LIMIT_RETENTION_MS)
+          )
+        );
+    } catch (error) {
+      logError("cron/cleanup-orphan-uploads.rate-limits", error);
     }
 
     let deleted = 0;

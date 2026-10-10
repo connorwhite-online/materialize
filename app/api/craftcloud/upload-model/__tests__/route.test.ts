@@ -77,6 +77,24 @@ vi.mock("@/lib/uploads/anon-grants", () => ({
 }));
 
 const logErrorMock = vi.fn();
+const { consumeRateLimitMock } = vi.hoisted(() => ({
+  consumeRateLimitMock: vi.fn(async () => ({ ok: true }) as const),
+}));
+vi.mock("@/lib/rate-limit", () => ({
+  RATE_LIMITS: {
+    quoteStart: { name: "quote-start", limit: 1, windowMs: 1 },
+    quotePoll: { name: "quote-poll", limit: 1, windowMs: 1 },
+    modelUpload: { name: "model-upload", limit: 1, windowMs: 1 },
+  },
+  consumeRateLimit: consumeRateLimitMock,
+  rateLimitCallerKey: () => "ip:test",
+  rateLimitedResponse: (s: number) =>
+    Response.json({ error: "Too many requests" }, {
+      status: 429,
+      headers: { "Retry-After": String(s) },
+    }),
+}));
+
 vi.mock("@/lib/logger", () => ({
   logError: (...args: unknown[]) => logErrorMock(...args),
 }));

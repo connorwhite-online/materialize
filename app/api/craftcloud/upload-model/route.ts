@@ -13,6 +13,12 @@ import {
   uploadModelToCraftCloud,
 } from "@/lib/craftcloud/model-upload";
 import { consumeAnonUploadGrant } from "@/lib/uploads/anon-grants";
+import {
+  consumeRateLimit,
+  RATE_LIMITS,
+  rateLimitCallerKey,
+  rateLimitedResponse,
+} from "@/lib/rate-limit";
 
 /**
  * Server-side CraftCloud model upload for a stored file asset.
@@ -158,6 +164,15 @@ export async function POST(request: Request) {
         isParsing: false,
       });
     }
+
+    // Only a real upload counts against the cap: the cached path above
+    // is one indexed read, and the anon path is already bounded by the
+    // fail-closed grant limiter on /api/upload/anon-presign.
+    const limited = await consumeRateLimit(
+      RATE_LIMITS.modelUpload,
+      rateLimitCallerKey(request.headers, userId)
+    );
+    if (!limited.ok) return rateLimitedResponse(limited.retryAfterSeconds);
 
     const rejected = await checkStagedObject(assetRow.storageKey);
     if (rejected) return rejected;
