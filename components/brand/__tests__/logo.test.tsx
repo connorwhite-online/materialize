@@ -39,7 +39,7 @@ describe("Logomark", () => {
   it("derives width from height, and is hidden unless given a title", () => {
     const { container, rerender } = render(<Logomark height={40} />);
     const svg = () => container.querySelector("svg")!;
-    expect(Number(svg().getAttribute("width"))).toBeCloseTo(40 * (415 / 251)); // standalone mark, its own artwork
+    expect(Number(svg().getAttribute("width"))).toBeCloseTo(40 * (196 / 100)); // standalone mark, its own artwork
     expect(svg().getAttribute("aria-hidden")).toBe("true");
 
     rerender(<Logomark height={40} title="Materialize" />);

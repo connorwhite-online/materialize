@@ -30,9 +30,8 @@ function aspectOf(viewBox: string): number {
 /** Kept in sync with the `--mz-h` default in globals.css. */
 const DEFAULT_LOGO_HEIGHT = 20;
 // Derived from the artwork, never hand-typed: the mark and the wordmark
-// are separate exports with different heights (the V2 wordmark is 100
-// units tall, the mark 251), so one shared ART_HEIGHT silently mis-sized
-// whichever one changed.
+// are separate exports (the old mark was 251 units tall, the wordmark
+// 100), so one shared ART_HEIGHT silently mis-sized whichever one changed.
 const MARK_ASPECT = aspectOf(MARK_VIEWBOX); // standalone "M"
 const WORDMARK_ASPECT = aspectOf(WORDMARK_VIEWBOX);
 
