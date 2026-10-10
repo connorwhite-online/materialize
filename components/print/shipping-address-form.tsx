@@ -380,9 +380,9 @@ export function ShippingAddressForm({
   // from email" keyboard suggestion, which is frequently delayed by
   // up to a minute. Safari only allows `readText()` to run inside a
   // direct user gesture (a click/tap), so it rejects this silently on
-  // iOS — there's no button fallback, so those users still fall back
-  // to typing the code by hand. This effect is the reliable path on
-  // Chrome/Android, where no gesture is required.
+  // iOS — there, OtpField's own "Paste code" button is the fallback.
+  // This effect is the reliable path on Chrome/Android, where no
+  // gesture is required.
   useEffect(() => {
     if (stage !== "code") return;
     if (typeof navigator === "undefined" || !navigator.clipboard?.readText) {
