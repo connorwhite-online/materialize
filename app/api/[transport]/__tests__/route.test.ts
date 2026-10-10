@@ -240,11 +240,18 @@ describe("tool annotations (ChatGPT app review + Claude permission prompts)", ()
     expect((imp!.config as { _meta?: Record<string, unknown> })._meta?.["openai/fileParams"]).toEqual(["file"]);
   });
 
-  it("marks only the tool that reaches the open internet as open-world", () => {
+  it("marks open-world only the URL import and the tools that can publish publicly", () => {
     const openWorld = registered
       .filter((r) => r.config.annotations!.openWorldHint)
-      .map((r) => r.name);
-    expect(openWorld).toEqual(["materialize_import_model"]);
+      .map((r) => r.name)
+      .sort();
+    expect(openWorld).toEqual([
+      "materialize_create_project",
+      "materialize_import_model",
+      "materialize_register_upload",
+      "materialize_update_file",
+      "materialize_update_project",
+    ]);
   });
 
   it("marks create_order destructive, since a spending policy can make it a real charge", () => {
