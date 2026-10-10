@@ -16,6 +16,7 @@ import { getVendorMinimums } from "@/lib/craftcloud/vendor-minimums";
 import { pickMinimumProbes } from "@/components/print/material-picker/vendor-minimums";
 import { logError } from "@/lib/logger";
 import { ensureGeometry } from "./geometry";
+import { isPublicListing } from "@/lib/files/public-listing";
 import {
   arrivalWindow,
   byBuyerTotal,
@@ -110,6 +111,11 @@ const POLL_INTERVAL_MS = 1500;
 const STABLE_POLLS_REQUIRED = 4;
 const POLL_DEADLINE_MS = 30_000;
 
+function isAbortLike(error: unknown): boolean {
+  const name = (error as { name?: string } | null)?.name;
+  return name === "AbortError" || name === "TimeoutError";
+}
+
 export async function getQuoteForUser(
   input: GetQuoteInput
 ): Promise<GetQuoteResult | { error: string }> {
@@ -118,6 +124,7 @@ export async function getQuoteForUser(
       asset: fileAssets,
       ownerId: files.userId,
       fileStatus: files.status,
+      fileVisibility: files.visibility,
       fileName: files.name,
     })
     .from(fileAssets)
@@ -126,7 +133,10 @@ export async function getQuoteForUser(
     .limit(1);
 
   if (!assetRow) return { error: "File not found" };
-  if (assetRow.ownerId !== input.userId && assetRow.fileStatus !== "published") {
+  // Same "owner or public listing" gate as the web quote route and
+  // materialize_create_order (userCanPrintAsset): published alone also
+  // matched a listing its owner had set private.
+  if (assetRow.ownerId !== input.userId && !isPublicListing(assetRow)) {
     return { error: "Forbidden" };
   }
   if (!assetRow.asset.craftCloudModelId) {
@@ -165,6 +175,13 @@ export async function getQuoteForUser(
     }
   }
 
+  // Geometry is only needed for the response, and on a fresh import it
+  // can cost a CraftCloud round trip; start it now so it overlaps the
+  // quote polling instead of trailing it. The no-op catch keeps an early
+  // failure from surfacing as unhandled; it is rethrown where awaited.
+  const geometryPromise = ensureGeometry(assetRow.asset);
+  geometryPromise.catch(() => {});
+
   let priceId: string;
   try {
     const res = await createPriceRequest({
@@ -187,7 +204,21 @@ export async function getQuoteForUser(
   let lastSnapshot: Awaited<ReturnType<typeof getPrice>> | null = null;
 
   while (Date.now() - startedAt < POLL_DEADLINE_MS) {
-    const snapshot = await getPrice(priceId);
+    // Bound each read by what's left of the deadline: one slow getPrice
+    // (10s timeout, retried) could otherwise run the tool call well past
+    // it while the agent waits.
+    const remainingMs = POLL_DEADLINE_MS - (Date.now() - startedAt);
+    let snapshot: Awaited<ReturnType<typeof getPrice>>;
+    try {
+      snapshot = await getPrice(priceId, {
+        signal: AbortSignal.timeout(Math.max(1, remainingMs)),
+      });
+    } catch (error) {
+      // Out of time with something in hand: return what we have, and
+      // the deadline warning below says it may be partial.
+      if (lastSnapshot && isAbortLike(error)) break;
+      throw error;
+    }
     lastSnapshot = snapshot;
     const count = snapshot.quotes?.length ?? 0;
 
@@ -199,7 +230,15 @@ export async function getQuoteForUser(
     }
     lastCount = count;
 
-    await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
+    await new Promise((r) =>
+      setTimeout(
+        r,
+        Math.min(
+          POLL_INTERVAL_MS,
+          Math.max(0, POLL_DEADLINE_MS - (Date.now() - startedAt))
+        )
+      )
+    );
   }
 
   if (!lastSnapshot) return { error: "No quotes returned" };
@@ -341,7 +380,7 @@ export async function getQuoteForUser(
     lead ? [lead.quoteId, ...(lead.alternative ? [lead.alternative.quoteId] : [])] : [],
     input.maxOptions
   );
-  const geometry = (await ensureGeometry(assetRow.asset)) ?? undefined;
+  const geometry = (await geometryPromise) ?? undefined;
   return {
     quotes: options,
     lead,
