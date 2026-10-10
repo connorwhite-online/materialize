@@ -3,7 +3,7 @@ import * as THREE from "three";
 /**
  * Parts for the authed-home dropzone backdrop: a playful bench of
  * machine components that lean additive — fan, chunky gear, twisted-
- * tube heat exchanger, clevis yoke, compliant flexure stage, spring on
+ * tube heat exchanger, organic clevis fork, compliant flexure stage, spring on
  * its seats. Simple enough to read as
  * sketches at ~60px, specific enough to read as real parts.
  *
@@ -245,38 +245,53 @@ export function makeFlexureGeometry({ thickness = 0.16 } = {}) {
 }
 
 /**
- * Clevis yoke: the forked end of an articulating joint on its shaft —
- * two ears with a cross-bored pin and a hub, the part a linkage or
- * actuator pivots on.
+ * Clevis fork, one organic piece: a round shaft whose neck flows up and
+ * splits into two rounded prongs, each with its eye bored through — the
+ * articulating end of an actuator, shaped the way a printer would grow
+ * it rather than the way a mill would cut it.
  */
 export function makeJointGeometry() {
   const parts: THREE.BufferGeometry[] = [];
-  const shaft = new THREE.CylinderGeometry(0.11, 0.11, 0.5, 40);
-  shaft.translate(0, -0.47, 0);
-  const hub = new THREE.CylinderGeometry(0.19, 0.19, 0.12, 48);
-  hub.translate(0, -0.18, 0);
-  parts.push(shaft, hub);
-  const ear = new THREE.Shape();
-  ear.moveTo(-0.12, -0.18);
-  ear.lineTo(0.12, -0.18);
-  ear.lineTo(0.12, 0.06);
-  ear.absarc(0, 0.06, 0.12, 0, Math.PI, false);
-  ear.closePath();
-  ear.holes.push(circlePath(0.05, 0, 0.06));
-  for (const sx of [-1, 1]) {
-    const g = new THREE.ExtrudeGeometry(ear, { depth: 0.07, bevelEnabled: false, curveSegments: 24 });
-    g.rotateY(Math.PI / 2);
-    g.translate(sx > 0 ? 0.12 : -0.19, 0, 0);
-    parts.push(g);
-  }
-  // The pin, through both ears, with a head on one side.
-  const pin = new THREE.CylinderGeometry(0.035, 0.035, 0.48, 20);
-  pin.rotateZ(Math.PI / 2);
-  pin.translate(0, 0.06, 0);
-  const head = new THREE.CylinderGeometry(0.06, 0.06, 0.04, 24);
-  head.rotateZ(Math.PI / 2);
-  head.translate(0.26, 0.06, 0);
-  parts.push(pin, head);
+  // Front profile: neck → flare → two prongs with round tops, a soft
+  // crotch between them. Built left-to-right, CCW.
+  const f = new THREE.Shape();
+  f.moveTo(-0.11, -0.3);
+  f.bezierCurveTo(-0.11, -0.14, -0.3, -0.12, -0.3, 0.06);
+  f.lineTo(-0.3, 0.2);
+  f.absarc(-0.19, 0.2, 0.11, Math.PI, 0, true);
+  f.lineTo(-0.08, 0.1);
+  f.bezierCurveTo(-0.08, 0.0, 0.08, 0.0, 0.08, 0.1);
+  f.lineTo(0.08, 0.2);
+  f.absarc(0.19, 0.2, 0.11, Math.PI, 0, true);
+  f.lineTo(0.3, 0.06);
+  f.bezierCurveTo(0.3, -0.12, 0.11, -0.14, 0.11, -0.3);
+  f.closePath();
+  f.holes.push(circlePath(0.045, -0.19, 0.2), circlePath(0.045, 0.19, 0.2));
+  const fork = new THREE.ExtrudeGeometry(f, {
+    depth: 0.16,
+    bevelEnabled: true,
+    bevelThickness: 0.035,
+    bevelSize: 0.03,
+    bevelSegments: 5,
+    curveSegments: 32,
+  });
+  fork.translate(0, 0, -0.08);
+  parts.push(fork);
+  // The round shaft the neck grows out of, with a soft collar.
+  const shaft = new THREE.LatheGeometry(
+    [
+      [0, -0.82],
+      [0.1, -0.82],
+      [0.11, -0.8],
+      [0.11, -0.4],
+      [0.15, -0.36],
+      [0.15, -0.31],
+      [0.11, -0.27],
+      [0, -0.27],
+    ].map(([r, y]) => new THREE.Vector2(r, y)),
+    48
+  );
+  parts.push(shaft);
   const merged = mergeGeometries(parts);
   merged.rotateZ(-0.25);
   return finish(merged);

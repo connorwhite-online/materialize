@@ -30,7 +30,7 @@ interface FileUploaderProps {
   featured?: boolean;
   /**
    * Absolutely positioned behind the copy. Decorative only.
-   * Featured defaults to the floating print-material primitives;
+   * Featured defaults to the isometric machine-part drawings;
    * pass `null` to suppress them while keeping the featured well.
    */
   backdrop?: ReactNode | null;

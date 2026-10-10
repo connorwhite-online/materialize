@@ -320,6 +320,15 @@ responsive `[--mz-h:15px] sm:[--mz-h:20px]` class escape hatch. Nothing animates
 on the main thread — the stagger is `transition-delay`/`animation-delay` off a
 per-letter `--mz-i`, and `prefers-reduced-motion` collapses it to instant.
 
+## Isometric drawings (`lib/isometric`)
+
+The featured dropzone's backdrop is isometric line drawings of machine parts (`components/home/dropzone-parts.tsx`, parts in `isometric-parts.ts`, placement in `dropzone-parts-layout.ts`), drawn on a fading dot grid (`.mz-drafting-dots`). The renderer is meant to be reused elsewhere:
+
+- **Bake once, show an image.** `bakeIsometric(geometry, { pxPerUnit, palette })` renders through one shared offscreen WebGL renderer and returns a PNG blob URL. Pages show plain `<img>`s; the float is a CSS animation (`.mz-iso-float`). No live canvases: any number of drawings costs one WebGL context and zero per-frame work. Don't reintroduce a per-drawing `<Canvas>`.
+- **Lines are screen-space, not geometry.** Three passes (tone, normal+depth, edges); the edge pass uses a depth Laplacian + crease angle, so cost is per pixel and nothing is precomputed per triangle. Thin, closely packed features (tube bundles, fine fins) ink solid at backdrop size — design parts with that in mind.
+- **Tones follow the theme.** `useIsometricPalette()` resolves `--foreground`/`--background` mixes (oklch → sRGB via a 1px canvas) and re-reads on theme change; `BACKDROP_INK` holds the percentages.
+- **Parts are unit-extent and pure.** Builders return geometry with largest extent 1, centred; `isometric-parts.test.ts` pins that.
+
 ## Fonts
 
 - **Body & headings** — one system font stack (`-apple-system, SF Pro, …`), set in `app/globals.css` via `--font-sans`. Headings inherit it (sizes/weights unchanged). No webfont download. `--font-heading` aliases `--font-sans` so leftover `font-heading` utilities still resolve.
