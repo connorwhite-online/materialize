@@ -1,5 +1,6 @@
 import "server-only";
 
+import { clerkClient } from "@clerk/nextjs/server";
 import { and, eq, gte } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
@@ -25,6 +26,29 @@ import {
 } from "@/lib/email/templates/agent-order-cancellation-confirmed";
 import { computePeriodStart, type SpendingPolicy } from "@/lib/billing/policy";
 import { logError } from "@/lib/logger";
+import { primaryEmail, type ClerkUserLike } from "@/lib/clerk-email";
+
+/**
+ * Who gets an agent-order email: the account owner's primary (Clerk)
+ * email, NOT the agent-supplied `shippingAddress.email` — an agent (or
+ * a prompt injected into one) controls that field, and these emails
+ * carry the confirm / cancel links that move money. The shipping email
+ * is only a fallback for an account Clerk can't resolve an email for.
+ */
+export async function resolveAgentOrderRecipient(row: {
+  userId: string;
+  shippingAddress: { email?: string | null } | null;
+}): Promise<string | null> {
+  try {
+    const client = await clerkClient();
+    const user = (await client.users.getUser(row.userId)) as ClerkUserLike;
+    const email = primaryEmail(user);
+    if (email) return email;
+  } catch (err) {
+    logError("resolveAgentOrderRecipient", err);
+  }
+  return row.shippingAddress?.email || null;
+}
 
 /**
  * Send the agent-initiated-order confirmation email.
@@ -59,8 +83,9 @@ export async function sendOrderConfirmationEmail(params: {
       .limit(1);
 
     if (!row) return { ok: false, error: "Order not found" };
-    if (!row.shippingAddress?.email) {
-      return { ok: false, error: "Order has no shipping email" };
+    const to = await resolveAgentOrderRecipient(row);
+    if (!to) {
+      return { ok: false, error: "Order has no recipient email" };
     }
     if (!row.confirmationToken) {
       return { ok: false, error: "Order has no confirmation token" };
@@ -122,7 +147,7 @@ export async function sendOrderConfirmationEmail(params: {
         await formatRemainingBudget(row.initiatedByTokenId);
 
       return await sendEmail({
-        to: row.shippingAddress.email,
+        to,
         subject: `${agentName} placed an order — cancel ${cancelDeadlineDisplay}`,
         react: AgentOrderAutoApprovedEmail({
           agentName,
@@ -157,7 +182,7 @@ export async function sendOrderConfirmationEmail(params: {
     const expiresAtDisplay = formatExpiry(row.confirmationExpiresAt);
 
     return await sendEmail({
-      to: row.shippingAddress.email,
+      to,
       subject: `Confirm print order from ${agentName} — Materialize`,
       react: AgentOrderConfirmationEmail({
         agentName,
@@ -214,8 +239,9 @@ export async function sendCancellationConfirmedEmail(params: {
       .limit(1);
 
     if (!row) return { ok: false, error: "Order not found" };
-    if (!row.shippingAddress?.email) {
-      return { ok: false, error: "Order has no shipping email" };
+    const to = await resolveAgentOrderRecipient(row);
+    if (!to) {
+      return { ok: false, error: "Order has no recipient email" };
     }
 
     const fileRow = row.fileAssetId
@@ -250,7 +276,7 @@ export async function sendCancellationConfirmedEmail(params: {
     };
 
     return await sendEmail({
-      to: row.shippingAddress.email,
+      to,
       subject: `Order cancelled — refund of ${totalDisplay} on the way`,
       react: AgentOrderCancellationConfirmedEmail(props),
       text: renderAgentOrderCancellationConfirmedText(props),

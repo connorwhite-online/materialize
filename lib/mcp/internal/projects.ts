@@ -27,7 +27,14 @@ import {
 import { buildListingSlug } from "@/lib/filenames";
 import { logError } from "@/lib/logger";
 import { LICENSE_ENUM_VALUES, type LicenseId } from "@/lib/licenses";
-import { MAX_BUILD_GUIDE_LENGTH } from "@/lib/validations/project";
+import {
+  MAX_BUILD_GUIDE_LENGTH,
+  MAX_PRICE_CENTS,
+} from "@/lib/validations/project";
+import {
+  archiveProjectRow,
+  countProjectBuyers,
+} from "@/lib/projects/delete-guard";
 import { sanitizeRichHtml } from "@/lib/sanitize/sanitize-html";
 import { bestEffortDeleteR2 } from "./files";
 import { stripPhotoMetadata } from "@/lib/photos/strip-metadata";
@@ -53,6 +60,7 @@ async function cleanBuildGuide(
 const MAX_BOM_ITEMS = 200;
 const MAX_CAPTION_LENGTH = 500;
 const MAX_REPO_URL = 500;
+const MAX_BOM_URL = 500;
 
 export interface ProjectMetadataInput {
   name?: string;
@@ -94,8 +102,14 @@ function normalizeProjectMeta(meta: ProjectMetadataInput | undefined): Partial<{
       ? meta.buildGuide.slice(0, MAX_BUILD_GUIDE_LENGTH)
       : null;
   }
-  if (typeof meta.priceCents === "number" && meta.priceCents >= 0) {
-    out.price = Math.round(meta.priceCents);
+  // Negative / non-finite prices are ignored; anything above the web
+  // form's ceiling is clamped to it.
+  if (
+    typeof meta.priceCents === "number" &&
+    Number.isFinite(meta.priceCents) &&
+    meta.priceCents >= 0
+  ) {
+    out.price = Math.min(Math.round(meta.priceCents), MAX_PRICE_CENTS);
   }
   if (
     meta.license &&
@@ -117,19 +131,29 @@ function normalizeProjectMeta(meta: ProjectMetadataInput | undefined): Partial<{
     if (!meta.repoUrl) {
       out.repoUrl = null;
     } else {
-      // Light validation — the URL must parse and look like http(s).
-      // The web form does the same in zod.
-      try {
-        const u = new URL(meta.repoUrl);
-        if (u.protocol === "http:" || u.protocol === "https:") {
-          out.repoUrl = u.toString().slice(0, MAX_REPO_URL);
-        }
-      } catch {
-        // ignore bad URLs silently — agent can pass null to clear
-      }
+      // Bad URLs are ignored silently — agent can pass null to clear.
+      const url = httpUrlOrNull(meta.repoUrl, MAX_REPO_URL);
+      if (url) out.repoUrl = url;
     }
   }
   return out;
+}
+
+/**
+ * Light URL validation — the value must parse and be http(s), so a
+ * `javascript:` / `data:` link can never land behind a project's
+ * buttons. The web form does the same in zod. Returns null otherwise.
+ */
+function httpUrlOrNull(raw: string, maxLength: number): string | null {
+  try {
+    const u = new URL(raw.trim());
+    if (u.protocol === "http:" || u.protocol === "https:") {
+      return u.toString().slice(0, maxLength);
+    }
+  } catch {
+    // fall through
+  }
+  return null;
 }
 
 async function userOwnsAllFiles(
@@ -454,7 +478,11 @@ export async function updateProjectForUser(params: {
 export async function deleteProjectForUser(params: {
   userId: string;
   projectId: string;
-}): Promise<{ ok: true } | { error: string }> {
+}): Promise<
+  | { ok: true; archived: false }
+  | { ok: true; archived: true; reason: "has-buyers"; count: number }
+  | { error: string }
+> {
   const [row] = await db
     .select({ id: projects.id, userId: projects.userId })
     .from(projects)
@@ -463,8 +491,15 @@ export async function deleteProjectForUser(params: {
   if (!row || row.userId !== params.userId) {
     return { error: "Project not found" };
   }
+  // Same gate as the web deleteProject: buyers keep the bundle, so
+  // archive rather than cascade their purchase rows away.
+  const buyerCount = await countProjectBuyers(row.id);
+  if (buyerCount > 0) {
+    await archiveProjectRow(row.id);
+    return { ok: true, archived: true, reason: "has-buyers", count: buyerCount };
+  }
   await db.delete(projects).where(eq(projects.id, row.id));
-  return { ok: true };
+  return { ok: true, archived: false };
 }
 
 /* -------------------- BOM -------------------- */
@@ -507,6 +542,9 @@ export async function setProjectBomForUser(params: {
     if (typeof it.quantity !== "number" || it.quantity <= 0) {
       return { error: `BOM "${it.name}": quantity must be a positive number` };
     }
+    if (it.sourceUrl?.trim() && !httpUrlOrNull(it.sourceUrl, MAX_BOM_URL)) {
+      return { error: `BOM "${it.name}": sourceUrl must be an http(s) URL` };
+    }
   }
 
   await db.delete(projectBomItems).where(eq(projectBomItems.projectId, row.id));
@@ -518,7 +556,9 @@ export async function setProjectBomForUser(params: {
         quantity: it.quantity,
         unit: it.unit?.trim().slice(0, 32) || null,
         notes: it.notes?.trim().slice(0, 500) || null,
-        sourceUrl: it.sourceUrl?.trim().slice(0, 500) || null,
+        sourceUrl: it.sourceUrl?.trim()
+          ? httpUrlOrNull(it.sourceUrl, MAX_BOM_URL)
+          : null,
         sortOrder: i,
       }))
     );

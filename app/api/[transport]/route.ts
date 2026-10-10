@@ -22,6 +22,7 @@ import {
   requestUploadUrlForUser,
   registerUploadForUser,
   listFilesForUser,
+  MAX_LISTED_FILES,
   deleteFileForUser,
   updateFileForUser,
   addFilePhotoForUser,
@@ -246,7 +247,17 @@ async function verifyAndRecord(req: Request, bearerToken: string | undefined) {
  */
 async function hideUnavailableTools(tools: Map<string, unknown>) {
   const userId = requestAuth.getStore()?.auth?.extra?.userId;
-  if (!userId || (await hasCadAccess(userId))) return;
+  if (!userId) return;
+  let allowed = false;
+  try {
+    allowed = await hasCadAccess(userId);
+  } catch (err) {
+    // A Clerk/DB blip must not take down every MCP request: fail closed
+    // on the owner-only tools (they re-check their own gate anyway) and
+    // serve the rest.
+    logError("mcp.hideUnavailableTools", err);
+  }
+  if (allowed) return;
   for (const name of OWNER_ONLY_TOOLS) {
     (tools.get(name) as { disable?: () => void } | undefined)?.disable?.();
   }
@@ -898,7 +909,11 @@ const handler = createMcpHandler(
           const auth = readAuthExtra(extra);
           requireScope(auth, "files:read");
           const files = await listFilesForUser(auth.userId);
-          return jsonResult({ files });
+          return jsonResult({
+            files,
+            // Newest MAX_LISTED_FILES only; older files are still there.
+            ...(files.length >= MAX_LISTED_FILES ? { truncated: true } : {}),
+          });
         } catch (err) {
           return scopeOrInternal(err, "materialize_list_files");
         }
@@ -927,6 +942,20 @@ const handler = createMcpHandler(
             return errorResult({
               code: "delete_failed",
               message: result.error,
+            });
+          }
+          if (result.archived) {
+            // Same rule as the web delete: other people's purchases or
+            // in-flight orders keep the file, so it was archived (made
+            // private, delisted) rather than deleted.
+            return jsonResult({
+              deleted: false,
+              archived: true,
+              reason: result.reason,
+              message:
+                result.reason === "has-buyers"
+                  ? "Other people have bought this file, so it was archived (unlisted and private) instead of deleted. They keep access."
+                  : "This file is in a cart or an in-progress print order, so it was archived (unlisted and private) instead of deleted. Retry once those orders finish.",
             });
           }
           return jsonResult({ deleted: true });
@@ -1219,6 +1248,15 @@ const handler = createMcpHandler(
             return errorResult({
               code: "delete_project_failed",
               message: result.error,
+            });
+          }
+          if (result.archived) {
+            return jsonResult({
+              deleted: false,
+              archived: true,
+              reason: result.reason,
+              message:
+                "Other people have bought this project, so it was archived (unlisted and private) instead of deleted. They keep access.",
             });
           }
           return jsonResult({ deleted: true });

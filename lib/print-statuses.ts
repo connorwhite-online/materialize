@@ -50,8 +50,9 @@ export const PRINTED_STATUSES = [
  *     sits blocked would cascade-destroy the buyer's refund path and
  *     order history while the Stripe charge stands (MTR-231).
  *
- * Single source of truth used by both app/actions/files.ts
- * (deleteFileListing archive/hard-delete gate) and
+ * Single source of truth used by both lib/files/delete-guard.ts
+ * (the archive/hard-delete gate behind app/actions/files.ts
+ * deleteFileListing and the MCP materialize_delete_file tool) and
  * app/(app)/files/[slug]/page.tsx (owner buyer-count display) — moved
  * here rather than exported from app/actions/files.ts because that
  * file has a top-level "use server" directive, and Next.js requires

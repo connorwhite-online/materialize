@@ -1,7 +1,6 @@
 "use server";
 
 import { auth } from "@clerk/nextjs/server";
-import { createHash, timingSafeEqual } from "crypto";
 import { and, eq, gt, isNull } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { db } from "@/lib/db";
@@ -17,21 +16,9 @@ import { sendCancellationConfirmedEmail } from "@/lib/mcp/email";
 import { logError } from "@/lib/logger";
 import { revalidatePath } from "next/cache";
 import { deriveAppUrl } from "@/lib/utils/request-url";
+import { confirmationTokenMatches } from "@/lib/mcp/confirmation-token";
 
 const SESSION_CLAIM_PREFIX = "session_claim:";
-
-// Constant-time comparison of the emailed confirm/cancel capability token.
-// Hashing first equalizes length (timingSafeEqual throws on length mismatch)
-// and a null/absent stored token never matches.
-function confirmationTokenMatches(
-  stored: string | null | undefined,
-  provided: string | null | undefined
-): boolean {
-  if (!stored || !provided) return false;
-  const a = createHash("sha256").update(stored).digest();
-  const b = createHash("sha256").update(provided).digest();
-  return timingSafeEqual(a, b);
-}
 
 /**
  * Confirms an agent-initiated print order: flips its status from
@@ -291,7 +278,12 @@ async function mintStripeSession(params: {
       source: "agent",
     },
     success_url: `${appUrl}/dashboard/orders?payment=success&orderId=${order.id}`,
-    cancel_url: `${appUrl}/orders/${order.id}/confirm?payment=cancelled`,
+    // The confirm page 404s without its token, so carry it back. By the
+    // time Stripe sends the buyer here the order is cart_created, and
+    // the page points them at their orders to resume payment.
+    cancel_url: `${appUrl}/orders/${order.id}/confirm?token=${encodeURIComponent(
+      order.confirmationToken ?? ""
+    )}&payment=cancelled`,
   });
 
   if (!session.url) {

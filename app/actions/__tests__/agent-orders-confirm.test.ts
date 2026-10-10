@@ -288,6 +288,26 @@ describe("confirmAgentInitiatedOrder", () => {
     expect(swap?.stripeSessionId).toBe("cs_real");
   });
 
+  it("cancel_url carries the confirmation token so the confirm page doesn't 404", async () => {
+    resetState();
+    selectQueue = [[baseOrder()], []];
+    claimReturn = [{ id: "order-1" }];
+    goodStripeSession();
+
+    await confirmAgentInitiatedOrder({
+      orderId: "order-1",
+      confirmationToken: "tok-correct",
+    });
+
+    const call = stripeSessionCreateMock.mock.calls[0][0] as {
+      cancel_url: string;
+    };
+    const url = new URL(call.cancel_url);
+    expect(url.pathname).toBe("/orders/order-1/confirm");
+    expect(url.searchParams.get("token")).toBe("tok-correct");
+    expect(url.searchParams.get("payment")).toBe("cancelled");
+  });
+
   // ────────────────────────────────────────────────────────────
   // mintStripeSession line-item math
   // ────────────────────────────────────────────────────────────
