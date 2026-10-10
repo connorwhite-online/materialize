@@ -1,7 +1,6 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { DropzonePrimitivesFallback } from "./dropzone-primitives-fallback";
 
 /**
  * Lazy wrapper for the authed-home dropzone's WebGL primitives.
@@ -18,9 +17,11 @@ import { DropzonePrimitivesFallback } from "./dropzone-primitives-fallback";
  * — `ssr: false` is only legal in a Client Component.
  */
 export const DropzonePrimitives = dynamic(
-  () => import("./dropzone-primitives").then((m) => m.DropzonePrimitives),
+  () => import("./dropzone-parts").then((m) => m.DropzoneParts),
   {
     ssr: false,
-    loading: () => <DropzonePrimitivesFallback />,
+    // Line drawings in the page's own ink: an empty well while the
+    // chunk loads reads better than a coloured stand-in swapping out.
+    loading: () => null,
   }
 );

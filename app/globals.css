@@ -1045,3 +1045,27 @@
     opacity: 0;
   }
 }
+
+/* Isometric drawings (lib/isometric): baked images that bob a few px.
+   Compositor-only transform; --mz-float sets the amplitude, inline
+   duration/delay set the period and phase per drawing. */
+@keyframes mz-iso-float {
+  from {
+    transform: translateY(calc(var(--mz-float, 2px) * -1));
+  }
+  to {
+    transform: translateY(var(--mz-float, 2px));
+  }
+}
+.mz-iso-float {
+  animation-name: mz-iso-float;
+  animation-timing-function: ease-in-out;
+  animation-iteration-count: infinite;
+  animation-direction: alternate;
+  will-change: transform;
+}
+@media (prefers-reduced-motion: reduce) {
+  .mz-iso-float {
+    animation: none;
+  }
+}
