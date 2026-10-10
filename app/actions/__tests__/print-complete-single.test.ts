@@ -114,6 +114,7 @@ vi.mock("@/lib/logger", () => ({
 vi.mock("nanoid", () => ({ nanoid: () => "fixed-id" }));
 
 import { completePrintOrder } from "../print";
+import { expectedSingleItemCheckoutCents } from "@/lib/print/checkout-amount";
 
 const baseOrder = {
   id: "order-1",
@@ -297,6 +298,89 @@ describe("completePrintOrder (single checkout model — default happy path)", ()
           billing: baseAddress.billing,
         }),
       })
+    );
+  });
+});
+
+describe("completePrintOrder — downstream uses the PARSED address", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    selectedOrder = { ...baseOrder };
+    claimReturns = [{ id: "order-1" }];
+    stripeCreate.mockResolvedValue({
+      id: "sess_single",
+      url: "https://stripe.test/single",
+    });
+  });
+
+  it("stores the validated values, not the raw client payload (trimmed phone, unknown keys stripped)", async () => {
+    await completePrintOrder({
+      ...callArgs,
+      shipping: {
+        ...baseAddress.shipping,
+        phoneNumber: "  +44 20 7946 0000  ",
+        // Not in the schema — must not ride through to the DB / CraftCloud.
+        injected: "x",
+      } as typeof baseAddress.shipping,
+    });
+
+    const persisted = updateSet.mock.calls
+      .map((c) => c[0] as { shippingAddress?: { shipping: Record<string, unknown> } })
+      .find((v) => v.shippingAddress);
+    expect(persisted?.shippingAddress?.shipping.phoneNumber).toBe(
+      "+44 20 7946 0000"
+    );
+    expect(persisted?.shippingAddress?.shipping).not.toHaveProperty("injected");
+  });
+
+  it("falls back to the shipping address as billing when billing is omitted", async () => {
+    await completePrintOrder({
+      ...callArgs,
+      billing: undefined as unknown as typeof callArgs.billing,
+    });
+
+    expect(updateSet).toHaveBeenCalledWith(
+      expect.objectContaining({
+        shippingAddress: expect.objectContaining({
+          billing: { ...baseAddress.shipping, isCompany: false },
+        }),
+      })
+    );
+  });
+});
+
+describe("Stripe line items ↔ expectedSingleItemCheckoutCents (webhook amount cross-check)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    claimReturns = [{ id: "order-1" }];
+    stripeCreate.mockResolvedValue({
+      id: "sess_single",
+      url: "https://stripe.test/single",
+    });
+  });
+
+  it.each([
+    ["no vendor minimum", {}],
+    ["vendor minimum", { totalPrice: 4850 + 500 }],
+    ["quantity > 1", { quantity: 3, totalPrice: 4500 * 3 + 350 }],
+    [
+      "no breakdown",
+      { materialSubtotal: null, shippingSubtotal: null, quantity: null },
+    ],
+  ])("the session total equals the helper's expected total (%s)", async (_label, overrides) => {
+    selectedOrder = { ...baseOrder, ...overrides };
+
+    await completePrintOrder(callArgs);
+
+    const args = stripeCreate.mock.calls[0][0] as SessionCreateArgs;
+    const sessionTotal = args.line_items.reduce(
+      (sum, l) => sum + l.price_data.unit_amount * l.quantity,
+      0
+    );
+    expect(sessionTotal).toBe(
+      expectedSingleItemCheckoutCents(
+        selectedOrder as Parameters<typeof expectedSingleItemCheckoutCents>[0]
+      )
     );
   });
 });

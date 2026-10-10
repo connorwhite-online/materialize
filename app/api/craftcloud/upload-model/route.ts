@@ -2,6 +2,7 @@ import { auth } from "@clerk/nextjs/server";
 import { and, eq, isNull } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { fileAssets, files } from "@/lib/db/schema";
+import { isPublicListing } from "@/lib/files/public-listing";
 import { getObjectBytes } from "@/lib/storage";
 import { logError } from "@/lib/logger";
 import {
@@ -88,6 +89,7 @@ export async function POST(request: Request) {
         cachedModelId: fileAssets.craftCloudModelId,
         fileUserId: files.userId,
         fileStatus: files.status,
+        fileVisibility: files.visibility,
       })
       .from(fileAssets)
       .leftJoin(files, eq(fileAssets.fileId, files.id))
@@ -98,9 +100,9 @@ export async function POST(request: Request) {
     }
 
     // Same gate as /api/craftcloud/download-url and cache-model: the
-    // owner, or anyone when the listing is published.
+    // owner, or anyone when the listing is published and public.
     const isOwner = Boolean(userId) && assetRow.fileUserId === userId;
-    const isPublished = assetRow.fileStatus === "published";
+    const isPublished = isPublicListing(assetRow);
     if (!isOwner && !isPublished) {
       return Response.json({ error: "Forbidden" }, { status: 403 });
     }

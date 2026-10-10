@@ -42,7 +42,6 @@ import {
   createCart,
   createOrder,
   createStripeCheckout,
-  getOrderStatus,
   isMockCheckoutMode,
   CraftCloudApiError,
 } from "@/lib/craftcloud/client";
@@ -64,6 +63,7 @@ import {
 } from "@/lib/craftcloud/vendor-minimums";
 import { getOrCreateStripeCustomer } from "@/lib/stripe/customers";
 import { persistSavedFeeCard } from "@/lib/stripe/handle-print-order-payment";
+import { closeCheckoutSession } from "@/lib/stripe/checkout-session";
 import { mintPayProductionToken } from "@/lib/orders/pay-production-token";
 import {
   fetchPriceSnapshot,
@@ -206,7 +206,12 @@ export async function discardDraftOrder(
     if (!userId) return { error: "Unauthorized" };
 
     const [order] = await db
-      .select({ id: printOrders.id, status: printOrders.status })
+      .select({
+        id: printOrders.id,
+        status: printOrders.status,
+        stripeSessionId: printOrders.stripeSessionId,
+        craftCloudOrderId: printOrders.craftCloudOrderId,
+      })
       .from(printOrders)
       .where(and(eq(printOrders.id, orderId), eq(printOrders.userId, userId)));
 
@@ -217,7 +222,59 @@ export async function discardDraftOrder(
       return { error: "Cannot discard an order that has been placed" };
     }
 
-    await db.delete(printOrders).where(eq(printOrders.id, orderId));
+    // cart_created is not proof nothing happened yet:
+    //  - a craftCloudOrderId (real, or a webhook `placing:` sentinel)
+    //    means the vendor order exists or is being placed — two_step
+    //    places it up-front, unpaid;
+    //  - a `pi_…` ref is an off-session charge (agent path) or an
+    //    embedded fee hold — money already moved;
+    //  - a `session_claim:` sentinel means a checkout is being minted
+    //    right now.
+    // None of those rows may simply vanish.
+    if (order.craftCloudOrderId) {
+      return { error: "Cannot discard an order that has been placed" };
+    }
+    const refKind = classifyPaymentRef(order.stripeSessionId);
+    if (refKind === "payment_intent") {
+      return { error: "Cannot discard an order that has been paid" };
+    }
+    if (refKind === "claim") {
+      return {
+        error: "Checkout is in progress for this order. Please try again in a moment.",
+      };
+    }
+    if (refKind === "session") {
+      // Close the Checkout session first, so a still-open tab can't
+      // take a payment for an order row that no longer exists.
+      const closed = await closeCheckoutSession(
+        order.stripeSessionId!,
+        "discardDraftOrder"
+      );
+      if (closed === "completed") {
+        return {
+          error:
+            "This order has already been paid — check your orders in a moment.",
+        };
+      }
+      if (closed === "unknown") {
+        return { error: "Failed to discard draft" };
+      }
+    }
+
+    // Conditional on the state we just verified: if a checkout was
+    // started (or the webhook advanced the row) in between, leave it.
+    await db
+      .delete(printOrders)
+      .where(
+        and(
+          eq(printOrders.id, orderId),
+          eq(printOrders.status, "cart_created"),
+          isNull(printOrders.craftCloudOrderId),
+          order.stripeSessionId
+            ? eq(printOrders.stripeSessionId, order.stripeSessionId)
+            : isNull(printOrders.stripeSessionId)
+        )
+      );
 
     revalidatePath("/dashboard/orders");
     return { success: true };
@@ -364,59 +421,6 @@ export async function createPrintOrder(params: {
       return { error: "Our print partner returned an error. Please try again." };
     }
     return { error: "Failed to create print order. Please try again." };
-  }
-}
-
-export async function checkOrderStatus(
-  orderId: string
-): Promise<{ status: string } | null> {
-  try {
-    const { userId } = await auth();
-    if (!userId) return null;
-
-    const [order] = await db
-      .select()
-      .from(printOrders)
-      .where(and(eq(printOrders.id, orderId), eq(printOrders.userId, userId)));
-
-    if (!order || !order.craftCloudOrderId) return null;
-
-    const status = await getOrderStatus(order.craftCloudOrderId);
-    const vendorStatus =
-      status.vendorStatuses.find((v) => v.vendorId === order.vendor) ??
-      status.vendorStatuses[0];
-
-    const STATUS_MAP: Record<string, typeof order.status> = {
-      ordered: "ordered",
-      in_production: "in_production",
-      shipped: "shipped",
-      received: "received",
-      blocked: "blocked",
-      cancelled: "cancelled",
-    };
-
-    if (vendorStatus && vendorStatus.status !== order.status) {
-      const mappedStatus = STATUS_MAP[vendorStatus.status] || order.status;
-      await db
-        .update(printOrders)
-        .set({
-          status: mappedStatus,
-          trackingInfo: vendorStatus.trackingUrl
-            ? {
-                trackingUrl: vendorStatus.trackingUrl,
-                trackingNumber: vendorStatus.trackingNumber,
-              }
-            : undefined,
-        })
-        .where(eq(printOrders.id, orderId));
-
-      revalidatePath(`/dashboard/orders/${orderId}`);
-    }
-
-    return { status: vendorStatus?.status || order.status };
-  } catch (error) {
-    logError("checkOrderStatus", error);
-    return null;
   }
 }
 
@@ -1038,6 +1042,17 @@ export async function completePrintOrder(params: {
     if (!addressParsed.success) {
       return { error: "Invalid address information" };
     }
+    // Everything downstream (DB write, CraftCloud order, Stripe) uses the
+    // PARSED values — trimmed, length-capped, unknown keys stripped —
+    // never the raw client payload. Billing is optional in the schema;
+    // CraftCloud's order call takes a billing address, so fall back to
+    // shipping rather than failing after the buyer has paid.
+    const email = addressParsed.data.email;
+    const shipping = addressParsed.data.shipping;
+    const billing = addressParsed.data.billing ?? {
+      ...shipping,
+      isCompany: false,
+    };
 
     // Fetch our print order, verify ownership and status
     const [order] = await db
@@ -1207,9 +1222,9 @@ export async function completePrintOrder(params: {
     // picks up where the last attempt left off.
     if (order.checkoutModel === "two_step") {
       const prep = await prepareTwoStepOrder(order, {
-        email: params.email,
-        shipping: params.shipping,
-        billing: params.billing,
+        email,
+        shipping,
+        billing,
       });
       if ("error" in prep) {
         await releaseSessionClaim(params.orderId, sentinel);
@@ -1228,9 +1243,9 @@ export async function completePrintOrder(params: {
               order,
               sentinel,
               {
-                email: params.email,
-                shipping: params.shipping,
-                billing: params.billing,
+                email,
+                shipping,
+                billing,
               },
               prep.bridgeSessionUrl
             )
@@ -1248,9 +1263,9 @@ export async function completePrintOrder(params: {
       // PI creation failure, lost sentinel), and the hosted-session
       // path below takes over unchanged.
       const sheet = await prepareEmbeddedFeeSheet(order, sentinel, {
-        email: params.email,
-        shipping: params.shipping,
-        billing: params.billing,
+        email,
+        shipping,
+        billing,
       });
       if (sheet) {
         revalidatePath("/dashboard/orders");
@@ -1261,7 +1276,7 @@ export async function completePrintOrder(params: {
     let sessionResult: Awaited<ReturnType<typeof createStripeSessionForOrder>>;
     try {
       sessionResult = await createStripeSessionForOrder(order, {
-        email: params.email,
+        email,
         isAnonFlow: params.isAnonFlow ?? false,
       });
     } catch (err) {
@@ -1281,9 +1296,9 @@ export async function completePrintOrder(params: {
       .set({
         stripeSessionId: sessionResult.id,
         shippingAddress: {
-          email: params.email,
-          shipping: params.shipping,
-          billing: params.billing,
+          email,
+          shipping,
+          billing,
         },
       })
       .where(
@@ -2442,38 +2457,20 @@ export async function requestOrderRefund(
       };
     }
 
-    // Blocked = factory rejected, safe to refund immediately
-    // Ordered = placed but not yet in production — check live status first
-    // Anything else = too late for self-service refund
-    if (order.status === "blocked") {
-      // Factory rejected — refund is straightforward
-    } else if (order.status === "ordered" && order.craftCloudOrderId) {
-      // Check live status before allowing refund — it may have moved to production
-      const liveStatus = await getOrderStatus(order.craftCloudOrderId);
-      const vendorStatus = liveStatus.vendorStatuses[0];
-      if (vendorStatus && vendorStatus.status !== "ordered") {
-        // Already in production or beyond — can't refund self-service
-        // Update our DB to reflect the real status
-        const STATUS_MAP: Record<string, string> = {
-          in_production: "in_production",
-          shipped: "shipped",
-          received: "received",
-          blocked: "blocked",
-          cancelled: "cancelled",
-        };
-        const mapped = STATUS_MAP[vendorStatus.status];
-        if (mapped) {
-          await db
-            .update(printOrders)
-            .set({ status: mapped as typeof order.status })
-            .where(eq(printOrders.id, orderId));
-          revalidatePath(`/dashboard/orders/${orderId}`);
-        }
-        return {
-          error: "This order is already in production and can't be refunded automatically. Please contact support.",
-        };
-      }
-    } else {
+    // Only `blocked` (the factory rejected the order) is safe to refund
+    // self-service. An `ordered` order is live at CraftCloud, and there
+    // is no CraftCloud cancellation API (CON-109): refunding the buyer in
+    // full here would leave the vendor free to produce and ship the print
+    // — and bill us for it. Route those to support, who can coordinate
+    // with the vendor before any money moves. Anything later is too late
+    // for self-service either way.
+    if (order.status === "ordered") {
+      return {
+        error:
+          "This order has already been sent to the manufacturer, so it can't be cancelled automatically. Please email support@materialize.cc and we'll coordinate with the vendor.",
+      };
+    }
+    if (order.status !== "blocked") {
       return { error: "This order can't be refunded at this stage" };
     }
 
@@ -2532,11 +2529,25 @@ export async function requestOrderRefund(
       { idempotencyKey: `print-refund:${order.id}` }
     );
 
-    // Update order status
-    await db
+    // Conditional on the status we refunded against, so a concurrent
+    // writer (the hourly sync-fulfillment-status cron) is never
+    // overwritten. The refund itself is idempotent per order, so a
+    // retry after a lost write is safe.
+    const updated = await db
       .update(printOrders)
       .set({ status: "refunded" })
-      .where(eq(printOrders.id, orderId));
+      .where(and(eq(printOrders.id, orderId), eq(printOrders.status, "blocked")))
+      .returning({ id: printOrders.id });
+    if (updated.length === 0) {
+      // Money went back to the buyer but the row moved under us —
+      // surface it for a human rather than guessing the right status.
+      logError(
+        "requestOrderRefund.statusWriteLost",
+        new Error(`refund issued but status write lost for order ${orderId}`, {
+          cause: { printOrderId: orderId, paymentIntentId },
+        })
+      );
+    }
 
     revalidatePath(`/dashboard/orders/${orderId}`);
     revalidatePath("/dashboard/orders");

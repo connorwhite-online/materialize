@@ -135,13 +135,14 @@ awaiting_production_payment → ordered            (hourly reconcile capture, re
 ordered|in_production|shipped|blocked → in_production|shipped|received|blocked|cancelled
                                                  (hourly sync-fulfillment-status cron, forward-only,
                                                   lib/craftcloud/fulfillment-sync.ts; CON-107)
-blocked|ordered         → refunded               (app/actions/print.ts:1587)
+blocked                 → refunded               (self-service requestOrderRefund, conditional on status;
+                                                  `ordered` routes to support — no CraftCloud cancel API)
 ```
 
 **Truths every consumer must know:**
 
 - **`quoting` is dead** — it's the column default only; no writer ever sets it, no code reads it. Ignore it.
-- **Fulfillment is polled, not pushed** — CraftCloud has no webhooks (its published spec has none), so the hourly `sync-fulfillment-status` cron is how orders move past `ordered`. Transitions are forward-only (`nextFulfillmentStatus`) with `blocked`/`cancelled` as side exits, and a CraftCloud cancellation is logged for a refund check because nothing refunds it automatically. The status endpoint returns **no tracking numbers**, so `trackingInfo` stays empty. `checkOrderStatus` in `app/actions/print.ts` is still uncalled; `requestOrderRefund` also advances status on its own live read.
+- **Fulfillment is polled, not pushed** — CraftCloud has no webhooks (its published spec has none), so the hourly `sync-fulfillment-status` cron is how orders move past `ordered`. Transitions are forward-only (`nextFulfillmentStatus`) with `blocked`/`cancelled` as side exits, and a CraftCloud cancellation is logged for a refund check because nothing refunds it automatically. The status endpoint returns **no tracking numbers**, so `trackingInfo` stays empty. The cron is the only status reader: the old `checkOrderStatus` server action was deleted (it was uncalled, and as a public endpoint it could move an order backwards).
 - **`getOrderStatus` returns a normalized shape** — CraftCloud's wire response is per-vendor status *history* (`status[].orderStatus[]`); `normalizeOrderStatus` (`lib/craftcloud/order-status.ts`) collapses it to `vendorStatuses`. Don't read the raw payload anywhere else.
 - **Four status-writing crons**: `place-auto-approved-orders` (minutely), `reconcile-production-payments` (hourly), `sync-fulfillment-status` (hourly), `cleanup-stale-orders` (daily). `retry-failed-refunds` does NOT write status.
 

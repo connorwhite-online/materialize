@@ -98,6 +98,7 @@ function asset(
     fileUserId: string | null;
     fileOrganizationId: string | null;
     fileStatus: string;
+    fileVisibility: string;
   }> = {}
 ) {
   return {
@@ -106,6 +107,7 @@ function asset(
     fileUserId: "owner-1",
     fileOrganizationId: null,
     fileStatus: "published",
+    fileVisibility: "public",
     ...overrides,
   };
 }
@@ -142,6 +144,40 @@ describe("preview/[fileAssetId] GET", () => {
   it("published file: non-owner authenticated user gets 200", async () => {
     mockUserId = "other-user";
     assetRow = asset({ fileStatus: "published", fileUserId: "owner-1" });
+    upstreamOk();
+
+    const res = await GET(makeRequest(), makeProps("asset-1"));
+    expect(res.status).toBe(200);
+  });
+
+  it("published but PRIVATE file: anon gets 403", async () => {
+    mockUserId = null;
+    assetRow = asset({ fileStatus: "published", fileVisibility: "private" });
+
+    const res = await GET(makeRequest(), makeProps("asset-1"));
+    expect(res.status).toBe(403);
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it("published but PRIVATE file: other authenticated user gets 403", async () => {
+    mockUserId = "other-user";
+    assetRow = asset({
+      fileStatus: "published",
+      fileVisibility: "private",
+      fileUserId: "owner-1",
+    });
+
+    const res = await GET(makeRequest(), makeProps("asset-1"));
+    expect(res.status).toBe(403);
+  });
+
+  it("published but PRIVATE file: owner still gets 200", async () => {
+    mockUserId = "owner-1";
+    assetRow = asset({
+      fileStatus: "published",
+      fileVisibility: "private",
+      fileUserId: "owner-1",
+    });
     upstreamOk();
 
     const res = await GET(makeRequest(), makeProps("asset-1"));

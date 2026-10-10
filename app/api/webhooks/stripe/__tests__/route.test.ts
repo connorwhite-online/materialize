@@ -180,6 +180,8 @@ describe("POST /api/webhooks/stripe", () => {
       type: "checkout.session.completed",
       data: {
         object: {
+          id: "cs_single_1",
+          amount_total: 1545,
           payment_status: "paid",
           payment_intent: "pi_single_1",
           metadata: { type: "print_order", printOrderId: "po_1" },
@@ -191,8 +193,15 @@ describe("POST /api/webhooks/stripe", () => {
 
     expect(res.status).toBe(200);
     expect(mockHandlePrintOrderPayment).toHaveBeenCalledTimes(1);
+    // The session rides along so the handler can cross-check it
+    // against the order and release the payment for a dead order.
     expect(mockHandlePrintOrderPayment).toHaveBeenCalledWith("po_1", {
       paymentIntentId: "pi_single_1",
+      session: {
+        id: "cs_single_1",
+        amountTotal: 1545,
+        paymentStatus: "paid",
+      },
     });
     expect(mockHandleListingPurchase).not.toHaveBeenCalled();
     expect(mockHandleListingRefund).not.toHaveBeenCalled();
@@ -216,9 +225,10 @@ describe("POST /api/webhooks/stripe", () => {
     const res = await POST(makeRequest());
 
     expect(res.status).toBe(200);
-    expect(mockHandlePrintOrderPayment).toHaveBeenCalledWith("po_async", {
-      paymentIntentId: undefined,
-    });
+    expect(mockHandlePrintOrderPayment).toHaveBeenCalledWith(
+      "po_async",
+      expect.objectContaining({ paymentIntentId: undefined })
+    );
   });
 
   it("routes an UNPAID two-step fee session (manual capture) to handlePrintOrderPayment", async () => {
@@ -246,9 +256,10 @@ describe("POST /api/webhooks/stripe", () => {
 
     expect(res.status).toBe(200);
     expect(mockHandlePrintOrderPayment).toHaveBeenCalledTimes(1);
-    expect(mockHandlePrintOrderPayment).toHaveBeenCalledWith("po_two_step", {
-      paymentIntentId: "pi_fee_1",
-    });
+    expect(mockHandlePrintOrderPayment).toHaveBeenCalledWith(
+      "po_two_step",
+      expect.objectContaining({ paymentIntentId: "pi_fee_1" })
+    );
     // Handled events land in the dedup table.
     expect(mockDbInsert).toHaveBeenCalledWith({
       id: "evt_test",
@@ -275,9 +286,10 @@ describe("POST /api/webhooks/stripe", () => {
     const res = await POST(makeRequest());
 
     expect(res.status).toBe(200);
-    expect(mockHandlePrintOrderPayment).toHaveBeenCalledWith("po_two_step", {
-      paymentIntentId: "pi_expanded",
-    });
+    expect(mockHandlePrintOrderPayment).toHaveBeenCalledWith(
+      "po_two_step",
+      expect.objectContaining({ paymentIntentId: "pi_expanded" })
+    );
   });
 
   it("still drops an unpaid completed session WITHOUT two_step metadata (single gating unchanged)", async () => {

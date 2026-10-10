@@ -139,7 +139,7 @@ vi.mock("@/lib/entitlement", () => ({
   userCanPrintAsset: vi.fn(async () => true),
 }));
 
-import { createPrintOrder, checkOrderStatus, checkCartPricing } from "../print";
+import { createPrintOrder, checkCartPricing } from "../print";
 import { userCanPrintAsset } from "@/lib/entitlement";
 
 describe("createPrintOrder", () => {
@@ -437,42 +437,6 @@ describe("createPrintOrder — server-derived quote terms", () => {
     if (!("error" in result)) throw new Error("expected error");
     expect(result.error).toMatch(/USD/);
     expect(mockCreateCart).not.toHaveBeenCalled();
-  });
-});
-
-describe("checkOrderStatus", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-  });
-
-  it("fetches status from CraftCloud and updates DB", async () => {
-    const result = await checkOrderStatus("order-id-1");
-    expect(mockGetOrderStatus).toHaveBeenCalledWith("cc-order-123");
-    expect(result).toEqual({ status: "shipped" });
-  });
-
-  it("updates tracking info when available", async () => {
-    await checkOrderStatus("order-id-1");
-    expect(mockDbUpdateSet).toHaveBeenCalledWith(
-      expect.objectContaining({
-        status: "shipped",
-        trackingInfo: expect.objectContaining({
-          trackingUrl: "https://track.me/123",
-        }),
-      })
-    );
-  });
-
-  it("maps blocked status to blocked (not cancelled)", async () => {
-    mockGetOrderStatus.mockResolvedValueOnce({
-      orderId: "order-123",
-      vendorStatuses: [{ vendorId: "v1", status: "blocked" }],
-    });
-    const result = await checkOrderStatus("order-id-1");
-    expect(result).toEqual({ status: "blocked" });
-    expect(mockDbUpdateSet).toHaveBeenCalledWith(
-      expect.objectContaining({ status: "blocked" })
-    );
   });
 });
 

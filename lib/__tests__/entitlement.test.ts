@@ -23,7 +23,11 @@ const state: {
   collaboratorGrantViaFile: { id: string } | null;
   // userCanPrintAsset reads a single row via fileAssets LEFT JOIN files.
   // null means "no matching fileAssets row at all" (missing asset).
-  printAssetRow: { fileUserId: string | null; fileStatus: string | null } | null;
+  printAssetRow: {
+    fileUserId: string | null;
+    fileStatus: string | null;
+    fileVisibility?: string | null;
+  } | null;
 } = {
   fileRow: null,
   projectRow: null,
@@ -403,6 +407,25 @@ describe("userCanPrintAsset", () => {
   it("non-owner CAN print another user's published asset", async () => {
     state.printAssetRow = { fileUserId: "owner-1", fileStatus: "published" };
     expect(await userCanPrintAsset("u1", "asset-1")).toBe(true);
+  });
+
+  it("non-owner cannot print a published asset its owner set private", async () => {
+    state.printAssetRow = {
+      fileUserId: "owner-1",
+      fileStatus: "published",
+      fileVisibility: "private",
+    };
+    expect(await userCanPrintAsset("u1", "asset-1")).toBe(false);
+    expect(await userCanPrintAsset(null, "asset-1")).toBe(false);
+  });
+
+  it("owner can still print their own private published asset", async () => {
+    state.printAssetRow = {
+      fileUserId: "owner-1",
+      fileStatus: "published",
+      fileVisibility: "private",
+    };
+    expect(await userCanPrintAsset("owner-1", "asset-1")).toBe(true);
   });
 
   it("anonymous viewer can print a published asset", async () => {

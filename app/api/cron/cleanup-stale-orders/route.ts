@@ -18,6 +18,7 @@ import { getStripe } from "@/lib/stripe";
 import { logError } from "@/lib/logger";
 import { constantTimeEqual } from "@/lib/auth/constant-time-equal";
 import { deleteObject } from "@/lib/storage";
+import { closeCheckoutSession } from "@/lib/stripe/checkout-session";
 
 /**
  * Daily housekeeping sweeps. The path name predates the broader
@@ -31,7 +32,10 @@ import { deleteObject } from "@/lib/storage";
  *      closed the tab between createPrintOrder and completePrintOrder,
  *      when Stripe checkout never opened, or when the chain partially
  *      failed. 48h is generous: real checkouts complete in seconds
- *      and a Stripe Checkout session expires after 24h.
+ *      and a Stripe Checkout session expires after 24h. A row still
+ *      holding a Checkout session has it expired first, and is skipped
+ *      (`skippedPaid`) if the buyer already completed it — a resumed
+ *      session can outlive the cutoff.
  *
  *      Every cancel is claimed atomically (status='cart_created' guard
  *      + `.returning()`) before anything else happens for that row —
@@ -313,6 +317,9 @@ export async function GET(request: Request) {
     let prunedWebhookEvents: OpResult = "error";
     let hasMoreStaleOrders = false;
     let skippedContended = 0;
+    // Rows left alone because their Checkout session completed (or
+    // Stripe couldn't confirm it hadn't).
+    let skippedPaid = 0;
     let deletedDraftFiles = 0;
 
     try {
@@ -355,6 +362,44 @@ export async function GET(request: Request) {
         const isChargedRow =
           typeof row.stripeSessionId === "string" &&
           row.stripeSessionId.startsWith("pi_");
+
+        // A Checkout session on the row may still be payable: resume
+        // mints a fresh 24h session, so one opened at hour 47 outlives
+        // this 48h cutoff, and delayed rails (ACH) complete days later.
+        // Cancelling under it lets the payment land on a cancelled
+        // order the webhook won't place. Expire it first; if the buyer
+        // already completed it, the order is NOT stale — skip it and
+        // let the webhook advance it. An unreachable Stripe also skips
+        // (tomorrow's run retries) rather than cancelling blind.
+        // `session_claim:` sentinels and pi_ rows have no session.
+        const hasCheckoutSession =
+          typeof row.stripeSessionId === "string" &&
+          !isChargedRow &&
+          !row.stripeSessionId.startsWith("session_claim:");
+        if (hasCheckoutSession) {
+          const closed = await closeCheckoutSession(
+            row.stripeSessionId!,
+            "cron/cleanup-stale-orders"
+          );
+          if (closed !== "closed") {
+            if (closed === "completed") {
+              logError(
+                "cron/cleanup-stale-orders.completedSession",
+                new Error(
+                  `stale cart_created order ${row.id} has a completed checkout session — not cancelling`,
+                  {
+                    cause: {
+                      printOrderId: row.id,
+                      sessionId: row.stripeSessionId,
+                    },
+                  }
+                )
+              );
+            }
+            skippedPaid++;
+            continue;
+          }
+        }
 
         // MTR-229: claim the row atomically before doing anything
         // else. A zero-row result means another writer (the per-minute
@@ -474,6 +519,7 @@ export async function GET(request: Request) {
       prunedWebhookEvents: prunedWebhookEvents,
       hasMoreStaleOrders,
       skippedContended,
+      skippedPaid,
       deletedDraftFiles,
       cutoffs: {
         orders: orderCutoff.toISOString(),

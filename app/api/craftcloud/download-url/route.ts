@@ -1,6 +1,7 @@
 import { auth } from "@clerk/nextjs/server";
 import { db } from "@/lib/db";
 import { fileAssets, files } from "@/lib/db/schema";
+import { isPublicListing } from "@/lib/files/public-listing";
 import { eq } from "drizzle-orm";
 import { logError } from "@/lib/logger";
 
@@ -56,6 +57,7 @@ export async function POST(request: Request) {
         fileUnit: fileAssets.fileUnit,
         fileUserId: files.userId,
         fileStatus: files.status,
+        fileVisibility: files.visibility,
       })
       .from(fileAssets)
       .leftJoin(files, eq(fileAssets.fileId, files.id))
@@ -66,7 +68,7 @@ export async function POST(request: Request) {
     }
 
     const isOwner = userId && assetRow.fileUserId === userId;
-    const isPublished = assetRow.fileStatus === "published";
+    const isPublished = isPublicListing(assetRow);
     if (!isOwner && !isPublished) {
       return Response.json({ error: "Forbidden" }, { status: 403 });
     }

@@ -2,6 +2,7 @@ import { after } from "next/server";
 import { auth } from "@clerk/nextjs/server";
 import { db } from "@/lib/db";
 import { fileAssets, files } from "@/lib/db/schema";
+import { isPublicListing } from "@/lib/files/public-listing";
 import { eq } from "drizzle-orm";
 import { generateDownloadUrl } from "@/lib/storage";
 import { logError } from "@/lib/logger";
@@ -20,10 +21,10 @@ import { promoteStudioDraftsForAssets } from "@/lib/studio-drafts";
  * read on the server kills the dependency on bucket-side CORS for
  * downloads entirely.
  *
- * Access policy: published files are previewable by anyone (mirrors the
- * detail page); draft files are owner-only. Anything that pulls model
- * bytes back into the browser flows through here, so this is the one
- * place to enforce that policy.
+ * Access policy: published, public files are previewable by anyone
+ * (mirrors the detail page); drafts and private files are owner/org-only.
+ * Anything that pulls model bytes back into the browser flows through
+ * here, so this is the one place to enforce that policy.
  */
 
 const FORMAT_MIME: Record<string, string> = {
@@ -50,6 +51,7 @@ export async function GET(
         fileUserId: files.userId,
         fileOrganizationId: files.organizationId,
         fileStatus: files.status,
+        fileVisibility: files.visibility,
       })
       .from(fileAssets)
       .leftJoin(files, eq(fileAssets.fileId, files.id))
@@ -64,7 +66,7 @@ export async function GET(
       (assetRow.fileUserId === userId ||
         (assetRow.fileOrganizationId !== null &&
           (await isOrgMember(userId, assetRow.fileOrganizationId)).member));
-    const isPublished = assetRow.fileStatus === "published";
+    const isPublished = isPublicListing(assetRow);
     if (!canView && !isPublished) {
       return new Response("Forbidden", { status: 403 });
     }

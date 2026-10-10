@@ -132,10 +132,17 @@ vi.mock("@/lib/craftcloud/client", () => ({
 // persistSavedFeeCard retrieves the fee PI to learn which customer +
 // payment method Stripe attached the saved card to.
 const mockPIRetrieve = vi.fn();
+// Orphaned-payment release: refund a captured PI, cancel a held one.
+const mockPICancel = vi.fn();
+const mockRefundsCreate = vi.fn();
 vi.mock("@/lib/stripe", () => ({
   getStripe: () => ({
     paymentIntents: {
       retrieve: (...args: unknown[]) => mockPIRetrieve(...args),
+      cancel: (...args: unknown[]) => mockPICancel(...args),
+    },
+    refunds: {
+      create: (...args: unknown[]) => mockRefundsCreate(...args),
     },
   }),
 }));
@@ -760,5 +767,235 @@ describe("handlePrintOrderPayment (two_step)", () => {
 
       expect(mockPIRetrieve).not.toHaveBeenCalled();
     });
+  });
+});
+
+describe("handlePrintOrderPayment — orphaned payments (missing / cancelled order)", () => {
+  const paidSession = {
+    id: "cs_orphan_1",
+    amountTotal: 1545,
+    paymentStatus: "paid",
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    dbOrder = null;
+    printOrderItemRows = [];
+    userRows = [];
+    claimReturns = [];
+    returningQueue = null;
+    deleteShouldThrow = null;
+    mockPIRetrieve.mockResolvedValue({ status: "succeeded" });
+    mockRefundsCreate.mockResolvedValue({ id: "re_1" });
+    mockPICancel.mockResolvedValue({ id: "pi_x", status: "canceled" });
+  });
+
+  it("refunds a paid session for a missing order (per-session key) and logs instead of throwing forever", async () => {
+    dbOrder = null;
+
+    await expect(
+      handlePrintOrderPayment("gone", {
+        paymentIntentId: "pi_paid_1",
+        session: paidSession,
+      })
+    ).resolves.toBeUndefined();
+
+    expect(mockRefundsCreate).toHaveBeenCalledTimes(1);
+    const [params, opts] = mockRefundsCreate.mock.calls[0];
+    expect(params).toMatchObject({ payment_intent: "pi_paid_1" });
+    expect(opts).toEqual({ idempotencyKey: "print-refund-orphan:cs_orphan_1" });
+    expect(logError).toHaveBeenCalledWith(
+      "handlePrintOrderPayment.orphanedPayment",
+      expect.any(Error)
+    );
+    expect(mockCreateOrder).not.toHaveBeenCalled();
+    expect(mockUpdateSet).not.toHaveBeenCalled();
+  });
+
+  it("refunds a paid session for a cancelled order and never places it", async () => {
+    dbOrder = {
+      id: "order-1",
+      status: "cancelled",
+      checkoutModel: "single",
+      craftCloudCartId: "cart-1",
+      craftCloudOrderId: null,
+      stripeSessionId: "cs_orphan_1",
+      shippingAddress: baseAddress,
+    };
+
+    await handlePrintOrderPayment("order-1", {
+      paymentIntentId: "pi_paid_1",
+      session: paidSession,
+    });
+
+    expect(mockRefundsCreate).toHaveBeenCalledTimes(1);
+    expect(mockCreateOrder).not.toHaveBeenCalled();
+    expect(mockUpdateSet).not.toHaveBeenCalled();
+  });
+
+  it("cancels (never refunds) a two_step fee hold on a cancelled order — the two_step money invariant", async () => {
+    dbOrder = {
+      id: "order-2",
+      status: "cancelled",
+      checkoutModel: "two_step",
+      craftCloudOrderId: "cc-upfront",
+      shippingAddress: baseAddress,
+    };
+    mockPIRetrieve.mockResolvedValue({ status: "requires_capture" });
+
+    await handlePrintOrderPayment("order-2", {
+      paymentIntentId: "pi_fee_hold",
+      session: { id: "cs_fee", amountTotal: 45, paymentStatus: "unpaid" },
+    });
+
+    expect(mockPICancel).toHaveBeenCalledWith("pi_fee_hold");
+    expect(mockRefundsCreate).not.toHaveBeenCalled();
+    expect(mockUpdateSet).not.toHaveBeenCalled();
+  });
+
+  it("treats an already-refunded charge as done", async () => {
+    mockRefundsCreate.mockRejectedValue(
+      Object.assign(new Error("already refunded"), {
+        code: "charge_already_refunded",
+      })
+    );
+
+    await expect(
+      handlePrintOrderPayment("gone", {
+        paymentIntentId: "pi_paid_1",
+        session: paidSession,
+      })
+    ).resolves.toBeUndefined();
+  });
+
+  it("propagates other refund failures so Stripe retries the delivery", async () => {
+    mockRefundsCreate.mockRejectedValue(new Error("stripe down"));
+
+    await expect(
+      handlePrintOrderPayment("gone", {
+        paymentIntentId: "pi_paid_1",
+        session: paidSession,
+      })
+    ).rejects.toThrow("stripe down");
+  });
+
+  it("without a session (the auto-approve cron path) a missing order still throws as before", async () => {
+    dbOrder = null;
+    await expect(handlePrintOrderPayment("gone")).rejects.toThrow(
+      /Print order not found/
+    );
+    expect(mockRefundsCreate).not.toHaveBeenCalled();
+  });
+});
+
+describe("handlePrintOrderPayment — paid-session cross-checks (single)", () => {
+  // $10 × 1 + $5 shipping, no vendor minimum, $0.45 fee → 1545.
+  const singleOrder = {
+    id: "order-1",
+    status: "cart_created",
+    checkoutModel: "single",
+    fileAssetId: "asset-1",
+    craftCloudCartId: "cart-1",
+    craftCloudOrderId: SENTINEL,
+    stripeSessionId: "cs_good",
+    totalPrice: 1500,
+    serviceFee: 45,
+    materialSubtotal: 1000,
+    shippingSubtotal: 500,
+    quantity: 1,
+    shippingAddress: baseAddress,
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    dbOrder = null;
+    printOrderItemRows = [];
+    userRows = [];
+    claimReturns = [];
+    returningQueue = null;
+    deleteShouldThrow = null;
+    mockCreateOrder.mockResolvedValue({ orderId: "cc-new" });
+  });
+
+  it("places the order when the session id and amount match", async () => {
+    dbOrder = { ...singleOrder };
+    claimReturns = [{ id: "order-1" }];
+
+    await handlePrintOrderPayment("order-1", {
+      paymentIntentId: "pi_1",
+      session: { id: "cs_good", amountTotal: 1545, paymentStatus: "paid" },
+    });
+
+    expect(mockCreateOrder).toHaveBeenCalledTimes(1);
+  });
+
+  it("does NOT place (and logs) when the paid session isn't the order's session", async () => {
+    dbOrder = { ...singleOrder };
+    claimReturns = [{ id: "order-1" }];
+
+    await handlePrintOrderPayment("order-1", {
+      paymentIntentId: "pi_1",
+      session: { id: "cs_other", amountTotal: 1545, paymentStatus: "paid" },
+    });
+
+    expect(mockCreateOrder).not.toHaveBeenCalled();
+    expect(mockUpdateSet).not.toHaveBeenCalled();
+    expect(logError).toHaveBeenCalledWith(
+      "handlePrintOrderPayment.sessionMismatch",
+      expect.any(Error)
+    );
+  });
+
+  it("does NOT place (and logs) when the paid amount differs from what the order charges", async () => {
+    dbOrder = { ...singleOrder };
+    claimReturns = [{ id: "order-1" }];
+
+    await handlePrintOrderPayment("order-1", {
+      paymentIntentId: "pi_1",
+      session: { id: "cs_good", amountTotal: 100, paymentStatus: "paid" },
+    });
+
+    expect(mockCreateOrder).not.toHaveBeenCalled();
+    expect(logError).toHaveBeenCalledWith(
+      "handlePrintOrderPayment.amountMismatch",
+      expect.any(Error)
+    );
+  });
+
+  it("skips the id check when the order holds a pi_ ref, and the amount check for multi-item orders", async () => {
+    dbOrder = {
+      ...singleOrder,
+      fileAssetId: null,
+      stripeSessionId: "pi_agent",
+    };
+    claimReturns = [{ id: "order-1" }];
+
+    await handlePrintOrderPayment("order-1", {
+      paymentIntentId: "pi_1",
+      session: { id: "cs_whatever", amountTotal: 1, paymentStatus: "paid" },
+    });
+
+    expect(mockCreateOrder).toHaveBeenCalledTimes(1);
+  });
+
+  it("two_step fee sessions bypass the cross-checks (fee-only amount, unpaid status)", async () => {
+    dbOrder = {
+      ...singleOrder,
+      checkoutModel: "two_step",
+      craftCloudOrderId: "cc-upfront",
+      stripeSessionId: "cs_fee",
+    };
+    claimReturns = [{ id: "order-1" }];
+    mockPIRetrieve.mockResolvedValue({ customer: null, payment_method: null });
+
+    await handlePrintOrderPayment("order-1", {
+      paymentIntentId: "pi_fee",
+      session: { id: "cs_fee", amountTotal: 45, paymentStatus: "unpaid" },
+    });
+
+    expect(mockUpdateSet).toHaveBeenCalledWith(
+      expect.objectContaining({ status: "awaiting_production_payment" })
+    );
+    expect(logError).not.toHaveBeenCalled();
   });
 });
