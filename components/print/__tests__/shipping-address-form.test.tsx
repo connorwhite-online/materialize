@@ -103,7 +103,7 @@ function fillRequiredFields() {
 // handleVerifyOtp directly, so we don't need to type per-character.
 function enterOtp(code: string) {
   const otpInput = document.querySelector(
-    'input[maxlength="6"]'
+    'input[autocomplete="one-time-code"]'
   ) as HTMLInputElement | null;
   if (!otpInput) throw new Error("OTP input not found");
   fireEvent.input(otpInput, { target: { value: code } });

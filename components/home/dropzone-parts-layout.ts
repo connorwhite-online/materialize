@@ -37,19 +37,20 @@ export const DROPZONE_PARTS_LINE_WIDTH = 1.25;
 export const DROPZONE_GRID: "dots" | "lines" = "dots";
 
 export const DROPZONE_PARTS_MOBILE_MAX_WIDTH = 520;
-export const DROPZONE_PARTS_MOBILE_SCALE = 0.72;
+export const DROPZONE_PARTS_MOBILE_SCALE = 0.62;
 
 /**
  * Six parts scattered across the well, a few bleeding off its edges —
  * the well is a window onto a bench of parts, not a frame around three.
  * The chip owns the centre band; nothing sits behind it. Phones keep
- * four, pushed further out so the chip stays clear.
+ * all six, smaller, spread round the chip: two corners each side, one
+ * peeking in over the top edge and one up from the bottom.
  */
 export const DROPZONE_PARTS: readonly DropzonePart[] = [
   {
     kind: "joint",
     position: [-0.42, 0.04],
-    mobilePosition: [-0.72, 0.28],
+    mobilePosition: [-0.6, 0.46],
     size: 0.72,
     yaw: 0,
     floatPx: 2,
@@ -59,7 +60,7 @@ export const DROPZONE_PARTS: readonly DropzonePart[] = [
   {
     kind: "exchanger",
     position: [0.58, 0.16],
-    mobilePosition: [0.72, 0.34],
+    mobilePosition: [0.62, 0.5],
     size: 0.66,
     yaw: 0,
     floatPx: 2.5,
@@ -69,7 +70,7 @@ export const DROPZONE_PARTS: readonly DropzonePart[] = [
   {
     kind: "flexure",
     position: [0.3, -0.14],
-    mobilePosition: null,
+    mobilePosition: [0.24, 0.9],
     size: 0.6,
     yaw: 0,
     floatPx: 1.5,
@@ -80,7 +81,7 @@ export const DROPZONE_PARTS: readonly DropzonePart[] = [
     kind: "fan",
     // Cropped by the left edge.
     position: [-0.94, -0.3],
-    mobilePosition: [-0.95, -0.55],
+    mobilePosition: [-0.94, -0.48],
     size: 0.85,
     yaw: 0,
     floatPx: 1.5,
@@ -90,7 +91,7 @@ export const DROPZONE_PARTS: readonly DropzonePart[] = [
   {
     kind: "spring",
     position: [-0.16, -0.62],
-    mobilePosition: null,
+    mobilePosition: [-0.22, -0.82],
     size: 0.42,
     yaw: 0.4,
     floatPx: 1.2,
@@ -101,7 +102,7 @@ export const DROPZONE_PARTS: readonly DropzonePart[] = [
     kind: "gear",
     // Cropped by the right and bottom edges.
     position: [0.9, -0.5],
-    mobilePosition: [0.86, -0.6],
+    mobilePosition: [0.9, -0.52],
     size: 0.62,
     yaw: 0.2,
     floatPx: 2,

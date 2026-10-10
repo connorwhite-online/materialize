@@ -44,6 +44,27 @@ export function OtpField({
 }: OtpFieldProps) {
   const inputRef = React.useRef<HTMLInputElement>(null);
   const [focused, setFocused] = React.useState(false);
+  // An explicit Paste affordance. The input is invisible, so iOS's
+  // long-press Paste callout has nothing visible to anchor to and often
+  // never appears; reading the clipboard on a tap sidesteps that (iOS shows
+  // its own one-tap Paste confirmation). Set after mount so SSR and the
+  // first client render agree.
+  const [canPaste, setCanPaste] = React.useState(false);
+  React.useEffect(() => {
+    setCanPaste(
+      typeof navigator !== "undefined" && !!navigator.clipboard?.readText,
+    );
+  }, []);
+  const pasteFromClipboard = async () => {
+    try {
+      const text = await navigator.clipboard.readText();
+      const digits = text.replace(/\D/g, "").slice(0, length);
+      if (digits) onChange(digits);
+      inputRef.current?.focus();
+    } catch {
+      // Permission denied or nothing to read — typing still works.
+    }
+  };
   const [selection, setSelection] = React.useState({ start: 0, end: 0 });
 
   // Mirror the input's selection into state so the boxes can show where the
@@ -78,60 +99,74 @@ export function OtpField({
   };
 
   return (
-    <div className={cn("group/otp grid h-12 justify-center", className)}>
-      <div
-        aria-hidden
-        className="col-start-1 row-start-1 flex items-center gap-1.5"
-      >
-        {Array.from({ length }, (_, i) => {
-          const isActive =
-            focused &&
-            (selection.end > selection.start
-              ? i >= selection.start && i < selection.end
-              : i === selection.start);
-          return (
-            <div
-              key={i}
-              data-slot="otp-field-slot"
-              data-active={isActive}
-              className="relative flex h-12 w-10 items-center justify-center rounded-xl border border-foreground/25 bg-muted/60 text-base font-medium text-foreground shadow-sunken transition-[color,box-shadow,border-color] duration-150 ease-out data-[active=true]:z-10 data-[active=true]:border-ring data-[active=true]:shadow-input-focus group-aria-invalid/otp:border-destructive dark:border-foreground/30 dark:bg-input/30"
-            >
-              {value[i]}
-              {isActive && !value[i] && (
-                <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-                  <div className="h-5 w-px animate-caret-blink bg-foreground duration-1000" />
-                </div>
-              )}
-            </div>
-          );
-        })}
+    <div className={cn("flex flex-col items-center gap-2", className)}>
+      <div className="group/otp grid h-12 justify-center">
+        <div
+          aria-hidden
+          className="col-start-1 row-start-1 flex items-center gap-1.5"
+        >
+          {Array.from({ length }, (_, i) => {
+            const isActive =
+              focused &&
+              (selection.end > selection.start
+                ? i >= selection.start && i < selection.end
+                : i === selection.start);
+            return (
+              <div
+                key={i}
+                data-slot="otp-field-slot"
+                data-active={isActive}
+                className="relative flex h-12 w-10 items-center justify-center rounded-xl border border-foreground/25 bg-muted/60 text-base font-medium text-foreground shadow-sunken transition-[color,box-shadow,border-color] duration-150 ease-out data-[active=true]:z-10 data-[active=true]:border-ring data-[active=true]:shadow-input-focus group-aria-invalid/otp:border-destructive dark:border-foreground/30 dark:bg-input/30"
+              >
+                {value[i]}
+                {isActive && !value[i] && (
+                  <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+                    <div className="h-5 w-px animate-caret-blink bg-foreground duration-1000" />
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+        <input
+          ref={inputRef}
+          value={value}
+          onChange={(e) => {
+            onChange(e.target.value.replace(/\D/g, "").slice(0, length));
+            // The caret moves after React commits the new value.
+            requestAnimationFrame(syncSelection);
+          }}
+          onClick={placeCaretFromPointer}
+          onSelect={syncSelection}
+          onFocus={() => {
+            setFocused(true);
+            syncSelection();
+          }}
+          onBlur={() => setFocused(false)}
+          inputMode="numeric"
+          autoComplete="one-time-code"
+          pattern="[0-9]*"
+          // No maxLength: a pasted "123 456" or "Code: 123456" would be cut
+          // to its first six characters before onChange strips the
+          // non-digits, losing the code. onChange keeps the first `length`
+          // digits instead.
+          aria-label={ariaLabel}
+          aria-invalid={ariaInvalid}
+          aria-describedby={ariaDescribedBy}
+          autoFocus={autoFocus}
+          disabled={disabled}
+          className="field-text col-start-1 row-start-1 h-full w-full cursor-text appearance-none border-0 bg-transparent p-0 text-transparent caret-transparent opacity-0 outline-none"
+        />
       </div>
-      <input
-        ref={inputRef}
-        value={value}
-        onChange={(e) => {
-          onChange(e.target.value.replace(/\D/g, "").slice(0, length));
-          // The caret moves after React commits the new value.
-          requestAnimationFrame(syncSelection);
-        }}
-        onClick={placeCaretFromPointer}
-        onSelect={syncSelection}
-        onFocus={() => {
-          setFocused(true);
-          syncSelection();
-        }}
-        onBlur={() => setFocused(false)}
-        inputMode="numeric"
-        autoComplete="one-time-code"
-        pattern="[0-9]*"
-        maxLength={length}
-        aria-label={ariaLabel}
-        aria-invalid={ariaInvalid}
-        aria-describedby={ariaDescribedBy}
-        autoFocus={autoFocus}
-        disabled={disabled}
-        className="field-text col-start-1 row-start-1 h-full w-full cursor-text appearance-none border-0 bg-transparent p-0 text-transparent caret-transparent opacity-0 outline-none"
-      />
+      {canPaste && !value && !disabled ? (
+        <button
+          type="button"
+          onClick={() => void pasteFromClipboard()}
+          className="cursor-pointer text-xs text-muted-foreground transition-colors hover:text-foreground"
+        >
+          Paste code
+        </button>
+      ) : null}
     </div>
   );
 }

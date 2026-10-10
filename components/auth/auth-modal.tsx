@@ -57,7 +57,11 @@ export function AuthModalProvider({ children }: { children: React.ReactNode }) {
           setOpen(nextOpen);
         }}
       >
-        <DialogContent className="gap-3 rounded-3xl pb-0 sm:max-w-sm">
+        {/* touch-none: the sheet never scrolls itself, and on iOS a pan that
+            starts on it otherwise chains through to the page behind
+            (Safari ignores the overflow lock for touch). Taps and the
+            fields' long-press paste still work. */}
+        <DialogContent className="touch-none gap-3 rounded-3xl pb-0 sm:max-w-sm">
           <DialogHeader className="items-start pb-2">
             <AnimatedWordmark
               title="Materialize"

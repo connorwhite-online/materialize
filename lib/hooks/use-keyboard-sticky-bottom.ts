@@ -124,3 +124,41 @@ export function useKeyboardOpen(thresholdPx = 120): boolean {
 
   return open;
 }
+
+/**
+ * The visible area's box (top offset + height, px, in layout-viewport
+ * coordinates) while the soft keyboard is open, else `null`.
+ *
+ * A dialog centred in the *layout* viewport sits half behind an iOS
+ * keyboard: with `interactiveWidget = "overlays-content"` the layout
+ * viewport keeps its full height and the keyboard simply covers its
+ * bottom. Centring on this box instead keeps the dialog — and the input
+ * that summoned the keyboard — in the part of the screen you can see.
+ */
+export function useKeyboardViewport(
+  thresholdPx = 120
+): { top: number; height: number } | null {
+  const [box, setBox] = useState<{ top: number; height: number } | null>(null);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const vv = window.visualViewport;
+    if (!vv) return;
+
+    const update = () =>
+      setBox(
+        keyboardOverlapPx() > thresholdPx
+          ? { top: vv.offsetTop, height: vv.height }
+          : null
+      );
+    update();
+    vv.addEventListener("resize", update);
+    vv.addEventListener("scroll", update);
+    return () => {
+      vv.removeEventListener("resize", update);
+      vv.removeEventListener("scroll", update);
+    };
+  }, [thresholdPx]);
+
+  return box;
+}
