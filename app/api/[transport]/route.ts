@@ -78,6 +78,7 @@ import { clerkClient } from "@clerk/nextjs/server";
 import { primaryEmail } from "@/lib/clerk-email";
 import { shippingPhoneSchema } from "@/lib/validations/address";
 import { TOOL_ANNOTATIONS } from "@/lib/mcp/tool-annotations";
+import { SUPPORT_EMAIL } from "@/lib/legal";
 
 /**
  * Convert any tool result into the MCP shape. The payload goes out
@@ -578,7 +579,7 @@ const handler = createMcpHandler(
       {
         title: "Recommend materials for a part",
         description:
-          "Shortlist materials for what the part must do, with why each fits, what to watch out for, and the materialId to pass to materialize_get_quote. Say what matters (useCase, or minimum scores 1-5 for strength, flexibility, detail, heatResistance, a price ceiling, a preference) and, if you have one, the fileAssetId so materials the part can't be made in (too big, too thin) are ruled out. Ask the user what the part will do before guessing: a bracket, a figurine and a phone case want different materials. ruledOut says which requirement removed each material. Where the host shows Materialize's materials card (ChatGPT, Claude), the card already shows the shortlist and ratings: don't repeat them in a table, say which you'd pick and why. With a fileAssetId, each pick also carries `price.fromCents`: the cheapest all-in price to print that file in it (US shipping), so prices can guide the choice.",
+          "Shortlist materials for what the part must do, with why each fits, what to watch out for, and the materialId to pass to materialize_get_quote. Say what matters (useCase, or minimum scores 1-5 for strength, flexibility, detail, heatResistance, a price ceiling, a preference) and, if you have one, the fileAssetId so materials the part can't be made in (too big, too thin) are ruled out. The shortlist is only as good as the stated requirements: a bracket, a figurine and a phone case want different materials. ruledOut says which requirement removed each material. In hosts that render Materialize's materials card (ChatGPT, Claude), the card already shows the user the shortlist, ratings and prices. With a fileAssetId, each pick also carries `price.fromCents`: the cheapest all-in price to print that file in it (US shipping), so prices can guide the choice.",
         _meta: widgetToolMeta(MATERIALS_WIDGET_URI, {
           invoking: "Shortlisting materials…",
           invoked: "Materials ready",
@@ -1563,7 +1564,7 @@ const handler = createMcpHandler(
       {
         title: "Get prices for a print",
         description:
-          "Server-side polls CraftCloud for prices on a registered fileAsset. Returns quotes sorted by what the buyer pays, with vendor, finish, color, lead time. `lead` names the option to recommend first: the cheapest industrial print (SLS, MJF, SLA…) when it costs at most twice the cheapest, with the cheaper FDM print as its `alternative`; otherwise the cheapest, with industrial as the upgrade. Present it the same way. totalCents is the price to tell the user: production x quantity, plus the vendor's minimum-order top-up (minimumFeeCents), shipping, and Materialize's service fee (serviceFeeCents). priceCents is the per-unit production price only; never present it as the price. Pass the returned priceId/quoteId/materialConfigId/shippingId and the per-unit priceCents as materialPriceCents into materialize_create_order. Quotes and orders are USD-only for now. Shipping is priced per destination country (a ZIP code doesn't change it). Where the host shows Materialize's quote card (ChatGPT, Claude), the card already lists the prices and compares the options: don't repeat them in a table, give a sentence or two of advice instead.",
+          "Server-side polls CraftCloud for prices on a registered fileAsset. Returns quotes sorted by what the buyer pays, with vendor, finish, color, lead time. `lead` names the option to recommend first: the cheapest industrial print (SLS, MJF, SLA…) when it costs at most twice the cheapest, with the cheaper FDM print as its `alternative`; otherwise the cheapest, with industrial as the upgrade. totalCents is the price to tell the user: production x quantity, plus the vendor's minimum-order top-up (minimumFeeCents), shipping, and Materialize's service fee (serviceFeeCents). priceCents is the per-unit production price only, not what the user pays. Pass the returned priceId/quoteId/materialConfigId/shippingId and the per-unit priceCents as materialPriceCents into materialize_create_order. Quotes and orders are USD-only for now. Shipping is priced per destination country (a ZIP code doesn't change it). In hosts that render Materialize's quote card (ChatGPT, Claude), the card already shows the user every price and compares the options.",
         _meta: widgetToolMeta(QUOTE_WIDGET_URI, {
           invoking: "Getting live quotes…",
           invoked: "Quotes ready",
@@ -1638,7 +1639,7 @@ const handler = createMcpHandler(
       {
         title: "Create a draft print order (requires user confirmation)",
         description:
-          "Creates a draft order against the user's account. The user is notified by email and must approve and pay via the returned confirmationUrl before the order is placed with the vendor. The response's amountDueCents is what the user will pay, broken down as productionCents + minimumFeeCents (the vendor's minimum-order top-up) + shippingCents + serviceFeeCents; tell the user that amount, and explain minimumFeeCents if it's above zero. USD only. Idempotency is keyed on (user, idempotencyKey).",
+          "Creates a draft order against the user's account. The user is notified by email and approves and pays via the returned confirmationUrl before the order is placed with the vendor (status awaiting_user_approval). The one exception is a user who has set up an agent spending policy on materialize.cc: an order within its limits is charged to their saved card immediately (status auto_approved) and can be cancelled from the emailed link until cancellationDeadline. The response's amountDueCents is what the user pays, broken down as productionCents + minimumFeeCents (the vendor's minimum-order top-up) + shippingCents + serviceFeeCents. USD only. Idempotency is keyed on (user, idempotencyKey).",
         inputSchema: {
           priceId: z
             .string()
@@ -1780,7 +1781,7 @@ const handler = createMcpHandler(
       {
         title: "Get a print order by id",
         description:
-          "Returns the current status, vendor, material, price breakdown, and tracking (if shipped) for an order owned by the user.",
+          "Returns the current status, vendor, material and price breakdown for an order owned by the user. Status is synced from the print shop hourly; tracking numbers are usually not available.",
         inputSchema: { orderId: z.string().uuid() },
       },
       async ({ orderId }, extra) => {
@@ -1887,9 +1888,11 @@ function scopeOrInternal(err: unknown, context: string) {
     });
   }
   logError(`mcp.tool.${context}`, err);
+  // Fixed text (see SEC-6 above), but specific enough to act on: directory
+  // review rejects a bare "Internal error".
   return errorResult({
     code: "internal",
-    message: "Internal error",
+    message: `Materialize hit an unexpected error running ${context}. Try again in a moment; if it keeps failing, contact ${SUPPORT_EMAIL}.`,
     retryable: true,
   });
 }

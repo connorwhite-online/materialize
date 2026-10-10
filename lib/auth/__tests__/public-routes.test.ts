@@ -71,6 +71,8 @@ describe("PUBLIC_ROUTES — genuinely public surfaces", () => {
     "/privacy",
     "/terms",
     "/support",
+    // Documentation URL on the Claude directory listing.
+    "/support/claude",
   ])("%s stays reachable without a session", (path) => {
     expect(at(path)).toBe(true);
   });

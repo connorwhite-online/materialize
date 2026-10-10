@@ -55,6 +55,10 @@ export default function SupportPage() {
           To disconnect an assistant, revoke it in your profile settings
           under Agents, or remove it in the assistant&apos;s own settings.
         </li>
+        <li>
+          Using Claude? See <Link href="/support/claude">Materialize in
+          Claude</Link> for how to connect and what it can do.
+        </li>
       </ul>
 
       <h2>Account and privacy</h2>

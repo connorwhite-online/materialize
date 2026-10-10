@@ -33,7 +33,7 @@ export const PUBLIC_ROUTES = [
   // that pattern ever narrows.
   "/privacy",
   "/terms",
-  "/support",
+  "/support(.*)",
   // Mock-only payment / checkout chrome previews (3D fee card,
   // vendor checkout sheet). Each page notFound()s when CraftCloud
   // mock mode is off — listed here so that gate can run instead of
