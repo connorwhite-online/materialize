@@ -20,6 +20,7 @@ import {
   putObject,
 } from "@/lib/storage";
 import { fetchModelBytes, ModelFetchError } from "./fetch-model";
+import { measureGeometry } from "./geometry";
 import { notUnsavedStudioDraft } from "@/lib/studio-drafts";
 import { isCurrentAsset } from "@/lib/files/current-version";
 import { uploadModel } from "@/lib/craftcloud/client";
@@ -373,6 +374,15 @@ export async function importModelFromUrlForUser(
     throw err;
   }
 
+  // A link to a page about the model (a product page, a viewer, our own
+  // site) downloads HTML. Say that, rather than asking for a filename,
+  // which would only get the page stored as a broken "model".
+  if (looksLikeHtml(fetched.bytes)) {
+    return {
+      error: `That link returned a web page, not a 3D model file. Use a direct link to the ${SUPPORTED_FORMATS.join(", ")} file itself.`,
+    };
+  }
+
   const originalFilename = (input.filename ?? fetched.urlFilename ?? "").trim();
   const format = deriveFormat(originalFilename);
   if (!format) {
@@ -658,6 +668,7 @@ async function uploadAssetToCraftCloud(params: {
     if (!res.ok) throw new Error(`R2 download failed: ${res.status}`);
     const buffer = new Uint8Array(await res.arrayBuffer());
     const model = await uploadModel(buffer, params.originalFilename, params.unit);
+    const format = params.originalFilename.split(".").pop()?.toLowerCase() ?? "";
 
     await db
       .update(fileAssets)
@@ -669,12 +680,17 @@ async function uploadAssetToCraftCloud(params: {
               volume: model.geometry.volume,
               triangleCount: model.geometry.triangleCount,
             }
-          : undefined,
+          : (measureGeometry(buffer, format, params.unit) ?? undefined),
       })
       .where(eq(fileAssets.id, params.assetId));
   } catch (error) {
     logError("uploadAssetToCraftCloud", error);
   }
+}
+
+function looksLikeHtml(bytes: Uint8Array): boolean {
+  const head = new TextDecoder().decode(bytes.subarray(0, 512)).trimStart().toLowerCase();
+  return head.startsWith("<!doctype html") || head.startsWith("<html");
 }
 
 function deriveListingName(filename: string): string {

@@ -15,6 +15,7 @@ import {
 import { getVendorMinimums } from "@/lib/craftcloud/vendor-minimums";
 import { pickMinimumProbes } from "@/components/print/material-picker/vendor-minimums";
 import { logError } from "@/lib/logger";
+import { ensureGeometry } from "./geometry";
 import {
   arrivalWindow,
   byBuyerTotal,
@@ -336,7 +337,7 @@ export async function getQuoteForUser(
     lead ? [lead.quoteId, ...(lead.alternative ? [lead.alternative.quoteId] : [])] : [],
     input.maxOptions
   );
-  const geometry = assetRow.asset.geometryData ?? undefined;
+  const geometry = (await ensureGeometry(assetRow.asset)) ?? undefined;
   return {
     quotes: options,
     lead,

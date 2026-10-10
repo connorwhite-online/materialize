@@ -78,6 +78,7 @@ import { clerkClient } from "@clerk/nextjs/server";
 import { primaryEmail } from "@/lib/clerk-email";
 import { shippingPhoneSchema } from "@/lib/validations/address";
 import { TOOL_ANNOTATIONS } from "@/lib/mcp/tool-annotations";
+import { resolveCatalogImage } from "@/components/print/material-picker/catalog-image";
 import { SUPPORT_EMAIL } from "@/lib/legal";
 
 /**
@@ -435,7 +436,7 @@ const handler = createMcpHandler(
                 id: m.id,
                 name: m.name,
                 group: g.name,
-                featuredImage: m.featuredImage ?? null,
+                featuredImage: m.featuredImage ? resolveCatalogImage(m.featuredImage) : null,
                 tags: (m.tags ?? []).map((t) => t.name),
                 finishes: (m.finishGroups ?? []).map((fg) => ({
                   id: fg.id,
@@ -506,9 +507,11 @@ const handler = createMcpHandler(
             name: material.name,
             slug: material.slug,
             group: groupName,
-            description: material.description ?? null,
-            descriptionShort: material.descriptionShort ?? null,
-            featuredImage: material.featuredImage ?? null,
+            description: material.description?.trim() || null,
+            descriptionShort: material.descriptionShort?.trim() || null,
+            featuredImage: material.featuredImage
+              ? resolveCatalogImage(material.featuredImage)
+              : null,
             properties: {
               tensileStrengthMpaMin: material.tensileStrengthMin ?? null,
               tensileStrengthMpaMax: material.tensileStrengthMax ?? null,
@@ -1610,6 +1613,13 @@ const handler = createMcpHandler(
             quantity,
           });
           if ("error" in result) {
+            // A bad materialId never succeeds on retry; say so, or agents loop.
+            if (result.error.startsWith("Unknown materialId")) {
+              return errorResult({
+                code: "invalid_material",
+                message: `${result.error}. Use a materialId from materialize_list_materials or materialize_recommend_material.`,
+              });
+            }
             return errorResult({
               code: "quote_failed",
               message: result.error,
