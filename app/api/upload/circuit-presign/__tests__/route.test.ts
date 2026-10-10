@@ -146,6 +146,10 @@ describe("POST /api/upload/circuit-presign", () => {
     expect(res.status).toBe(200);
     // KiCad source files should be signed as octet-stream
     expect(generateUploadUrlMock.mock.calls[0][1]).toBe("application/octet-stream");
+    // Declared size is signed so the 20MB cap binds the actual PUT.
+    expect(generateUploadUrlMock.mock.calls[0][3]).toEqual({
+      contentLength: 50_000,
+    });
   });
 
   it("200 for .kicad_pcb extension", async () => {

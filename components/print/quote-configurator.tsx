@@ -21,7 +21,7 @@ import {
   cheapestShippingForVendor,
   type ShippingOption,
 } from "./shipping-options";
-import { pollQuotes } from "./poll-quotes";
+import { pollQuotes, quoteSnapshotKey } from "./poll-quotes";
 import { runAnonCheckout } from "./run-anon-checkout";
 import {
   FeePaymentSheet,
@@ -41,7 +41,7 @@ import { useCart } from "./cart-context";
 import { useUser } from "@clerk/nextjs";
 import { checkGeometry } from "@/lib/geometry-checks";
 import { REGIONS, DEFAULT_REGION } from "@/lib/craftcloud/regions";
-import { MaterialPreview } from "@/components/viewer/material-preview";
+import { MaterialPreviewLazy } from "./material-preview-lazy";
 import type { PreviewView } from "@/components/viewer/preview-camera";
 import { Label } from "@/components/ui/label";
 import { useVendorMinimums } from "./use-vendor-minimums";
@@ -181,6 +181,13 @@ type LoadingPhase = "uploading" | "quoting" | "done" | "timeout";
 // user's cursor.
 const RERANK_QUANTITY_DELTA = 5;
 
+// How long the quantity field must sit still before it starts a new
+// CraftCloud price request. Each request is a real upstream quote job
+// plus a 1.5s polling loop, so one per keystroke was pure waste.
+const QUANTITY_DEBOUNCE_MS = 400;
+const QUANTITY_PENDING_MESSAGE =
+  "Updating prices for the new quantity. Please try again in a moment.";
+
 export function QuoteConfigurator({
   fileAssetId,
   draftMode,
@@ -254,7 +261,29 @@ export function QuoteConfigurator({
   const selectedShippingRef = useRef<ShippingOption | null>(null);
   selectedQuoteRef.current = selectedQuote;
   selectedShippingRef.current = selectedShipping;
+  // `quantityInput` is what the field shows and updates per keystroke.
+  // `quantity` is the debounced value: the one quotes are requested
+  // for, the one the displayed prices belong to, and the one every
+  // add-to-cart / checkout path submits. Keeping a single name for the
+  // quoted quantity is deliberate — nothing downstream can pair a
+  // quote with a quantity it wasn't priced at. Typing "12" used to
+  // start a CraftCloud price request for "1" and then another for
+  // "12"; now only the settled value is quoted.
+  const [quantityInput, setQuantityInput] = useState(1);
   const [quantity, setQuantity] = useState(1);
+  useEffect(() => {
+    if (quantityInput === quantity) return;
+    const handle = setTimeout(
+      () => setQuantity(quantityInput),
+      QUANTITY_DEBOUNCE_MS
+    );
+    return () => clearTimeout(handle);
+  }, [quantityInput, quantity]);
+  // True in the debounce window: the field shows a quantity the
+  // current quotes were NOT priced for. Checkout/add-to-cart refuse to
+  // run in that window rather than submit the old quantity the user
+  // just typed over.
+  const quantityPending = quantityInput !== quantity;
   // Quantity-at-last-rerank anchor for the picker's sort. Drifts
   // behind the live quantity until the user has moved by more than
   // RERANK_QUANTITY_DELTA, then snaps to the new quantity and the
@@ -694,6 +723,10 @@ export function QuoteConfigurator({
 
   const handleAddToCart = useCallback(async () => {
     if (!selectedQuote || !selectedShipping || !cart) return;
+    if (quantityPending) {
+      setCheckoutError(QUANTITY_PENDING_MESSAGE);
+      return;
+    }
     if (!priceId) {
       setCheckoutError("Quotes are still loading. Please try again in a moment.");
       return;
@@ -749,7 +782,7 @@ export function QuoteConfigurator({
     } finally {
       setIsAddingToCart(false);
     }
-  }, [selectedQuote, selectedShipping, priceId, fileAssetId, draftMode, cart, quantity, region.code, filename, onAddedToCart, dismissCheckoutSheet]);
+  }, [selectedQuote, selectedShipping, priceId, fileAssetId, draftMode, cart, quantity, quantityPending, region.code, filename, onAddedToCart, dismissCheckoutSheet]);
 
   // Active material scope for the CraftCloud price request. Starts
   // as the preselectMaterialId (from /materials/[slug] → Print with
@@ -826,11 +859,20 @@ export function QuoteConfigurator({
       // invariant (allComplete + stable count). Each snapshot
       // drops straight into React state.
       let latestQuoteCount = 0;
+      // The loop keeps polling for STABLE_POLLS_REQUIRED snapshots
+      // after the set stops growing, and each one is a fresh array —
+      // handing those to setState re-rendered the whole picker every
+      // 1.5s for identical data. Skip a snapshot whose quote ids,
+      // shipping ids and completion flag match the last one applied.
+      let lastSnapshotKey: string | null = null;
       const reason = await pollQuotes({
         priceId: newPriceId,
         signal,
         onSnapshot: (snapshot) => {
           latestQuoteCount = snapshot.quotes?.length ?? 0;
+          const key = quoteSnapshotKey(snapshot);
+          if (key === lastSnapshotKey) return;
+          lastSnapshotKey = key;
           setQuotes(snapshot.quotes ?? []);
           setShipping(snapshot.shipping ?? []);
         },
@@ -971,6 +1013,10 @@ export function QuoteConfigurator({
 
   const handleCheckout = async () => {
     if (!selectedQuote || !selectedShipping) return;
+    if (quantityPending) {
+      setCheckoutError(QUANTITY_PENDING_MESSAGE);
+      return;
+    }
     // Synchronous reentry guard — a double-tap (mobile especially)
     // fires two overlapping invocations before the isCheckingOut
     // state update from the first is even visible to React, so the
@@ -1088,6 +1134,13 @@ export function QuoteConfigurator({
     // guard, the anon chain below would fire the entire R2 →
     // draft → order → Stripe pipeline twice in parallel.
     if (checkoutInFlightRef.current) return;
+    // The quantity field moved since these quotes were fetched; the
+    // re-quote will clear the selection in a moment. Don't place an
+    // order for the old quantity.
+    if (quantityPending) {
+      setCheckoutError(QUANTITY_PENDING_MESSAGE);
+      return;
+    }
     checkoutInFlightRef.current = true;
 
     setStep("processing");
@@ -1404,7 +1457,7 @@ export function QuoteConfigurator({
           <div className="grid gap-6 lg:grid-cols-[3fr_2fr] lg:items-start">
             {previewModelUrl && previewableFormat && (
               <div className="aspect-[4/3] w-full overflow-hidden rounded-2xl border border-border bg-gradient-to-br from-muted/40 to-muted/10">
-                <MaterialPreview
+                <MaterialPreviewLazy
                   modelUrl={previewModelUrl}
                   format={format as "stl" | "obj" | "3mf"}
                   materialColor={previewColor}
@@ -1456,7 +1509,7 @@ export function QuoteConfigurator({
                     type="number"
                     min={1}
                     max={100}
-                    value={quantity}
+                    value={quantityInput}
                     aria-describedby="quantity-range-hint"
                     onChange={(e) => {
                       // Clamp to [1, 100] and reject NaN — empty/
@@ -1477,7 +1530,7 @@ export function QuoteConfigurator({
                           `Quantity must be between 1 and 100. Adjusted to ${clamped}.`
                         );
                       }
-                      setQuantity(clamped);
+                      setQuantityInput(clamped);
                     }}
                     // field-text keeps 16px on phones (iOS auto-zooms below
                     // that); text-sm on md+ to match the rest of the row.

@@ -8,9 +8,15 @@ import "server-only";
  *   - /material-catalog  → full material + finish + color structure
  *   - /provider          → vendor slugs mapped to display names
  *
- * Neither requires auth. Both are large but stable; we fetch through
- * Next.js's data cache with a 24h revalidation so the hit only lands
- * once a day across all requests.
+ * Neither requires auth. Both are large but stable, so each warm
+ * server instance memoizes the parsed result for 24h (module scope,
+ * below) and concurrent cold callers share one in-flight fetch.
+ *
+ * Note the fetch also passes `next: { revalidate }`, but that only
+ * helps the provider list: the material catalog payload is ~3.2MB and
+ * Next's data cache refuses items over 2MB, so the catalog is NOT
+ * shared across instances or deploys — every cold instance pays one
+ * full fetch. The module memo is the only cache that actually holds it.
  */
 
 const CUSTOMER_API_BASE = "https://customer-api.craftcloud3d.com";
@@ -174,6 +180,12 @@ let cachedCatalog: CraftCloudCatalog | null = null;
 let cachedCatalogFetchedAt = 0;
 let cachedProviders: Map<string, Provider> | null = null;
 let cachedProvidersFetchedAt = 0;
+// In-flight loads. A cold instance takes a burst of concurrent quote
+// polls; without these each one would download + parse the full
+// multi-MB catalog in parallel. Cleared when the load settles (either
+// way) so a failure is retried by the next caller, not cached.
+let catalogInFlight: Promise<CraftCloudCatalog> | null = null;
+let providersInFlight: Promise<Map<string, Provider>> | null = null;
 
 /**
  * Whether a module-scope memo entry is still within the TTL window.
@@ -199,23 +211,37 @@ function isFresh(fetchedAt: number): boolean {
 // throws so callers (and the strict quote path) see the real outage.
 const FETCH_RETRY_STATUSES = new Set([403, 429, 500, 502, 503, 504]);
 const FETCH_MAX_ATTEMPTS = 3;
+export const CATALOG_FETCH_TIMEOUT_MS = 15_000;
 
 async function fetchCatalogResource(
   path: string,
   label: string
 ): Promise<Response> {
-  let lastStatus = 0;
+  let lastStatus: number | string = 0;
   for (let attempt = 1; attempt <= FETCH_MAX_ATTEMPTS; attempt++) {
-    const res = await fetch(`${CUSTOMER_API_BASE}${path}`, {
-      // Next.js data cache — shared across requests, revalidates daily.
-      next: { revalidate: CATALOG_TTL_SECONDS },
-      headers: {
-        // Without a reasonable UA the edge sometimes serves a challenge.
-        "User-Agent":
-          "Mozilla/5.0 (compatible; MaterializeServer/1.0; +https://materialize.cc)",
-        Accept: "application/json",
-      },
-    });
+    let res: Response;
+    try {
+      res = await fetch(`${CUSTOMER_API_BASE}${path}`, {
+        // Next.js data cache, revalidating daily. Effective for the
+        // provider list only — see the header comment on the 2MB limit.
+        next: { revalidate: CATALOG_TTL_SECONDS },
+        headers: {
+          // Without a reasonable UA the edge sometimes serves a challenge.
+          "User-Agent":
+            "Mozilla/5.0 (compatible; MaterializeServer/1.0; +https://materialize.cc)",
+          Accept: "application/json",
+        },
+        // Per-attempt cap so a hung edge can't hold every quote poll
+        // on a cold instance indefinitely. A timeout is retried like
+        // a transient status.
+        signal: AbortSignal.timeout(CATALOG_FETCH_TIMEOUT_MS),
+      });
+    } catch (err) {
+      if ((err as { name?: string } | null)?.name !== "TimeoutError") throw err;
+      lastStatus = "timeout";
+      if (attempt < FETCH_MAX_ATTEMPTS) continue;
+      break;
+    }
     if (res.ok) return res;
     lastStatus = res.status;
     if (!FETCH_RETRY_STATUSES.has(res.status)) break;
@@ -249,7 +275,15 @@ const PRINTABLE_TECHNOLOGIES = new Set(["3d_printing"]);
 
 export async function getCraftCloudCatalog(): Promise<CraftCloudCatalog> {
   if (cachedCatalog && isFresh(cachedCatalogFetchedAt)) return cachedCatalog;
+  if (!catalogInFlight) {
+    catalogInFlight = loadCatalog().finally(() => {
+      catalogInFlight = null;
+    });
+  }
+  return catalogInFlight;
+}
 
+async function loadCatalog(): Promise<CraftCloudCatalog> {
   const json = await fetchCatalogJson();
   const rawGroups = json.materialStructure ?? [];
 
@@ -307,10 +341,20 @@ export async function getCraftCloudCatalog(): Promise<CraftCloudCatalog> {
 
 export async function getProviderIndex(): Promise<Map<string, Provider>> {
   if (cachedProviders && isFresh(cachedProvidersFetchedAt)) return cachedProviders;
+  if (!providersInFlight) {
+    providersInFlight = loadProviders().finally(() => {
+      providersInFlight = null;
+    });
+  }
+  return providersInFlight;
+}
+
+async function loadProviders(): Promise<Map<string, Provider>> {
   const list = await fetchProvidersJson();
-  cachedProviders = new Map(list.map((p) => [p.vendorId, p]));
+  const providers = new Map(list.map((p) => [p.vendorId, p]));
+  cachedProviders = providers;
   cachedProvidersFetchedAt = Date.now();
-  return cachedProviders;
+  return providers;
 }
 
 export async function findMaterialConfig(configId: string) {

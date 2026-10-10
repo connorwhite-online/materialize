@@ -36,8 +36,17 @@ vi.mock("@/components/viewer/material-preview", () => ({
   ),
 }));
 
+// Every `quotes` array the picker is rendered with, so a test can tell
+// whether a poll snapshot actually replaced quote state.
+const pickerQuoteArrays = vi.hoisted(() => [] as unknown[][]);
+
 vi.mock("../material-picker", () => ({
-  MaterialPicker: (props: { onSelectQuote: (q: EnrichedQuote) => void }) => (
+  MaterialPicker: (props: {
+    quotes: unknown[];
+    onSelectQuote: (q: EnrichedQuote) => void;
+  }) => {
+    pickerQuoteArrays.push(props.quotes);
+    return (
     <button
       onClick={() =>
         props.onSelectQuote({
@@ -52,7 +61,8 @@ vi.mock("../material-picker", () => ({
     >
       select quote
     </button>
-  ),
+    );
+  },
 }));
 
 vi.mock("../price-display", () => ({
@@ -684,5 +694,121 @@ describe("QuoteConfigurator wiring (CON-38)", () => {
 
     const preview = await screen.findByTestId("material-preview");
     expect(preview.getAttribute("data-initial-view")).toBe("");
+  });
+
+  describe("quantity debounce", () => {
+    function quoteStartFetch() {
+      const fetchMock = vi.fn<
+        (url: string, init?: RequestInit) => Promise<Response>
+      >(
+        async () =>
+          ({
+            ok: true,
+            status: 200,
+            json: async () => ({ priceId: "price-1" }),
+          }) as unknown as Response
+      );
+      vi.stubGlobal("fetch", fetchMock);
+      const startBodies = () =>
+        fetchMock.mock.calls
+          .filter(([url]) => String(url) === "/api/craftcloud/quotes")
+          .map(([, init]) => JSON.parse(String(init?.body)));
+      return { fetchMock, startBodies };
+    }
+
+    it("starts one price request for the settled quantity, not one per keystroke", async () => {
+      const { startBodies } = quoteStartFetch();
+      render(<QuoteConfigurator {...draftProps()} />);
+      await screen.findByText("select quote");
+      expect(startBodies()).toHaveLength(1);
+
+      const input = screen.getByLabelText("Quantity") as HTMLInputElement;
+      fireEvent.change(input, { target: { value: "1" } });
+      fireEvent.change(input, { target: { value: "12" } });
+      // The field itself updates instantly.
+      expect(input.value).toBe("12");
+      // Still inside the debounce window — no new request yet.
+      expect(startBodies()).toHaveLength(1);
+
+      await waitFor(() => expect(startBodies()).toHaveLength(2));
+      expect(startBodies()[1].quantity).toBe(12);
+    });
+
+    it("refuses to check out while the field holds an unquoted quantity", async () => {
+      quoteStartFetch();
+      render(<QuoteConfigurator {...draftProps()} />);
+
+      fireEvent.click(await screen.findByText("select quote"));
+      await screen.findByTestId("sheet-shipping");
+
+      fireEvent.change(screen.getByLabelText("Quantity"), {
+        target: { value: "7" },
+      });
+      fireEvent.click(screen.getByText("checkout"));
+
+      // Draft-mode checkout would advance to the address step; the
+      // pending-quantity guard must stop it.
+      expect(screen.queryByText("submit address")).toBeNull();
+    });
+
+  });
+});
+
+describe("QuoteConfigurator poll snapshots", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    installLocalStorage();
+    pickerQuoteArrays.length = 0;
+    URL.createObjectURL = vi.fn(() => "blob:mock");
+    URL.revokeObjectURL = vi.fn();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          ({
+            ok: true,
+            status: 200,
+            json: async () => ({ priceId: "price-1" }),
+          }) as unknown as Response
+      )
+    );
+  });
+
+  it("does not replace quote state for a repeat (unchanged) snapshot", async () => {
+    const first: QuoteSnapshot = {
+      quotes: [STABLE_QUOTE],
+      shipping: [],
+      allComplete: true,
+    };
+    pollQuotesMock.mockImplementation(
+      async (opts: { onSnapshot: (s: QuoteSnapshot) => void }) => {
+        opts.onSnapshot(first);
+        // Fresh arrays, identical content — what the stability window
+        // produces every 1.5s.
+        opts.onSnapshot({ ...first, quotes: [{ ...STABLE_QUOTE }] });
+        opts.onSnapshot({ ...first, quotes: [{ ...STABLE_QUOTE }] });
+        return "complete";
+      }
+    );
+
+    const file = new File(["solid"], "part.stl", { type: "model/stl" });
+    render(
+      <QuoteConfigurator
+        draftMode={{ modelId: "model-123", file }}
+        filename="part.stl"
+        format="step"
+        hasCachedModel={false}
+        geometryData={null}
+      />
+    );
+    await screen.findByText("select quote");
+    await waitFor(() =>
+      expect(pickerQuoteArrays.some((q) => q.length === 1)).toBe(true)
+    );
+
+    // Only the first snapshot's array ever reached the picker.
+    const nonEmpty = new Set(pickerQuoteArrays.filter((q) => q.length > 0));
+    expect(nonEmpty.size).toBe(1);
+    expect([...nonEmpty][0]).toBe(first.quotes);
   });
 });

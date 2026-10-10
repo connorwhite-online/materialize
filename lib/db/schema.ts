@@ -875,6 +875,9 @@ export const printOrders = pgTable("print_orders", {
 }, (table) => [
   index("print_orders_user_id_idx").on(table.userId),
   index("print_orders_organization_id_idx").on(table.organizationId),
+  // FK lookups (entitlement/printed checks, file activity, cascade
+  // deletes from fileAssets) — 0070.
+  index("print_orders_file_asset_id_idx").on(table.fileAssetId),
   // Serves the per-minute place-auto-approved-orders cron
   // (status='auto_approved' AND auto_approved_until<=now). The leftmost
   // (status) prefix also covers the cleanup-stale-orders cron
@@ -918,6 +921,7 @@ export const printOrderItems = pgTable("print_order_items", {
     .defaultNow(),
 }, (table) => [
   index("print_order_items_order_id_idx").on(table.printOrderId),
+  index("print_order_items_file_asset_id_idx").on(table.fileAssetId),
 ]);
 
 // Cart staging — pre-order items accumulated via "Add to Cart".

@@ -88,6 +88,38 @@ const RETRY_BASE_MS = 200;
  */
 const RETRYABLE_STEPS: ReadonlySet<UploadStep> = new Set(["initiate", "transfer"]);
 
+/**
+ * Per-attempt timeout for each leg. Without one a hung CraftCloud (or
+ * S3) connection holds the upload route until the platform kills the
+ * function at `maxDuration`. The transfer carries up to MAX_FILE_SIZE
+ * of mesh, and confirm is where CraftCloud parses that mesh before
+ * answering, so both get far more room than the tiny initiate call.
+ * A timeout surfaces like any other network failure — a step-tagged
+ * CraftCloudUploadError with status 0, retried on the retryable legs.
+ */
+export const LEG_TIMEOUT_MS: Readonly<Record<UploadStep, number>> = {
+  initiate: 20_000,
+  transfer: 120_000,
+  confirm: 90_000,
+};
+
+/**
+ * One signal that fires on the caller's abort OR the leg timeout.
+ * `AbortSignal.any` is missing from older Safari (< 17.4) and this
+ * module also runs in the browser, so fall back to the timeout alone
+ * when there's no caller signal to merge, or to the caller's signal
+ * when `any` is unavailable.
+ */
+function legSignal(step: UploadStep, callerSignal?: AbortSignal | null) {
+  if (typeof AbortSignal.timeout !== "function") {
+    return callerSignal ?? undefined;
+  }
+  const timeout = AbortSignal.timeout(LEG_TIMEOUT_MS[step]);
+  if (!callerSignal) return timeout;
+  if (typeof AbortSignal.any !== "function") return callerSignal;
+  return AbortSignal.any([callerSignal, timeout]);
+}
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -118,7 +150,12 @@ async function fetchLeg(
 
   for (let attempt = 0; attempt < attempts; attempt++) {
     try {
-      const res = await fetch(input, init);
+      // Fresh timeout per attempt so a slow first try doesn't starve
+      // the retries.
+      const res = await fetch(input, {
+        ...init,
+        signal: legSignal(step, init?.signal),
+      });
       if (res.ok || !TRANSIENT_STATUSES.has(res.status)) return res;
       // Transient status on a retryable leg: fall through to backoff.
       // The body is consumed here so the caller isn't handed a used
@@ -130,7 +167,12 @@ async function fetchLeg(
       );
     } catch (cause) {
       if ((cause as { name?: string })?.name === "AbortError") throw cause;
-      const detail = cause instanceof Error ? cause.message : String(cause);
+      const detail =
+        (cause as { name?: string })?.name === "TimeoutError"
+          ? `timed out after ${LEG_TIMEOUT_MS[step]}ms`
+          : cause instanceof Error
+            ? cause.message
+            : String(cause);
       lastError = new CraftCloudUploadError(
         step,
         NETWORK_FAILURE_STATUS,

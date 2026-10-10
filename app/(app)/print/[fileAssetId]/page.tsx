@@ -74,11 +74,26 @@ export default async function PrintConfigPage(props: {
   // Resolve the preselect material: explicit ?material= wins, then a
   // directly-stored CraftCloud UUID (most reliable — no fuzzy lookup),
   // then fall back to the fuzzy editorial-slug resolver.
+  //
+  // The resolver (catalog fetch on a cold instance) and the preview
+  // view read (DB) are independent, so they run concurrently. The
+  // resolver is only invoked when the cheaper sources came up empty.
+  //
+  // previewView is loaded separately from the asset row on purpose —
+  // see `loadPreviewView`. Null when the listing never set a snapshot
+  // (automatic head-on capture) and also when the read fails, so a
+  // schema that lags a deploy costs the camera angle rather than the
+  // quote page. Draft / unlinked assets have no listing row.
+  const directPreselectMaterialId =
+    preselectMaterialId ?? asset.recommendedCcMaterialId ?? null;
+  const [resolvedRecommendedMaterialId, previewView] = await Promise.all([
+    directPreselectMaterialId
+      ? null
+      : resolveRecommendedCraftCloudMaterialId(asset.recommendedMaterialId),
+    asset.listingFileId ? loadPreviewView(asset.listingFileId) : null,
+  ]);
   const resolvedPreselectMaterialId =
-    preselectMaterialId ??
-    asset.recommendedCcMaterialId ??
-    (await resolveRecommendedCraftCloudMaterialId(asset.recommendedMaterialId)) ??
-    undefined;
+    directPreselectMaterialId ?? resolvedRecommendedMaterialId ?? undefined;
 
   // Finish group preselect: explicit ?finish= wins, then the DB value.
   // Only used when a material preselect is also resolved — a finish group
@@ -87,15 +102,6 @@ export default async function PrintConfigPage(props: {
     resolvedPreselectMaterialId
       ? (preselectFinishGroupId ?? asset.recommendedCcFinishGroupId ?? undefined)
       : undefined;
-
-  // Loaded separately from the asset row on purpose — see
-  // `loadPreviewView`. Null when the listing never set a snapshot
-  // (automatic head-on capture) and also when the read fails, so a
-  // schema that lags a deploy costs the camera angle rather than the
-  // quote page. Draft / unlinked assets have no listing row.
-  const previewView = asset.listingFileId
-    ? await loadPreviewView(asset.listingFileId)
-    : null;
 
   const configureHeader = (
     <div>

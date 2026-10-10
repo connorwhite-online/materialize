@@ -7,6 +7,7 @@ import { createPriceRequest } from "@/lib/craftcloud/client";
 import { getCraftCloudCatalog } from "@/lib/craftcloud/catalog";
 import { quotesRequestSchema } from "@/lib/validations/print";
 import { logError } from "@/lib/logger";
+import { invalidJsonResponse, readJsonObject } from "@/lib/http/json-body";
 
 /**
  * Start a CraftCloud price request and return its id immediately.
@@ -19,7 +20,8 @@ export async function POST(request: Request) {
   try {
     const { userId } = await auth();
 
-    const body = await request.json();
+    const body = await readJsonObject(request);
+    if (!body) return invalidJsonResponse();
     const parsed = quotesRequestSchema.safeParse(body);
     if (!parsed.success) {
       return Response.json(

@@ -4,6 +4,7 @@ import { fileAssets, files } from "@/lib/db/schema";
 import { isPublicListing } from "@/lib/files/public-listing";
 import { eq } from "drizzle-orm";
 import { logError } from "@/lib/logger";
+import { invalidJsonResponse, readJsonObject } from "@/lib/http/json-body";
 
 /**
  * Resolves a same-origin URL for the asset's bytes plus its CraftCloud
@@ -26,7 +27,9 @@ export async function POST(request: Request) {
   try {
     const { userId } = await auth();
 
-    const body = (await request.json()) as {
+    const json = await readJsonObject(request);
+    if (!json) return invalidJsonResponse();
+    const body = json as {
       fileAssetId?: string;
       storageKey?: string;
     };

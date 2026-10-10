@@ -64,8 +64,10 @@ vi.mock("@/lib/db", () => ({
 }));
 
 const getObjectBytesMock = vi.fn();
+const objectExistsMock = vi.fn();
 vi.mock("@/lib/storage", () => ({
   getObjectBytes: (...args: unknown[]) => getObjectBytesMock(...args),
+  objectExists: (...args: unknown[]) => objectExistsMock(...args),
 }));
 
 const consumeAnonUploadGrantMock = vi.fn();
@@ -93,6 +95,7 @@ vi.mock("@/lib/craftcloud/model-upload", async () => {
 
 import { POST } from "../route";
 import { CraftCloudUploadError } from "@/lib/craftcloud/model-upload";
+import { MAX_FILE_SIZE } from "@/lib/validations/file";
 
 const MODEL = {
   modelId: "model-123",
@@ -130,6 +133,7 @@ describe("POST /api/craftcloud/upload-model", () => {
     assetRow = publishedAsset();
     updateShouldThrow = false;
     getObjectBytesMock.mockResolvedValue(new Uint8Array([1, 2, 3]));
+    objectExistsMock.mockResolvedValue({ exists: true, sizeBytes: 3 });
     uploadModelToCraftCloudMock.mockResolvedValue(MODEL);
     consumeAnonUploadGrantMock.mockResolvedValue({
       originalFilename: "part.stl",
@@ -213,6 +217,96 @@ describe("POST /api/craftcloud/upload-model", () => {
 
     expect(res.status).toBe(500);
     expect(await res.json()).toEqual({ error: "Failed to upload model" });
+  });
+
+  describe("cached modelId", () => {
+    it("returns the cached modelId + stored geometry without touching R2 or CraftCloud", async () => {
+      assetRow = publishedAsset({
+        cachedModelId: "cached-model",
+        geometryData: { dimensions: { x: 1, y: 2, z: 3 }, volume: 6 },
+      });
+
+      const res = await POST(req());
+
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({
+        modelId: "cached-model",
+        dimensions: { x: 1, y: 2, z: 3 },
+        volume: 6,
+        isParsing: false,
+      });
+      expect(objectExistsMock).not.toHaveBeenCalled();
+      expect(getObjectBytesMock).not.toHaveBeenCalled();
+      expect(uploadModelToCraftCloudMock).not.toHaveBeenCalled();
+      expect(updateSetSpy).not.toHaveBeenCalled();
+    });
+
+    it("still applies the access gate before revealing a cached modelId", async () => {
+      mockUserId = "u2";
+      assetRow = publishedAsset({
+        cachedModelId: "cached-model",
+        fileStatus: "draft",
+      });
+      expect((await POST(req())).status).toBe(403);
+    });
+
+    it("returns null geometry when none was stored", async () => {
+      assetRow = publishedAsset({ cachedModelId: "cached-model", geometryData: null });
+      const body = await (await POST(req())).json();
+      expect(body).toMatchObject({ modelId: "cached-model", dimensions: null, volume: null });
+    });
+  });
+
+  describe("size guard", () => {
+    it("413s before downloading an object above MAX_FILE_SIZE", async () => {
+      objectExistsMock.mockResolvedValue({
+        exists: true,
+        sizeBytes: MAX_FILE_SIZE + 1,
+      });
+      const res = await POST(req());
+      expect(res.status).toBe(413);
+      expect(getObjectBytesMock).not.toHaveBeenCalled();
+      expect(uploadModelToCraftCloudMock).not.toHaveBeenCalled();
+    });
+
+    it("applies to the anon staged object too", async () => {
+      objectExistsMock.mockResolvedValue({
+        exists: true,
+        sizeBytes: MAX_FILE_SIZE + 1,
+      });
+      const res = await POST(
+        req({ storageKey: "anon-uploads/abc123/part.stl" })
+      );
+      expect(res.status).toBe(413);
+      expect(getObjectBytesMock).not.toHaveBeenCalled();
+    });
+
+    it("404s when the object is missing from R2", async () => {
+      objectExistsMock.mockResolvedValue({ exists: false });
+      const res = await POST(req());
+      expect(res.status).toBe(404);
+      expect(getObjectBytesMock).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("input validation", () => {
+    it("400s an unknown fileUnit", async () => {
+      const res = await POST(
+        req({ storageKey: "anon-uploads/abc123/part.stl", fileUnit: "ft" })
+      );
+      expect(res.status).toBe(400);
+      expect(consumeAnonUploadGrantMock).not.toHaveBeenCalled();
+    });
+
+    it("400s (not 500) a malformed JSON body", async () => {
+      const res = await POST(
+        new Request("http://localhost/api/craftcloud/upload-model", {
+          method: "POST",
+          body: "{nope",
+        })
+      );
+      expect(res.status).toBe(400);
+    });
   });
 
   it("400s without a fileAssetId or storageKey", async () => {
