@@ -215,7 +215,9 @@ export async function getQuoteForUser(
   for (const q of lastSnapshot.quotes ?? []) {
     const entry = catalog.configById.get(q.materialConfigId);
     if (!entry) {
-      dropped += 1;
+      // CNC and other non-printing configs are left out on purpose; only
+      // a config we've never heard of means the catalog is behind.
+      if (!catalog.excludedConfigIds?.has(q.materialConfigId)) dropped += 1;
       continue;
     }
     const provider = providers.get(q.vendorId);
@@ -249,7 +251,7 @@ export async function getQuoteForUser(
   const warnings: string[] = [];
   if (dropped > 0) {
     warnings.push(
-      `${dropped} quote(s) referenced material configs not in our catalog and were dropped`
+      `${dropped} quote(s) were for materials CraftCloud added since Materialize's catalog last refreshed (it refreshes daily), so they're not shown`
     );
   }
   if (Date.now() - startedAt >= POLL_DEADLINE_MS) {
