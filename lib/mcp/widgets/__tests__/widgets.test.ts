@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { mintWidgetModelToken, verifyWidgetModelToken } from "../model-token";
 import { quoteWidgetHtml } from "../quote-widget";
 import { materialsWidgetHtml } from "../materials-widget";
+import { inspectorWidgetHtml } from "../inspector-widget";
 import { toCm3 } from "@/lib/mcp/internal/quotes";
 
 describe("widget model token", () => {
@@ -24,6 +25,7 @@ describe("widget templates", () => {
   it.each([
     ["quote", quoteWidgetHtml],
     ["materials", materialsWidgetHtml],
+    ["inspector", inspectorWidgetHtml],
   ])("%s is a complete document with no unfilled template holes", (_n, html) => {
     const doc = html();
     expect(doc.startsWith("<!doctype html>")).toBe(true);
@@ -36,6 +38,7 @@ describe("widget templates", () => {
   it.each([
     ["quote", quoteWidgetHtml],
     ["materials", materialsWidgetHtml],
+    ["inspector", inspectorWidgetHtml],
   ])("%s's scripts parse (escapes inside the template literal survive)", (_n, html) => {
     const scripts = [...html().matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => m[1]);
     expect(scripts.length).toBe(3);
@@ -53,5 +56,13 @@ describe("toCm3", () => {
     expect(toCm3(8, cube)).toBe(8);
     expect(toCm3(undefined, cube)).toBeNull();
     expect(toCm3(0, cube)).toBeNull();
+  });
+});
+
+describe("display modes", () => {
+  it("declares fullscreen for the inspector only, leaving the other widgets' bridge as it was", () => {
+    expect(inspectorWidgetHtml()).toContain('availableDisplayModes: ["inline","fullscreen"]');
+    expect(quoteWidgetHtml()).toContain("appCapabilities: {}");
+    expect(materialsWidgetHtml()).toContain("appCapabilities: {}");
   });
 });

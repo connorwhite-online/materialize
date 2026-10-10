@@ -47,6 +47,8 @@ export const TOOL_ANNOTATIONS: Record<string, ToolAnnotations> = {
   materialize_cad_reference: READ,
   materialize_cad_run: READ,
   materialize_cad_save: CREATE,
+  // Mints short-lived view links; stores nothing.
+  materialize_inspect_model: READ,
 
   // Catalog
   materialize_list_materials: READ,

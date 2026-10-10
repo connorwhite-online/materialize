@@ -5,6 +5,7 @@ import { deriveAppUrl } from "@/lib/utils/request-url";
 import { mintWidgetModelToken } from "./model-token";
 import { materialsWidgetHtml } from "./materials-widget";
 import { quoteWidgetHtml } from "./quote-widget";
+import { inspectorWidgetHtml } from "./inspector-widget";
 import { WIDGET_CDN, WIDGET_MIME_TYPE } from "./shell";
 
 /**
@@ -29,11 +30,18 @@ export const QUOTE_WIDGET_DESCRIPTION =
 export const MATERIALS_WIDGET_DESCRIPTION =
   "Shows the user an interactive card: each shortlisted material with strength, flex, detail and heat meters, its description, cautions and price for the user's file, and what was ruled out. Don't repeat the shortlist or the ratings in a table; add one or two sentences on which you'd pick for their part and why.";
 
+export const INSPECTOR_WIDGET_DESCRIPTION =
+  "Shows the user the model (or an assembly's parts) in an interactive 3D inspector: they can cut through it on any axis, measure between two points in mm, explode an assembly, and see its size, volume, thinnest wall and printing problems. What they cut or measure comes back to you as context. Don't repeat the facts the card shows; say in a sentence or two what's worth checking.";
+
 // The description travels with the template, so it's part of the hash too.
 export const QUOTE_WIDGET_URI = versionedUri("quote", quoteWidgetHtml() + QUOTE_WIDGET_DESCRIPTION);
 export const MATERIALS_WIDGET_URI = versionedUri(
   "materials",
   materialsWidgetHtml() + MATERIALS_WIDGET_DESCRIPTION
+);
+export const INSPECTOR_WIDGET_URI = versionedUri(
+  "inspector",
+  inspectorWidgetHtml() + INSPECTOR_WIDGET_DESCRIPTION
 );
 
 /**
@@ -67,13 +75,15 @@ interface ResourceServer {
  * (derived from the request, like every runtime URL here: see AGENTS.md
  * on NEXT_PUBLIC_APP_URL).
  */
-export function registerWidgets(server: ResourceServer) {
+export function registerWidgets(server: ResourceServer): Map<string, unknown> {
   const widgets: Array<[string, string, string, () => string]> = [
     ["materialize-quote-widget", QUOTE_WIDGET_URI, QUOTE_WIDGET_DESCRIPTION, quoteWidgetHtml],
     ["materialize-materials-widget", MATERIALS_WIDGET_URI, MATERIALS_WIDGET_DESCRIPTION, materialsWidgetHtml],
+    ["materialize-inspector-widget", INSPECTOR_WIDGET_URI, INSPECTOR_WIDGET_DESCRIPTION, inspectorWidgetHtml],
   ];
+  const handles = new Map<string, unknown>();
   for (const [name, uri, description, html] of widgets) {
-    server.registerResource(name, uri, { mimeType: WIDGET_MIME_TYPE, description }, async () => {
+    handles.set(name, server.registerResource(name, uri, { mimeType: WIDGET_MIME_TYPE, description }, async () => {
       const appUrl = await deriveAppUrl();
       return {
         contents: [
@@ -99,8 +109,9 @@ export function registerWidgets(server: ResourceServer) {
           },
         ],
       };
-    });
+    }));
   }
+  return handles;
 }
 
 /** A short-lived link the quote widget's 3D view can fetch the model from. */

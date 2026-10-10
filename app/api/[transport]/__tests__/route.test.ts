@@ -101,6 +101,7 @@ const EXPECTED_TOOL_SCOPES: Record<string, string> = {
   materialize_get_material: "catalog:read",
   materialize_recommend_material: "catalog:read",
   materialize_check_printability: "files:read",
+  materialize_inspect_model: "files:read",
   materialize_request_upload_url: "files:write",
   materialize_register_upload: "files:write",
   materialize_import_model: "files:write",
@@ -226,7 +227,7 @@ describe("tool annotations (ChatGPT app review + Claude permission prompts)", ()
       }
       if (a.readOnlyHint) {
         expect(a.destructiveHint, name).toBe(false);
-        expect(name, name).toMatch(/_(get|list)_|_cad_(run|reference)$|_recommend_material$|_check_printability$/);
+        expect(name, name).toMatch(/_(get|list)_|_cad_(run|reference)$|_recommend_material$|_check_printability$|_inspect_model$/);
       }
     }
   });
@@ -261,6 +262,16 @@ describe("tool annotations (ChatGPT app review + Claude permission prompts)", ()
 });
 
 describe("CAD tools are owner-only on top of their scope", () => {
+  it("materialize_inspect_model refuses a files:read token whose owner isn't on the allowlist", async () => {
+    const tool = registered.find((r) => r.name === "materialize_inspect_model");
+    const result = await tool!.handler(
+      { fileAssetIds: ["00000000-0000-4000-8000-000000000000"] },
+      { authInfo: { extra: { userId: "user_test", tokenId: "tok_test", tokenName: "t", scopes: ["files:read"] } } }
+    );
+    expect(result.isError).toBe(true);
+    expect(parseResultText(result).error.code).toBe("forbidden");
+  });
+
   it.each(["materialize_cad_reference", "materialize_cad_run", "materialize_cad_save"])(
     "%s refuses a cad:build token whose owner isn't on the text-to-CAD allowlist",
     async (name) => {
@@ -291,6 +302,7 @@ describe("in-chat widgets (ChatGPT apps / MCP Apps)", () => {
   it.each([
     ["materialize_get_quote", "quote"],
     ["materialize_recommend_material", "materials"],
+    ["materialize_inspect_model", "inspector"],
   ])("%s points at its registered widget under both hosts' keys", (name, base) => {
     const tool = registered.find((r) => r.name === name);
     const meta = (tool!.config as { _meta?: Record<string, unknown> })._meta!;
@@ -302,7 +314,7 @@ describe("in-chat widgets (ChatGPT apps / MCP Apps)", () => {
   });
 
   it("registers each widget as an MCP Apps HTML resource that allows the CDN and our origin", async () => {
-    expect(registeredResources).toHaveLength(2);
+    expect(registeredResources).toHaveLength(3);
     for (const r of registeredResources) {
       const { contents } = await r.read();
       expect(contents[0].mimeType).toBe("text/html;profile=mcp-app");

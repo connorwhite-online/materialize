@@ -22,7 +22,9 @@ vi.mock("mcp-handler", () => ({
         registerTool: (name: string) => ({
           disable: () => state.disabled.push(name),
         }),
-        registerResource: () => ({}),
+        registerResource: (name: string) => ({
+          disable: () => state.disabled.push(name),
+        }),
       };
       await state.init!(server);
       return new Response(null, { status: 200 });
@@ -57,6 +59,7 @@ const CAD_TOOLS = [
   "materialize_cad_reference",
   "materialize_cad_run",
   "materialize_cad_save",
+  "materialize_inspect_model",
 ];
 
 describe("owner-only tool visibility", () => {
@@ -67,7 +70,8 @@ describe("owner-only tool visibility", () => {
   it("hides the CAD tools from a user without CAD access", async () => {
     state.cadAllowed = false;
     await POST(new Request("https://materialize.cc/api/mcp", { method: "POST" }));
-    expect(state.disabled.sort()).toEqual(CAD_TOOLS);
+    // The inspector's widget template goes with its tool.
+    expect(state.disabled.sort()).toEqual([...CAD_TOOLS, "materialize-inspector-widget"].sort());
   });
 
   it("lists everything for the owner", async () => {
