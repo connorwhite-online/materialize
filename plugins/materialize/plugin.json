@@ -2,7 +2,7 @@
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "materialize",
   "version": "0.1.0",
-  "description": "Get 3D models professionally printed and shipped: instant quotes from print shops across plastics, resins and metals, and orders the user approves before anything is charged.",
+  "description": "Print, host and share 3D models: instant quotes from print shops across plastics, resins and metals, orders the user approves before anything is charged, and a shareable page for every model you publish.",
   "author": {
     "name": "Materialize Systems LLC",
     "url": "https://www.materialize.cc"
@@ -10,6 +10,7 @@
   "homepage": "https://www.materialize.cc",
   "keywords": [
     "3d-printing",
+    "3d-models",
     "manufacturing",
     "cad",
     "stl",
@@ -19,15 +20,15 @@
     "com.openai": {
       "interface": {
         "displayName": "Materialize",
-        "shortDescription": "Print and ship your 3D models",
-        "longDescription": "Attach an STL, STEP, OBJ, 3MF or AMF file, or share a link to one, and Materialize compares live prices from professional print shops across plastics, resins and metals, with lead times and shipping. Pick an option and Materialize prepares the order; you review and pay on materialize.cc before anything is made or charged. You can also check on your print orders, browse materials, and manage the models and hardware projects you publish on Materialize.\n\nFor people who need a physical part and don't own a printer, or need an industrial process like SLS nylon or metal. Limitations: prices are in USD; paid model downloads are bought on the website, not in chat.",
+        "shortDescription": "Print and host your 3D models",
+        "longDescription": "Materialize prints and hosts your 3D models. Attach an STL, STEP, OBJ, 3MF or AMF file, or share a link to one, and Materialize compares live prices from professional print shops across plastics, resins and metals, with lead times and shipping. Pick an option and Materialize prepares the order; you review and pay on materialize.cc before anything is made or charged.\n\nEvery model also gets a home: publish it to Materialize with a 3D preview, photos, a license and an optional price, and share the link so anyone can view it, download it or order their own print. Bundle parts, a parts list, wiring diagrams and a build guide into a hardware project. You can also check on your print orders and browse materials.\n\nFor people who need a physical part and don't own a printer, need an industrial process like SLS nylon or metal, or want one place to host and share their designs. Limitations: prices are in USD; paid model downloads are bought on the website, not in chat.",
         "developerName": "Materialize Systems LLC",
         "category": "Productivity",
         "capabilities": [
           "Quote 3D prints",
           "Order 3D prints",
-          "Track print orders",
-          "Manage published models"
+          "Host and share 3D models",
+          "Track print orders"
         ],
         "websiteURL": "https://www.materialize.cc",
         "supportURL": "https://www.materialize.cc/support",
@@ -101,7 +102,7 @@
         "countries": [
           "US"
         ],
-        "release_notes": "Initial release: import a model from chat or a link, compare print quotes, prepare orders the user approves and pays for on materialize.cc, check order status, and manage published models."
+        "release_notes": "Initial release: import a model from chat or a link, compare print quotes, prepare orders the user approves and pays for on materialize.cc, check order status, and publish models and hardware projects to share."
       }
     }
   }
