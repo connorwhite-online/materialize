@@ -1,6 +1,6 @@
 import "server-only";
 
-import { and, eq, isNull } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { fileAssets } from "@/lib/db/schema";
 import { getObjectBytes } from "@/lib/storage";
@@ -36,6 +36,18 @@ export function measureGeometry(
 }
 
 /**
+ * CraftCloud's confirm step can return a model with all-zero dimensions
+ * (seen on fresh imports), which reads as present but is useless, so a
+ * zero anywhere counts as missing.
+ */
+export function hasDimensions(
+  g: { dimensions?: { x: number; y: number; z: number } } | null | undefined
+): boolean {
+  const d = g?.dimensions;
+  return !!d && d.x > 0 && d.y > 0 && d.z > 0;
+}
+
+/**
  * The asset's stored geometry, measuring and saving it first when it was
  * never recorded (every agent upload before this fix). Best-effort: a
  * read or parse failure returns whatever was stored.
@@ -47,7 +59,7 @@ export async function ensureGeometry(asset: {
   fileUnit: string;
   geometryData: { dimensions?: { x: number; y: number; z: number }; volume?: number; triangleCount?: number } | null;
 }) {
-  if (asset.geometryData?.dimensions) return asset.geometryData;
+  if (hasDimensions(asset.geometryData)) return asset.geometryData;
   try {
     const bytes = await getObjectBytes(asset.storageKey);
     const measured = measureGeometry(bytes, asset.format, asset.fileUnit as "mm" | "cm" | "in");
@@ -55,7 +67,7 @@ export async function ensureGeometry(asset: {
     await db
       .update(fileAssets)
       .set({ geometryData: measured })
-      .where(and(eq(fileAssets.id, asset.id), isNull(fileAssets.geometryData)));
+      .where(eq(fileAssets.id, asset.id));
     return measured;
   } catch (err) {
     logError("mcp.geometry.backfill", err);

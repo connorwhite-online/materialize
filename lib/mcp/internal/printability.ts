@@ -43,7 +43,7 @@ import { MATERIALS } from "@/lib/materials/preset-library";
 import { matchCraftCloudMaterialId } from "@/lib/materials/craftcloud-resolver";
 import { getCraftCloudCatalog } from "@/lib/craftcloud/catalog";
 import { logError } from "@/lib/logger";
-import { ensureGeometry } from "./geometry";
+import { ensureGeometry, hasDimensions } from "./geometry";
 
 interface LoadedModel {
   facts: ModelFacts;
@@ -101,7 +101,7 @@ async function loadModel(
 
   if (analysis) {
     // Record the size for quotes and list_files if it never was.
-    if (!asset.geometryData?.dimensions) await ensureGeometry(asset);
+    if (!hasDimensions(asset.geometryData)) await ensureGeometry(asset);
     return {
       facts: { bboxMm: analysis.bboxMm, analysis, wall, declaredUnit: unit },
       filename: asset.originalFilename,
