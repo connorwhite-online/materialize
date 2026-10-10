@@ -73,6 +73,7 @@ import { persistSavedFeeCard } from "@/lib/stripe/handle-print-order-payment";
 import { closeCheckoutSession } from "@/lib/stripe/checkout-session";
 import { mintPayProductionToken } from "@/lib/orders/pay-production-token";
 import {
+  CHECKOUT_CURRENCY,
   fetchPriceSnapshot,
   reconcileQuote,
   reconcileQuoteInSnapshot,
@@ -485,7 +486,7 @@ export async function checkoutVendorGroup(
     if (items.some((i) => !i.priceId)) {
       return {
         error:
-          "One or more items in this cart need a fresh quote. Remove them and re-add them from the quote page.",
+          "One or more items in this cart need a fresh quote. Change their quantity to re-price them, or remove and re-add them.",
       };
     }
     // One getPrice per distinct priceId, in parallel.
@@ -522,11 +523,11 @@ export async function checkoutVendorGroup(
       reconciledMaterialCentsById.get(item.id)!;
 
     const shippingIds = [...new Set(items.map((i) => i.shippingId))];
-    const currency = items[0].currency as Currency;
-
     const cart = await createCart({
       shippingIds,
-      currency,
+      // Every line was just reconciled against a USD quote; a row's
+      // stored currency may predate the USD switch, so it isn't read.
+      currency: CHECKOUT_CURRENCY,
       quotes: items.map((i) => ({ id: i.quoteId })),
     });
 

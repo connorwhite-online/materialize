@@ -294,6 +294,10 @@ describe("addToCart", () => {
     ];
     const result = await addToCart({ ...baseParams, currency: "USD" });
     expect(result).toMatchObject({ error: expect.stringContaining("EUR") });
+    // A pre-USD line: the error says how to get unstuck.
+    expect(result).toMatchObject({
+      error: expect.stringContaining("change their quantity"),
+    });
     expect(insertedValues).toHaveLength(0);
     expect(upsertSet).toBeNull();
   });
@@ -391,6 +395,8 @@ describe("repriceCartItem", () => {
     // The re-quote's own priceId is stored so checkout can reconcile
     // the row again.
     expect(set.priceId).toBe("price-1");
+    // Re-pricing also moves a pre-USD line onto USD.
+    expect(set.currency).toBe("USD");
   });
 
   it("rejects a client price that doesn't match CraftCloud's re-quote", async () => {

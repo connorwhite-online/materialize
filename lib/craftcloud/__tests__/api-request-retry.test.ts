@@ -113,6 +113,34 @@ describe("apiRequest retry behavior", () => {
     ).rejects.toBeInstanceOf(CraftCloudApiError);
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
+
+  it("createOrder never times out client-side — an abort can't tell us whether it placed", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({ orderId: "o1" }));
+    await createOrder({
+      cartId: "cart-1",
+      user: {
+        emailAddress: "a@b.c",
+        shipping: {
+          firstName: "A",
+          lastName: "B",
+          address: "1",
+          city: "C",
+          zipCode: "00000",
+          countryCode: "US",
+        },
+        billing: {
+          firstName: "A",
+          lastName: "B",
+          address: "1",
+          city: "C",
+          zipCode: "00000",
+          countryCode: "US",
+          isCompany: false,
+        },
+      },
+    });
+    expect(fetchMock.mock.calls[0][1].signal).toBeUndefined();
+  });
 });
 
 describe("apiRequest timeouts + path encoding", () => {

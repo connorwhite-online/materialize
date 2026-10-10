@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import { auth } from "@clerk/nextjs/server";
 import { db } from "@/lib/db";
 import { fileAssets, files } from "@/lib/db/schema";
+import { isPublicListing } from "@/lib/files/public-listing";
 import { eq } from "drizzle-orm";
 import { FileAssetPrintShell } from "@/components/print/file-asset-print-shell";
 import { loadPreviewView } from "@/lib/files/load-preview-view";
@@ -43,6 +44,7 @@ export default async function PrintConfigPage(props: {
       listingFileId: files.id,
       fileUserId: files.userId,
       fileStatus: files.status,
+      fileVisibility: files.visibility,
       recommendedMaterialId: files.recommendedMaterialId,
       recommendedCcMaterialId: files.recommendedCcMaterialId,
       recommendedCcFinishGroupId: files.recommendedCcFinishGroupId,
@@ -59,7 +61,7 @@ export default async function PrintConfigPage(props: {
   // routes. Without this, any visitor could load another user's private
   // model metadata and config UI by guessing the asset id.
   const isOwner = userId && asset.fileUserId === userId;
-  const isPublished = asset.fileStatus === "published";
+  const isPublished = isPublicListing(asset);
   if (!isOwner && !isPublished) notFound();
 
   const recommendedMaterial = asset.recommendedMaterialId

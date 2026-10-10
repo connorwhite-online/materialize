@@ -122,6 +122,11 @@ export const MUTATION_TIMEOUT_MS = 20_000;
 export interface ApiRequestOptions {
   /** Caller cancellation (e.g. the incoming request's signal). */
   signal?: AbortSignal;
+  /**
+   * Override the default timeout; `null` means none. Only for calls
+   * where giving up is worse than waiting — see realCreateOrder.
+   */
+  timeoutMs?: number | null;
 }
 
 function isTimeoutError(err: unknown): boolean {
@@ -140,7 +145,12 @@ async function apiRequest<T>(
   // us to tell if the prior attempt succeeded. The webhook layer's
   // atomic claim handles end-to-end retries for createOrder.
   const canRetry = method.toUpperCase() === "GET";
-  const timeoutMs = canRetry ? GET_TIMEOUT_MS : MUTATION_TIMEOUT_MS;
+  const timeoutMs =
+    options.timeoutMs === undefined
+      ? canRetry
+        ? GET_TIMEOUT_MS
+        : MUTATION_TIMEOUT_MS
+      : options.timeoutMs;
   const callerSignal = options.signal;
 
   let lastError: unknown;
@@ -148,10 +158,12 @@ async function apiRequest<T>(
     try {
       // Fresh timeout per attempt, so one slow attempt doesn't eat the
       // retries' budget. The caller's signal still cancels everything.
-      const timeout = AbortSignal.timeout(timeoutMs);
-      const signal = callerSignal
-        ? AbortSignal.any([callerSignal, timeout])
-        : timeout;
+      const timeout =
+        timeoutMs === null ? undefined : AbortSignal.timeout(timeoutMs);
+      const signal =
+        callerSignal && timeout
+          ? AbortSignal.any([callerSignal, timeout])
+          : (callerSignal ?? timeout);
       const res = await fetch(`${BASE_URL}${path}`, {
         method,
         headers: {
@@ -285,7 +297,13 @@ async function realCreateCart(params: CartRequest): Promise<Cart> {
 }
 
 async function realCreateOrder(params: OrderRequest): Promise<Order> {
-  return apiRequest("POST", "/v5/order", params);
+  // No timeout, on purpose. Placing an order is not idempotent, and a
+  // client-side abort doesn't tell us whether CraftCloud placed it: the
+  // webhook would release its `placing:` claim, Stripe would retry, and
+  // a slow-but-successful first call becomes two paid vendor orders. A
+  // hung call instead dies with the function and leaves the claim in
+  // place, which blocks retries and surfaces for manual reconciliation.
+  return apiRequest("POST", "/v5/order", params, { timeoutMs: null });
 }
 
 async function realGetOrderStatus(orderId: string): Promise<OrderStatusResponse> {

@@ -13,7 +13,7 @@ import {
   purchases,
   webhookEventsProcessed,
 } from "@/lib/db/schema";
-import { and, eq, inArray, isNull, lt, ne } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, lt, ne } from "drizzle-orm";
 import { getStripe } from "@/lib/stripe";
 import { logError } from "@/lib/logger";
 import { constantTimeEqual } from "@/lib/auth/constant-time-equal";
@@ -348,6 +348,11 @@ export async function GET(request: Request) {
             isNull(printOrders.craftCloudOrderId)
           )
         )
+        // Newest first: rows this sweep deliberately leaves alone (a
+        // completed or unconfirmable session) stay `cart_created`
+        // forever, and on an oldest-first or unordered read enough of
+        // them would fill every page and starve newer stale rows.
+        .orderBy(desc(printOrders.createdAt))
         .limit(STALE_ORDER_LIMIT + 1);
 
       hasMoreStaleOrders = fetchedRows.length > STALE_ORDER_LIMIT;

@@ -8,7 +8,10 @@ import { revalidatePath } from "next/cache";
 import { addToCartSchema } from "@/lib/validations/print";
 import { userCanPrintAsset } from "@/lib/entitlement";
 import { logError } from "@/lib/logger";
-import { reconcileQuote } from "@/lib/pricing/reconcile-quote";
+import {
+  CHECKOUT_CURRENCY,
+  reconcileQuote,
+} from "@/lib/pricing/reconcile-quote";
 
 export type CartItemWithMeta = {
   id: string;
@@ -118,6 +121,13 @@ export async function addToCart(params: {
       .where(eq(cartItems.userId, userId));
 
     if (anyExisting && anyExisting.currency !== data.currency) {
+      if (anyExisting.currency !== CHECKOUT_CURRENCY) {
+        // A line priced before checkout went USD-only. It can't be
+        // checked out as-is either, so say how to get unstuck.
+        return {
+          error: `Your cart has items priced in ${anyExisting.currency} from before checkout moved to USD. Remove them, or change their quantity to re-price them, then add this item.`,
+        };
+      }
       return {
         error: `Your cart is in ${anyExisting.currency}. Clear it or finish that order before adding ${data.currency} items.`,
       };
@@ -312,6 +322,9 @@ export async function repriceCartItem(params: {
         quoteId: params.quoteId,
         priceId: params.priceId,
         materialPrice: reconciled.priceCents,
+        // Re-priced against a USD quote (reconcileQuote refuses others),
+        // which also migrates a line priced before the USD switch.
+        currency: CHECKOUT_CURRENCY,
         updatedAt: new Date(),
       })
       .where(eq(cartItems.id, params.cartItemId));

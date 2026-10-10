@@ -71,8 +71,10 @@ function bumpCallCount(name: string): number {
 function selectChain(rows: unknown[]) {
   const promise = Promise.resolve(rows) as Promise<unknown[]> & {
     limit: (n: number) => unknown[];
+    orderBy: () => { limit: (n: number) => unknown[] };
   };
   promise.limit = (n: number) => rows.slice(0, n);
+  promise.orderBy = () => ({ limit: promise.limit });
   return promise;
 }
 
