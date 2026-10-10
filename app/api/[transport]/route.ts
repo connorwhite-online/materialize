@@ -1637,7 +1637,7 @@ const handler = createMcpHandler(
     server.registerTool(
       "materialize_create_order",
       {
-        title: "Create a draft print order (requires user confirmation)",
+        title: "Order a print",
         description:
           "Creates a draft order against the user's account. The user is notified by email and approves and pays via the returned confirmationUrl before the order is placed with the vendor (status awaiting_user_approval). The one exception is a user who has set up an agent spending policy on materialize.cc: an order within its limits is charged to their saved card immediately (status auto_approved) and can be cancelled from the emailed link until cancellationDeadline. The response's amountDueCents is what the user pays, broken down as productionCents + minimumFeeCents (the vendor's minimum-order top-up) + shippingCents + serviceFeeCents. USD only. Idempotency is keyed on (user, idempotencyKey).",
         inputSchema: {
