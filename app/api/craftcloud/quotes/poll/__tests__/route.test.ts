@@ -180,6 +180,31 @@ describe("GET /api/craftcloud/quotes/poll", () => {
     );
   });
 
+  it("does not count CNC quotes the catalog excludes on purpose", async () => {
+    // 3 of 4 quotes are for excluded (non-printing) configs: dropped
+    // from the list, but not evidence of a stale catalog.
+    mockGetCraftCloudCatalog.mockResolvedValue({
+      configById: new Map([["cfg-1", catalogEntry("cfg-1")]]),
+      excludedConfigIds: new Set(["cnc-1", "cnc-2", "cnc-3"]),
+    });
+    mockGetPrice.mockResolvedValue({
+      priceId: "price-1",
+      allComplete: true,
+      quotes: [
+        ONE_QUOTE,
+        { ...ONE_QUOTE, quoteId: "q2", materialConfigId: "cnc-1" },
+        { ...ONE_QUOTE, quoteId: "q3", materialConfigId: "cnc-2" },
+        { ...ONE_QUOTE, quoteId: "q4", materialConfigId: "cnc-3" },
+      ],
+      shippings: [],
+    });
+
+    const res = await GET(pollRequest("?priceId=price-1"));
+    const body = await res.json();
+    expect(body.quotes).toHaveLength(1);
+    expect(mockLogError).not.toHaveBeenCalled();
+  });
+
   it("does not escalate a low, ordinary drop ratio", async () => {
     // 1 of 5 dropped — 20%, under the 25% threshold.
     mockGetPrice.mockResolvedValue({

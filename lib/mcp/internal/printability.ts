@@ -43,6 +43,7 @@ import { MATERIALS } from "@/lib/materials/preset-library";
 import { matchCraftCloudMaterialId } from "@/lib/materials/craftcloud-resolver";
 import { getCraftCloudCatalog } from "@/lib/craftcloud/catalog";
 import { logError } from "@/lib/logger";
+import { ensureGeometry } from "./geometry";
 
 interface LoadedModel {
   facts: ModelFacts;
@@ -99,6 +100,8 @@ async function loadModel(
   }
 
   if (analysis) {
+    // Record the size for quotes and list_files if it never was.
+    if (!asset.geometryData?.dimensions) await ensureGeometry(asset);
     return {
       facts: { bboxMm: analysis.bboxMm, analysis, wall, declaredUnit: unit },
       filename: asset.originalFilename,
@@ -258,8 +261,10 @@ export async function checkPrintabilityForUser(input: {
             medianMm: round(facts.wall.medianMm),
           }
         : null,
+      // Only a fallback: 2V/A can read below a measured minimum, and two
+      // thickness numbers that disagree confuse more than they help.
       averageThicknessMm:
-        a?.meanThicknessMm != null ? round(a.meanThicknessMm) : null,
+        !facts.wall && a?.meanThicknessMm != null ? round(a.meanThicknessMm) : null,
     },
     issues,
     printable: !issues.some((i) => i.severity === "blocker"),

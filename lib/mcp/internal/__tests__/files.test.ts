@@ -137,6 +137,20 @@ describe("importModelFromUrlForUser", () => {
     expect(mockPutObject).not.toHaveBeenCalled();
   });
 
+  it("says a web page isn't a model, even when a filename is passed", async () => {
+    mockFetchModelBytes.mockResolvedValue({
+      bytes: new TextEncoder().encode("\n  <!DOCTYPE html><html><head></head></html>"),
+      urlFilename: null,
+    });
+    const result = await importModelFromUrlForUser({
+      userId: "user_1",
+      url: "https://www.materialize.cc/",
+      filename: "model.stl",
+    });
+    expect(result).toMatchObject({ error: expect.stringContaining("returned a web page") });
+    expect(mockPutObject).not.toHaveBeenCalled();
+  });
+
   it("rejects an unsupported extension", async () => {
     mockFetchModelBytes.mockResolvedValue({
       bytes: new Uint8Array([1, 2, 3]),

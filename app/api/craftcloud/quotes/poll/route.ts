@@ -41,7 +41,9 @@ export async function GET(request: Request) {
       .map((q) => {
         const entry = catalog.configById.get(q.materialConfigId);
         if (!entry) {
-          droppedNoConfig++;
+          // CNC quotes are excluded by design (see PRINTABLE_TECHNOLOGIES);
+          // only count configs the catalog has never seen.
+          if (!catalog.excludedConfigIds?.has(q.materialConfigId)) droppedNoConfig++;
           return null;
         }
         const provider = providers.get(q.vendorId);

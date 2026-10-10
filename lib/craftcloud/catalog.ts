@@ -160,6 +160,14 @@ export interface CraftCloudCatalog {
   >;
   /** Count of configs in the catalog — useful for telemetry */
   configCount: number;
+  /**
+   * Configs of materials we drop on purpose (CNC and other non-printing
+   * technologies). CraftCloud still quotes them for an STL, about 7% of
+   * a full price request, so a quote whose config is here was excluded
+   * by design, not missing from a stale catalog. Optional so test
+   * fixtures needn't build it.
+   */
+  excludedConfigIds?: Set<string>;
 }
 
 let cachedCatalog: CraftCloudCatalog | null = null;
@@ -256,6 +264,7 @@ export async function getCraftCloudCatalog(): Promise<CraftCloudCatalog> {
     }
   >();
   let configCount = 0;
+  const excludedConfigIds = new Set<string>();
 
   // Build filtered groups in parallel with the index so consumers
   // iterating `catalog.groups` also see only printable materials.
@@ -263,7 +272,14 @@ export async function getCraftCloudCatalog(): Promise<CraftCloudCatalog> {
   for (const group of rawGroups) {
     const filteredMaterials: CatalogMaterial[] = [];
     for (const material of group.materials ?? []) {
-      if (!PRINTABLE_TECHNOLOGIES.has(material.technology ?? "")) continue;
+      if (!PRINTABLE_TECHNOLOGIES.has(material.technology ?? "")) {
+        for (const finishGroup of material.finishGroups ?? []) {
+          for (const config of finishGroup.materialConfigs ?? []) {
+            excludedConfigIds.add(config.id);
+          }
+        }
+        continue;
+      }
       if (!material.materialGroupName) material.materialGroupName = group.name;
       materialById.set(material.id, material);
       filteredMaterials.push(material);
@@ -284,7 +300,7 @@ export async function getCraftCloudCatalog(): Promise<CraftCloudCatalog> {
     }
   }
 
-  cachedCatalog = { groups, materialById, configById, configCount };
+  cachedCatalog = { groups, materialById, configById, configCount, excludedConfigIds };
   cachedCatalogFetchedAt = Date.now();
   return cachedCatalog;
 }
