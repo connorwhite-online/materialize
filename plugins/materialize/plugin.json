@@ -64,13 +64,13 @@
               "description": "Choose a material",
               "prompt": "What material should I use for a bracket that sits in a hot car all summer?",
               "tools_triggered": "materialize_recommend_material",
-              "expected_behavior": "Shows Materialize's materials card: heat-resistant options (such as polycarbonate or nylon) with strength, flex, detail and heat ratings and their cautions, with PLA and PETG ruled out for heat, and explains which it would pick. Nothing is uploaded or ordered."
+              "expected_behavior": "Shows Materialize's materials card: heat-resistant options (such as polycarbonate, PEEK or a metal) with strength, flex, detail and heat ratings and their cautions, lists lower-heat plastics such as PLA as ruled out, and explains which it would pick. Nothing is uploaded or ordered."
             },
             {
               "description": "Prepare an order the user approves",
               "prompt": "Order the recommended option. Ship to Test Reviewer, 1 Market St, San Francisco, CA 94105, phone 415-555-0100.",
               "tools_triggered": "materialize_create_order",
-              "expected_behavior": "Restates the material, vendor, all-in price and arrival dates and asks for a go-ahead, then creates the order and returns a link to review and pay on materialize.cc. It says the order is not placed until payment."
+              "expected_behavior": "Restates the material, vendor and all-in price, gets the user's go-ahead (ChatGPT's approval prompt counts), then creates the order and returns a link to review and pay on materialize.cc. It says the order is not placed until payment."
             },
             {
               "description": "Check order status",
