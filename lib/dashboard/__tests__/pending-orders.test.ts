@@ -19,6 +19,10 @@ function order(overrides: Partial<PendingOrder> = {}): PendingOrder {
     title: null,
     thumbnailUrl: null,
     quantity: 1,
+    totalCents: null,
+    materialName: null,
+    materialColor: null,
+    materialSwatch: null,
     createdAt: "2026-08-30T12:00:00.000Z",
     ...overrides,
   };

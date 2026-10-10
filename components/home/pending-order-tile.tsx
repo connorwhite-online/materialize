@@ -16,6 +16,7 @@ import { cn } from "@/lib/utils";
 import {
   formatOrderDate,
   formatOrderFileCount,
+  formatOrderTotal,
   orderNeedsAttention,
   pendingOrderHref,
   type PendingOrder,
@@ -99,22 +100,27 @@ export function PendingOrderTile({ order }: { order: PendingOrder }) {
     Icon: CreditCardIcon,
   };
   const attention = orderNeedsAttention(order.status);
+  const date = formatOrderDate(order.createdAt);
+  const total = formatOrderTotal(order.totalCents);
 
   const title = order.title ?? formatOrderFileCount(order.fileCount);
-  const meta = [
-    order.title && order.fileCount > 1
-      ? formatOrderFileCount(order.fileCount)
-      : order.quantity > 1
-        ? `×${order.quantity}`
-        : null,
-    formatOrderDate(order.createdAt) || null,
-  ]
+  // Material when the catalog answered, else the file count / date —
+  // the line is never empty, and the date is always on the tooltip.
+  // Extra files already show as the thumbnail's +N badge.
+  const material = [order.materialName, order.materialColor]
     .filter(Boolean)
     .join(" · ");
+  const meta =
+    material ||
+    [order.title && order.fileCount > 1 ? formatOrderFileCount(order.fileCount) : null, date]
+      .filter(Boolean)
+      .join(" · ");
+  const qty = order.quantity > 1 ? `×${order.quantity}` : null;
 
   return (
     <Link
       href={pendingOrderHref(order)}
+      title={date ? `Ordered ${date}` : undefined}
       className="group flex w-52 shrink-0 flex-col gap-2.5 rounded-2xl border border-border bg-card p-3 transition-colors hover:border-primary/40"
     >
       <div className="flex min-w-0 items-center gap-2.5">
@@ -124,21 +130,38 @@ export function PendingOrderTile({ order }: { order: PendingOrder }) {
             {title}
           </p>
           {meta ? (
-            <p className="truncate text-xs text-muted-foreground">{meta}</p>
+            <p className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
+              {material && order.materialSwatch ? (
+                <span
+                  aria-hidden
+                  className="size-2 shrink-0 rounded-full ring-1 ring-border"
+                  style={{ background: order.materialSwatch }}
+                />
+              ) : null}
+              <span className="truncate">{meta}</span>
+            </p>
           ) : null}
         </div>
       </div>
-      <span
-        className={cn(
-          "inline-flex w-fit max-w-full items-center gap-1.5 rounded-full px-2 py-0.5 text-[11px] font-medium",
-          attention
-            ? "bg-primary text-primary-foreground"
-            : "bg-muted text-muted-foreground"
-        )}
-      >
-        <Icon className="size-3 shrink-0" size={12} />
-        <span className="truncate">{label}</span>
-      </span>
+      <div className="flex items-center justify-between gap-2">
+        <span
+          className={cn(
+            "inline-flex min-w-0 items-center gap-1.5 rounded-full px-2 py-0.5 text-[11px] font-medium",
+            attention
+              ? "bg-primary text-primary-foreground"
+              : "bg-muted text-muted-foreground"
+          )}
+        >
+          <Icon className="size-3 shrink-0" size={12} />
+          <span className="truncate">{label}</span>
+        </span>
+        {total || qty ? (
+          <span className="shrink-0 text-xs tabular-nums">
+            {qty ? <span className="text-muted-foreground">{qty} </span> : null}
+            {total ? <span className="font-medium">{total}</span> : null}
+          </span>
+        ) : null}
+      </div>
     </Link>
   );
 }

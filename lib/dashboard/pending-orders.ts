@@ -5,6 +5,10 @@ import { fileAssets, files, printOrders, printOrderItems } from "@/lib/db/schema
 import { eq, desc, and, inArray } from "drizzle-orm";
 import { withDbRetry } from "@/lib/db/retry";
 import { visibleOrdersFilter } from "@/lib/print/order-visibility";
+import {
+  resolveOrderMaterials,
+  type OrderMaterialDisplay,
+} from "@/lib/print/order-material";
 
 /**
  * In-progress print orders shown on the authed-home Orders carousel.
@@ -49,6 +53,12 @@ export type PendingOrder = {
   thumbnailUrl: string | null;
   /** Units of the (first) part. */
   quantity: number;
+  /** Order total in cents (production + shipping + our fee). */
+  totalCents: number | null;
+  /** "PLA" + colour name + swatch, when the catalog resolved in time. */
+  materialName: string | null;
+  materialColor: string | null;
+  materialSwatch: string | null;
   /** ISO timestamp — when the order row was created / started. */
   createdAt: string;
   /**
@@ -106,6 +116,24 @@ export function sortHomeOrders<
 }
 
 const PENDING_MAX = 12;
+const MATERIAL_BUDGET_MS = 350;
+
+function materialFields(m: OrderMaterialDisplay | undefined) {
+  return {
+    materialName: m?.name ?? null,
+    materialColor: m?.method ?? null,
+    materialSwatch: m?.color ?? null,
+  };
+}
+
+/** "$24.10" — cents to a short USD string for the card. */
+export function formatOrderTotal(cents: number | null): string | null {
+  if (cents == null) return null;
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+  }).format(cents / 100);
+}
 
 /**
  * In-progress print orders for the authed home carousel. File count is
@@ -128,6 +156,7 @@ async function loadPendingOrdersOnce(userId: string): Promise<PendingOrder[]> {
       createdAt: printOrders.createdAt,
       confirmationToken: printOrders.confirmationToken,
       quantity: printOrders.quantity,
+      totalPrice: printOrders.totalPrice,
     })
     .from(printOrders)
     .where(
@@ -148,6 +177,7 @@ async function loadPendingOrdersOnce(userId: string): Promise<PendingOrder[]> {
             printOrderId: printOrderItems.printOrderId,
             fileAssetId: printOrderItems.fileAssetId,
             quantity: printOrderItems.quantity,
+            materialConfigId: printOrderItems.materialConfigId,
           })
           .from(printOrderItems)
           .where(inArray(printOrderItems.printOrderId, multiItemIds))
@@ -155,7 +185,10 @@ async function loadPendingOrdersOnce(userId: string): Promise<PendingOrder[]> {
       : [];
 
   const fileIdsByOrder = new Map<string, Set<string>>();
-  const firstItemByOrder = new Map<string, { fileAssetId: string; quantity: number }>();
+  const firstItemByOrder = new Map<
+    string,
+    { fileAssetId: string; quantity: number; materialConfigId: string }
+  >();
   for (const item of multiItemMeta) {
     let set = fileIdsByOrder.get(item.printOrderId);
     if (!set) {
@@ -192,6 +225,20 @@ async function loadPendingOrdersOnce(userId: string): Promise<PendingOrder[]> {
       : [];
   const partByAsset = new Map(partRows.map((r) => [r.assetId, r]));
 
+  // Material names come from the CraftCloud catalog (24h in-process
+  // cache). A warm cache answers instantly; a cold one must not hold up
+  // the home page, so it gets a short budget and the cards fall back to
+  // showing no material.
+  const materialIds = draftsRaw.map(
+    (d) => d.material ?? firstItemByOrder.get(d.id)?.materialConfigId
+  );
+  const materials = await Promise.race([
+    resolveOrderMaterials(materialIds),
+    new Promise<Map<string, OrderMaterialDisplay>>((resolve) =>
+      setTimeout(() => resolve(new Map()), MATERIAL_BUDGET_MS)
+    ),
+  ]);
+
   const mapped: PendingOrder[] = draftsRaw.map((d) => {
     const multiFiles = !d.fileAssetId
       ? fileIdsByOrder.get(d.id)
@@ -207,6 +254,8 @@ async function loadPendingOrdersOnce(userId: string): Promise<PendingOrder[]> {
       title: displayPartName(part?.name ?? part?.originalFilename),
       thumbnailUrl: part?.thumbnailUrl ?? null,
       quantity: Math.max(1, d.quantity ?? first?.quantity ?? 1),
+      totalCents: d.totalPrice > 0 ? d.totalPrice : null,
+      ...materialFields(materials.get(d.material ?? first?.materialConfigId ?? "")),
       createdAt: d.createdAt.toISOString(),
       confirmationToken:
         d.status === "awaiting_agent_approval" ? d.confirmationToken : null,
