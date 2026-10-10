@@ -190,8 +190,11 @@ export async function createProjectForUser(
       tags: input.tags,
       repoUrl: input.repoUrl,
     });
-    const visibility = meta.visibility ?? "public";
-    const status = meta.status ?? "published";
+    // Private draft unless the caller asks to publish, like an agent's
+    // file uploads: an assistant shouldn't put the user's work in public
+    // without being told to.
+    const visibility = meta.visibility ?? "private";
+    const status = meta.status ?? "draft";
     const slug = buildListingSlug(meta.name ?? input.name, nanoid(6));
     // Sanitize AFTER normalizeProjectMeta's length cap — slicing
     // sanitized output could split a tag, but sanitizing already-capped
