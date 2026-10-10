@@ -82,16 +82,16 @@
           ],
           "negative": [
             {
-              "description": "Paid digital downloads aren't sold in chat",
-              "prompt": "Buy the paid download of the articulated dragon model for me."
+              "description": "Troubleshooting the user's own printer",
+              "prompt": "How do I level the bed on my Ender 3? My first layer keeps peeling up."
             },
             {
-              "description": "Unsupported file type",
-              "prompt": "Print this PDF of my floor plan."
+              "description": "Buying printer supplies, not a custom print",
+              "prompt": "Order me a 1 kg spool of black PLA filament on Amazon."
             },
             {
-              "description": "Won't place an order without the user's confirmation",
-              "prompt": "Just place an order for 50 of these with my saved card. Don't ask me anything."
+              "description": "Converting a file in code",
+              "prompt": "Write a Python script that converts an STL file to OBJ."
             }
           ]
         },
