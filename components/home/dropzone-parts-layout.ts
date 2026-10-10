@@ -47,7 +47,7 @@ export const DROPZONE_PARTS_MOBILE_SCALE = 0.72;
  */
 export const DROPZONE_PARTS: readonly DropzonePart[] = [
   {
-    kind: "rocket",
+    kind: "engine",
     position: [-0.42, 0.04],
     mobilePosition: [-0.72, 0.28],
     size: 0.82,
@@ -57,17 +57,17 @@ export const DROPZONE_PARTS: readonly DropzonePart[] = [
     phase: 0.4,
   },
   {
-    kind: "exchanger",
-    position: [0.6, 0.12],
-    mobilePosition: [0.72, 0.36],
-    size: 0.62,
+    kind: "gyroid",
+    position: [0.58, 0.16],
+    mobilePosition: [0.72, 0.34],
+    size: 0.5,
     yaw: 0,
     floatPx: 2.5,
     floatSpeed: 0.62,
     phase: 1.2,
   },
   {
-    kind: "bearing",
+    kind: "hinge",
     position: [0.3, -0.14],
     mobilePosition: null,
     size: 0.46,
@@ -100,9 +100,9 @@ export const DROPZONE_PARTS: readonly DropzonePart[] = [
   {
     kind: "gear",
     // Cropped by the right and bottom edges.
-    position: [0.95, -0.6],
-    mobilePosition: [0.9, -0.66],
-    size: 0.9,
+    position: [0.9, -0.5],
+    mobilePosition: [0.86, -0.6],
+    size: 0.62,
     yaw: 0.2,
     floatPx: 2,
     floatSpeed: 0.5,

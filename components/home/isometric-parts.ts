@@ -2,8 +2,9 @@ import * as THREE from "three";
 
 /**
  * Parts for the authed-home dropzone backdrop: a playful bench of
- * primitive machine components — fan, gear, heat exchanger, a little
- * rocket booster, a ball bearing, a spring. Simple enough to read as
+ * machine components that lean additive — fan, chunky gear, gyroid
+ * heat-exchanger core, tube-wall rocket engine, print-in-place hinge,
+ * spring on its seats. Simple enough to read as
  * sketches at ~60px, specific enough to read as real parts.
  *
  * Each builder returns a BufferGeometry with largest extent 1, centred
@@ -16,19 +17,19 @@ import * as THREE from "three";
 export type IsometricPartKind =
   | "fan"
   | "gear"
-  | "exchanger"
-  | "rocket"
-  | "bearing"
+  | "gyroid"
+  | "engine"
+  | "hinge"
   | "spring";
 
-function finish(geometry: THREE.BufferGeometry) {
+function finish(geometry: THREE.BufferGeometry, { keepNormals = false } = {}) {
   geometry.center();
   geometry.computeBoundingBox();
   const size = new THREE.Vector3();
   geometry.boundingBox!.getSize(size);
   const s = 1 / Math.max(size.x, size.y, size.z);
   geometry.scale(s, s, s);
-  geometry.computeVertexNormals();
+  if (!keepNormals) geometry.computeVertexNormals();
   geometry.computeBoundingBox();
   return geometry;
 }
@@ -86,63 +87,49 @@ function circlePath(radius: number, cx = 0, cy = 0) {
 }
 
 /**
- * Spur gear: twelve trapezoid teeth, six lightening holes in the web,
- * a hub boss and a keyed bore. Laid flat so its face shows as the
- * isometric ellipse.
+ * Chunky spur gear: eight big teeth with rounded tips, a plain web and
+ * a raised hub. Fewer, fatter features so it reads as a toy-like gear
+ * at backdrop size rather than a busy drawing.
  */
 export function makeGearGeometry({
-  teeth = 12,
-  rootRadius = 0.4,
+  teeth = 8,
+  rootRadius = 0.36,
   tipRadius = 0.5,
-  boreRadius = 0.12,
-  thickness = 0.16,
-  hubRadius = 0.2,
+  boreRadius = 0.1,
+  thickness = 0.2,
+  hubRadius = 0.18,
   hubHeight = 0.1,
 } = {}) {
   const shape = new THREE.Shape();
   const pitch = (Math.PI * 2) / teeth;
+  // Each tooth: root flat, flank up, a rounded tip arc, flank down.
+  const tipR = (tipRadius * Math.sin(pitch * 0.17)) / 1.0;
   for (let i = 0; i < teeth; i++) {
     const a0 = i * pitch;
-    const pts: [number, number][] = [
-      [a0, rootRadius],
-      [a0 + pitch * 0.3, rootRadius],
-      [a0 + pitch * 0.39, tipRadius],
-      [a0 + pitch * 0.61, tipRadius],
-      [a0 + pitch * 0.7, rootRadius],
-    ];
-    pts.forEach(([a, r], k) => {
-      const x = Math.cos(a) * r;
-      const y = Math.sin(a) * r;
-      if (i === 0 && k === 0) shape.moveTo(x, y);
-      else shape.lineTo(x, y);
-    });
+    const rootStart = a0;
+    const rootEnd = a0 + pitch * 0.32;
+    const mid = a0 + pitch * 0.62;
+    const p = (a: number, r: number) => [Math.cos(a) * r, Math.sin(a) * r] as const;
+    if (i === 0) shape.moveTo(...p(rootStart, rootRadius));
+    shape.absarc(0, 0, rootRadius, rootStart, rootEnd, false);
+    const tipCentre = p(mid, tipRadius - tipR);
+    const flankAngle = Math.atan2(tipCentre[1], tipCentre[0]);
+    shape.absarc(
+      tipCentre[0],
+      tipCentre[1],
+      tipR,
+      flankAngle - Math.PI / 2 - 0.25,
+      flankAngle + Math.PI / 2 + 0.25,
+      false
+    );
+    shape.lineTo(...p(a0 + pitch, rootRadius));
   }
   shape.closePath();
-
-  // Keyed bore: a circle with a square notch on +X.
-  const bore = new THREE.Path();
-  const keyHalf = boreRadius * 0.38;
-  const keyDepth = boreRadius * 0.45;
-  const keyAngle = Math.asin(keyHalf / boreRadius);
-  bore.moveTo(boreRadius + keyDepth, -keyHalf);
-  bore.lineTo(boreRadius + keyDepth, keyHalf);
-  for (let i = 0; i <= 28; i++) {
-    const a = keyAngle + (i / 28) * (Math.PI * 2 - keyAngle * 2);
-    bore.lineTo(Math.cos(a) * boreRadius, Math.sin(a) * boreRadius);
-  }
-  bore.closePath();
-  shape.holes.push(bore);
-
-  const web = (hubRadius + rootRadius) / 2;
-  const holeRadius = (rootRadius - hubRadius) * 0.3;
-  for (let i = 0; i < 6; i++) {
-    const a = (i / 6) * Math.PI * 2 + Math.PI / 6;
-    shape.holes.push(circlePath(holeRadius, Math.cos(a) * web, Math.sin(a) * web));
-  }
+  shape.holes.push(circlePath(boreRadius));
   const body = new THREE.ExtrudeGeometry(shape, {
     depth: thickness,
     bevelEnabled: false,
-    curveSegments: 20,
+    curveSegments: 16,
   });
   const hub = annulus(hubRadius, boreRadius, hubHeight, 40);
   hub.translate(0, 0, thickness);
@@ -152,137 +139,269 @@ export function makeGearGeometry({
 }
 
 /**
- * Finned heat exchanger: a base block, a row of thin fins and two
- * coolant pipes running through the fin stack, stubbed out both ends.
+ * Naive surface nets over a scalar field (negative = solid). Returns a
+ * non-indexed geometry with normals taken from the field's gradient, so
+ * the curved surface shades smoothly instead of faceting.
  */
-export function makeExchangerGeometry({ fins = 9 } = {}) {
-  const parts: THREE.BufferGeometry[] = [];
-  const width = 1;
-  const depth = 0.56;
-  const base = new THREE.BoxGeometry(width, 0.1, depth);
-  base.translate(0, 0.05, 0);
-  parts.push(base);
-  const finHeight = 0.42;
-  const pitch = (width - 0.08) / (fins - 1);
-  for (let i = 0; i < fins; i++) {
-    const fin = new THREE.BoxGeometry(0.03, finHeight, depth);
-    fin.translate(-width / 2 + 0.04 + i * pitch, 0.1 + finHeight / 2, 0);
-    parts.push(fin);
+function surfaceNets(
+  field: (x: number, y: number, z: number) => number,
+  n: number,
+  min: number,
+  max: number
+) {
+  const step = (max - min) / n;
+  const N = n + 1;
+  const vals = new Float32Array(N * N * N);
+  const at = (i: number, j: number, k: number) => i + N * (j + N * k);
+  for (let k = 0; k < N; k++)
+    for (let j = 0; j < N; j++)
+      for (let i = 0; i < N; i++)
+        vals[at(i, j, k)] = field(min + i * step, min + j * step, min + k * step);
+
+  const cellVert = new Int32Array(n * n * n).fill(-1);
+  const verts: number[] = [];
+  const cAt = (i: number, j: number, k: number) => i + n * (j + n * k);
+  const corners = [
+    [0, 0, 0], [1, 0, 0], [0, 1, 0], [1, 1, 0],
+    [0, 0, 1], [1, 0, 1], [0, 1, 1], [1, 1, 1],
+  ];
+  const edges = [
+    [0, 1], [2, 3], [4, 5], [6, 7], [0, 2], [1, 3],
+    [4, 6], [5, 7], [0, 4], [1, 5], [2, 6], [3, 7],
+  ];
+  for (let k = 0; k < n; k++)
+    for (let j = 0; j < n; j++)
+      for (let i = 0; i < n; i++) {
+        const v = corners.map(([a, b, c]) => vals[at(i + a, j + b, k + c)]);
+        const inside = v.map((x) => x < 0);
+        if (inside.every(Boolean) || !inside.some(Boolean)) continue;
+        let sx = 0, sy = 0, sz = 0, cnt = 0;
+        for (const [e0, e1] of edges) {
+          if (inside[e0] === inside[e1]) continue;
+          const t = v[e0] / (v[e0] - v[e1]);
+          const c0 = corners[e0];
+          const c1 = corners[e1];
+          sx += c0[0] + (c1[0] - c0[0]) * t;
+          sy += c0[1] + (c1[1] - c0[1]) * t;
+          sz += c0[2] + (c1[2] - c0[2]) * t;
+          cnt++;
+        }
+        cellVert[cAt(i, j, k)] = verts.length / 3;
+        verts.push(
+          min + (i + sx / cnt) * step,
+          min + (j + sy / cnt) * step,
+          min + (k + sz / cnt) * step
+        );
+      }
+
+  const pos: number[] = [];
+  const nor: number[] = [];
+  const h = step * 0.5;
+  const grad = (x: number, y: number, z: number) =>
+    new THREE.Vector3(
+      field(x + h, y, z) - field(x - h, y, z),
+      field(x, y + h, z) - field(x, y - h, z),
+      field(x, y, z + h) - field(x, y, z - h)
+    ).normalize();
+  // One gradient per net vertex, shared by every triangle that uses it.
+  const vnorm: THREE.Vector3[] = [];
+  for (let v = 0; v < verts.length / 3; v++) {
+    vnorm.push(grad(verts[v * 3], verts[v * 3 + 1], verts[v * 3 + 2]));
   }
-  for (const z of [-depth * 0.22, depth * 0.22]) {
-    const pipe = new THREE.CylinderGeometry(0.055, 0.055, width + 0.24, 32);
-    pipe.rotateZ(Math.PI / 2);
-    pipe.translate(0, 0.1 + finHeight * 0.55, z);
-    parts.push(pipe);
-    for (const sx of [-1, 1]) {
-      const collar = new THREE.CylinderGeometry(0.075, 0.075, 0.04, 32);
-      collar.rotateZ(Math.PI / 2);
-      collar.translate(sx * (width / 2 + 0.12), 0.1 + finHeight * 0.55, z);
-      parts.push(collar);
+  const pa = new THREE.Vector3();
+  const pb = new THREE.Vector3();
+  const pc = new THREE.Vector3();
+  const tri = (a: number, b: number, c: number) => {
+    pa.fromArray(verts, a * 3);
+    pb.fromArray(verts, b * 3);
+    pc.fromArray(verts, c * 3);
+    const fn = new THREE.Vector3().subVectors(pb, pa).cross(new THREE.Vector3().subVectors(pc, pa));
+    const avg = vnorm[a].clone().add(vnorm[b]).add(vnorm[c]);
+    // Outward = up the field gradient (field is negative inside).
+    const order = fn.dot(avg) < 0 ? [a, c, b] : [a, b, c];
+    for (const idx of order) {
+      pos.push(verts[idx * 3], verts[idx * 3 + 1], verts[idx * 3 + 2]);
+      nor.push(vnorm[idx].x, vnorm[idx].y, vnorm[idx].z);
     }
-  }
-  return finish(mergeGeometries(parts));
+  };
+  const quad = (a: number, b: number, c: number, d: number) => {
+    if (a < 0 || b < 0 || c < 0 || d < 0) return;
+    tri(a, b, c);
+    tri(a, c, d);
+  };
+  for (let k = 0; k < N; k++)
+    for (let j = 0; j < N; j++)
+      for (let i = 0; i < N; i++) {
+        const s0 = vals[at(i, j, k)] < 0;
+        if (i < n && j > 0 && k > 0 && j < n && k < n && s0 !== vals[at(i + 1, j, k)] < 0)
+          quad(cellVert[cAt(i, j - 1, k - 1)], cellVert[cAt(i, j, k - 1)], cellVert[cAt(i, j, k)], cellVert[cAt(i, j - 1, k)]);
+        if (j < n && i > 0 && k > 0 && i < n && k < n && s0 !== vals[at(i, j + 1, k)] < 0)
+          quad(cellVert[cAt(i - 1, j, k - 1)], cellVert[cAt(i, j, k - 1)], cellVert[cAt(i, j, k)], cellVert[cAt(i - 1, j, k)]);
+        if (k < n && i > 0 && j > 0 && i < n && j < n && s0 !== vals[at(i, j, k + 1)] < 0)
+          quad(cellVert[cAt(i - 1, j - 1, k)], cellVert[cAt(i, j - 1, k)], cellVert[cAt(i, j, k)], cellVert[cAt(i - 1, j, k)]);
+      }
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+  geometry.setAttribute("normal", new THREE.Float32BufferAttribute(nor, 3));
+  return geometry;
 }
 
 /**
- * A little rocket booster, cartoon-proportioned: ogive nose, round
- * body with a porthole and a stage band, four swept fins and a nozzle
- * bell. Tilted a touch, mid-launch.
+ * Gyroid heat-exchanger core: a block cut through by a gyroid — the
+ * triply periodic surface that splits a volume into two interwoven
+ * channel networks, hot and cold, and can only be printed.
  */
-export function makeRocketGeometry({ fins = 4 } = {}) {
+export function makeGyroidGeometry({ periods = 1.5, gap = 0.36, resolution = 40 } = {}) {
+  const half = 1;
+  const k = (Math.PI * 2 * periods) / (half * 2);
+  const field = (x: number, y: number, z: number) => {
+    const g =
+      Math.sin(k * x) * Math.cos(k * y) +
+      Math.sin(k * y) * Math.cos(k * z) +
+      Math.sin(k * z) * Math.cos(k * x);
+    // Solid everywhere except a gyroid-shaped gap: the gap is the
+    // dividing wall's negative — two interwoven channel networks cut
+    // through a block — so every face shows the swirl as slots and the
+    // block keeps a clean square outline.
+    const channels = gap - Math.abs(g);
+    const box = (Math.max(Math.abs(x), Math.abs(y), Math.abs(z)) - half * 0.94) * 6;
+    return Math.max(channels, box);
+  };
+  return finish(surfaceNets(field, resolution, -half, half), { keepNormals: true });
+}
+
+/**
+ * Tube-wall rocket engine: injector dome, chamber, throat and bell,
+ * with coolant tubes running nozzle-to-throat into a manifold ring at
+ * each end — one printed part where the classic
+ * build brazes hundreds of tubes.
+ */
+export function makeEngineGeometry({ tubes = 10 } = {}) {
   const parts: THREE.BufferGeometry[] = [];
-  const r = 0.16;
-  const profile: THREE.Vector2[] = [new THREE.Vector2(0, 1)];
-  // Ogive nose.
-  for (let i = 1; i <= 16; i++) {
-    const t = i / 16;
-    profile.push(new THREE.Vector2(r * Math.sin((t * Math.PI) / 2) ** 0.8, 1 - 0.32 * t));
+  const bell = (y: number) => 0.11 + 0.26 * (1 - y / 0.5) ** 1.6;
+  const profile: THREE.Vector2[] = [new THREE.Vector2(0, 1.02)];
+  for (let i = 1; i <= 10; i++) {
+    const t = i / 10;
+    profile.push(new THREE.Vector2(0.22 * Math.sin((t * Math.PI) / 2), 1.02 - 0.12 * (1 - Math.cos((t * Math.PI) / 2))));
   }
-  profile.push(new THREE.Vector2(r, 0.22), new THREE.Vector2(r * 0.86, 0.16));
-  profile.push(new THREE.Vector2(r * 0.55, 0.15));
-  // Nozzle bell.
-  for (let i = 0; i <= 8; i++) {
+  profile.push(new THREE.Vector2(0.22, 0.72));
+  for (let i = 1; i <= 8; i++) {
     const t = i / 8;
-    profile.push(new THREE.Vector2(r * 0.4 + r * 0.42 * t ** 1.4, 0.15 - 0.13 * t));
+    profile.push(new THREE.Vector2(0.22 - 0.11 * (1 - Math.cos((t * Math.PI) / 2)), 0.72 - 0.22 * t));
   }
-  profile.push(new THREE.Vector2(r * 0.74, 0.02), new THREE.Vector2(0, 0.08));
+  for (let i = 1; i <= 24; i++) {
+    const y = 0.5 - (0.5 * i) / 24;
+    profile.push(new THREE.Vector2(bell(y) - 0.01, y));
+  }
+  profile.push(new THREE.Vector2(bell(0) - 0.03, 0), new THREE.Vector2(0.1, 0.45));
   parts.push(new THREE.LatheGeometry(profile, 64));
 
-  const band = new THREE.TorusGeometry(r + 0.008, 0.014, 12, 64);
-  band.rotateX(Math.PI / 2);
-  band.translate(0, 0.5, 0);
-  parts.push(band);
-
-  // Porthole: a ring and a domed glass, facing the viewer's side.
-  const port = new THREE.TorusGeometry(0.05, 0.013, 12, 40);
-  port.translate(0, 0.66, r);
-  parts.push(port);
-  const glass = new THREE.SphereGeometry(0.045, 24, 12, 0, Math.PI * 2, 0, Math.PI / 2);
-  glass.rotateX(Math.PI / 2);
-  glass.scale(1, 1, 0.35);
-  glass.translate(0, 0.66, r - 0.005);
-  parts.push(glass);
-
-  const fin = new THREE.Shape();
-  fin.moveTo(0, 0.38);
-  fin.lineTo(0, 0.12);
-  fin.lineTo(0.17, 0.0);
-  fin.lineTo(0.17, 0.1);
-  fin.closePath();
-  for (let i = 0; i < fins; i++) {
-    const geo = new THREE.ExtrudeGeometry(fin, { depth: 0.024, bevelEnabled: false });
-    geo.translate(r - 0.01, 0, -0.012);
-    geo.rotateY((i / fins) * Math.PI * 2 + Math.PI / 4);
-    parts.push(geo);
+  const tube = 0.026;
+  for (let i = 0; i < tubes; i++) {
+    const a = (i / tubes) * Math.PI * 2;
+    const pts: THREE.Vector3[] = [];
+    for (let s = 0; s <= 20; s++) {
+      const y = 0.04 + (0.44 * s) / 20;
+      const r = bell(y) + tube * 0.6;
+      pts.push(new THREE.Vector3(Math.cos(a) * r, y, Math.sin(a) * r));
+    }
+    parts.push(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 24, tube, 14, false));
   }
+  for (const [y, rr] of [
+    [0.04, bell(0.04) + tube * 1.5],
+    [0.48, bell(0.48) + tube * 1.5],
+  ]) {
+    const ring = new THREE.TorusGeometry(rr, tube * 1.7, 14, 72);
+    ring.rotateX(Math.PI / 2);
+    ring.translate(0, y, 0);
+    parts.push(ring);
+  }
+  // One propellant feed off the dome, flanged.
+  const feed = new THREE.CylinderGeometry(0.05, 0.05, 0.14, 24);
+  feed.translate(0, 1.08, 0);
+  const cap = new THREE.CylinderGeometry(0.085, 0.085, 0.035, 32);
+  cap.translate(0, 1.16, 0);
+  parts.push(feed, cap);
   const merged = mergeGeometries(parts);
-  merged.rotateZ(-0.32);
+  merged.rotateZ(-0.3);
   return finish(merged);
 }
 
 /**
- * Deep-groove ball bearing, unshielded so the balls show: outer race,
- * inner race, ten balls between them.
+ * Print-in-place hinge: two leaves whose knuckles interlock around a
+ * captive pin, printed assembled and already free to swing. Opened to
+ * ~120° so the knuckles read.
  */
-export function makeBearingGeometry({ balls = 10 } = {}) {
+export function makeHingeGeometry({ knuckles = 5, length = 1 } = {}) {
   const parts: THREE.BufferGeometry[] = [];
-  const width = 0.2;
-  const race = (outer: number, inner: number) => {
-    const g = annulus(outer, inner, width, 72);
-    g.translate(0, 0, -width / 2);
-    return g;
+  const r = 0.09;
+  const leafW = 0.42;
+  const t = 0.05;
+  const seg = length / knuckles;
+  const leaf = (angle: number, odd: boolean) => {
+    const shape = new THREE.Shape();
+    shape.moveTo(0, -length / 2);
+    shape.lineTo(leafW - 0.08, -length / 2);
+    shape.absarc(leafW - 0.08, -length / 2 + 0.08, 0.08, -Math.PI / 2, 0, false);
+    shape.lineTo(leafW, length / 2 - 0.08);
+    shape.absarc(leafW - 0.08, length / 2 - 0.08, 0.08, 0, Math.PI / 2, false);
+    shape.lineTo(0, length / 2);
+    shape.closePath();
+    for (const y of [-length * 0.28, length * 0.28]) shape.holes.push(circlePath(0.04, leafW * 0.62, y));
+    const g = new THREE.ExtrudeGeometry(shape, { depth: t, bevelEnabled: false, curveSegments: 16 });
+    g.translate(0, 0, -t / 2);
+    // Leaf lies in XY, spine along Y at x = 0; swing it about Y.
+    g.rotateY(angle);
+    parts.push(g);
+    for (let i = 0; i < knuckles; i++) {
+      if ((i % 2 === 1) !== odd) continue;
+      const k = new THREE.CylinderGeometry(r, r, seg * 0.92, 32);
+      k.translate(0, -length / 2 + seg * (i + 0.5), 0);
+      parts.push(k);
+    }
   };
-  parts.push(race(0.5, 0.41), race(0.24, 0.13));
-  const pitch = (0.41 + 0.24) / 2;
-  const ballR = (0.41 - 0.24) / 2 + 0.005;
-  for (let i = 0; i < balls; i++) {
-    const a = (i / balls) * Math.PI * 2;
-    const ball = new THREE.SphereGeometry(ballR, 24, 16);
-    ball.translate(Math.cos(a) * pitch, Math.sin(a) * pitch, 0);
-    parts.push(ball);
-  }
+  leaf(0, false);
+  leaf((Math.PI * 2) / 3, true);
+  const pin = new THREE.CylinderGeometry(r * 0.45, r * 0.45, length + 0.06, 20);
+  parts.push(pin);
   const merged = mergeGeometries(parts);
-  merged.rotateX(-Math.PI / 2 + 0.25);
+  merged.rotateX(Math.PI / 2);
   return finish(merged);
 }
 
 /**
- * Compression spring: a round-wire helix with closed, flat end coils.
+ * Compression spring on its seats: a round-wire helix with closed ends,
+ * sitting in a spigoted seat cup at each end — the way it sits in a
+ * real assembly.
  */
-export function makeSpringGeometry({ turns = 6, radius = 0.3, wire = 0.05 } = {}) {
-  const pts: THREE.Vector3[] = [];
+export function makeSpringGeometry({ turns = 5, radius = 0.26, wire = 0.045 } = {}) {
+  const parts: THREE.BufferGeometry[] = [];
+  const seatH = 0.08;
+  const height = 0.8;
   const steps = turns * 48;
-  const height = 1;
+  const pts: THREE.Vector3[] = [];
   for (let i = 0; i <= steps; i++) {
     const t = i / steps;
     const a = t * turns * Math.PI * 2;
-    // Closed ends: the first and last turn barely climb.
-    const ends = Math.min(1, t * turns, (1 - t) * turns);
-    const y = THREE.MathUtils.lerp(0, height, t) * 0.92 + 0.04 * (1 - ends) * (t > 0.5 ? 1 : -1);
+    // Closed ends: the first and last half-turn flatten onto the seats.
+    const e = Math.min(1, t * turns * 2, (1 - t) * turns * 2);
+    const y = seatH + wire + THREE.MathUtils.lerp(0, height, THREE.MathUtils.smoothstep(t, 0, 1) * 0.5 + t * 0.5) * (0.85 + 0.15 * e);
     pts.push(new THREE.Vector3(Math.cos(a) * radius, y, Math.sin(a) * radius));
   }
-  const coil = new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), steps, wire, 16, false);
-  return finish(mergeGeometries([coil]));
+  parts.push(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), steps, wire, 16, false));
+  const top = pts[pts.length - 1].y + wire;
+  const flangeH = seatH * 0.55;
+  const seat = (flangeY: number, spigotY: number) => {
+    // Seat: a flanged disc with a spigot that centres the coil.
+    const flange = new THREE.CylinderGeometry(radius + 0.12, radius + 0.12, flangeH, 48);
+    flange.translate(0, flangeY, 0);
+    const spigot = new THREE.CylinderGeometry(radius - wire * 1.5, radius - wire * 1.5, seatH, 40);
+    spigot.translate(0, spigotY, 0);
+    parts.push(flange, spigot);
+  };
+  seat(flangeH / 2, flangeH + seatH / 2);
+  seat(top + flangeH / 2, top - seatH / 2);
+  return finish(mergeGeometries(parts));
 }
 
 export const PART_BUILDERS: Record<
@@ -291,9 +410,9 @@ export const PART_BUILDERS: Record<
 > = {
   fan: () => makeRotorGeometry(),
   gear: () => makeGearGeometry(),
-  exchanger: () => makeExchangerGeometry(),
-  rocket: () => makeRocketGeometry(),
-  bearing: () => makeBearingGeometry(),
+  gyroid: () => makeGyroidGeometry(),
+  engine: () => makeEngineGeometry(),
+  hinge: () => makeHingeGeometry(),
   spring: () => makeSpringGeometry(),
 };
 
