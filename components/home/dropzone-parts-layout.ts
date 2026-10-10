@@ -47,17 +47,17 @@ export const DROPZONE_PARTS_MOBILE_SCALE = 0.72;
  */
 export const DROPZONE_PARTS: readonly DropzonePart[] = [
   {
-    kind: "thruster",
-    position: [-0.42, 0.06],
-    mobilePosition: [-0.7, 0.3],
-    size: 0.7,
-    yaw: 0.35,
+    kind: "rocket",
+    position: [-0.42, 0.04],
+    mobilePosition: [-0.72, 0.28],
+    size: 0.82,
+    yaw: 0,
     floatPx: 2,
     floatSpeed: 0.55,
     phase: 0.4,
   },
   {
-    kind: "manifold",
+    kind: "exchanger",
     position: [0.6, 0.12],
     mobilePosition: [0.72, 0.36],
     size: 0.62,
@@ -67,7 +67,7 @@ export const DROPZONE_PARTS: readonly DropzonePart[] = [
     phase: 1.2,
   },
   {
-    kind: "impeller",
+    kind: "bearing",
     position: [0.3, -0.14],
     mobilePosition: null,
     size: 0.46,
@@ -77,7 +77,7 @@ export const DROPZONE_PARTS: readonly DropzonePart[] = [
     phase: 2.1,
   },
   {
-    kind: "rotor",
+    kind: "fan",
     // Cropped by the left edge.
     position: [-0.94, -0.3],
     mobilePosition: [-0.95, -0.55],
@@ -88,7 +88,7 @@ export const DROPZONE_PARTS: readonly DropzonePart[] = [
     phase: 0.9,
   },
   {
-    kind: "injector",
+    kind: "spring",
     position: [-0.16, -0.62],
     mobilePosition: null,
     size: 0.42,
@@ -98,12 +98,12 @@ export const DROPZONE_PARTS: readonly DropzonePart[] = [
     phase: 2.8,
   },
   {
-    kind: "duct",
+    kind: "gear",
     // Cropped by the right and bottom edges.
-    position: [0.97, -0.55],
-    mobilePosition: [0.92, -0.62],
-    size: 0.8,
-    yaw: 0.6,
+    position: [0.95, -0.6],
+    mobilePosition: [0.9, -0.66],
+    size: 0.9,
+    yaw: 0.2,
     floatPx: 2,
     floatSpeed: 0.5,
     phase: 1.7,
