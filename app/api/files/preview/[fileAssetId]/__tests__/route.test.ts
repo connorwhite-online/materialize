@@ -29,6 +29,7 @@ vi.mock("@/lib/db/schema", () => ({
   },
   files: {
     id: "id",
+    price: "price",
     userId: "userId",
     organizationId: "organizationId",
     status: "status",
@@ -75,6 +76,21 @@ vi.mock("@/lib/studio-drafts", () => ({
   promoteStudioDraftsForAssets: (...args: unknown[]) => mockPromote(...args),
 }));
 
+// Entitlement is unit-tested in lib/__tests__; the route only has to ask
+// it (for paid, non-owner viewers) and honor the answer.
+const mockOwnsLoadedFile = vi.fn();
+vi.mock("@/lib/entitlement", () => ({
+  ownsLoadedFile: (...args: unknown[]) => mockOwnsLoadedFile(...args),
+}));
+
+// Keep the real needsLowDetailPreview / key version; stub the R2-backed
+// generator so the test sees exactly which variant was served.
+const mockGetPreviewBytes = vi.fn();
+vi.mock("@/lib/files/model-preview", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/files/model-preview")>()),
+  getPreviewBytes: (...args: unknown[]) => mockGetPreviewBytes(...args),
+}));
+
 // Mock global fetch for the upstream R2 proxy
 const mockFetch = vi.fn();
 vi.stubGlobal("fetch", mockFetch);
@@ -95,6 +111,8 @@ function asset(
   overrides: Partial<{
     storageKey: string;
     format: string;
+    fileId: string | null;
+    filePrice: number | null;
     fileUserId: string | null;
     fileOrganizationId: string | null;
     fileStatus: string;
@@ -104,6 +122,8 @@ function asset(
   return {
     storageKey: "uploads/owner-1/abc/model.stl",
     format: "stl",
+    fileId: "file-1",
+    filePrice: 0,
     fileUserId: "owner-1",
     fileOrganizationId: null,
     fileStatus: "published",
@@ -129,6 +149,10 @@ beforeEach(() => {
   mockIsOrgMember.mockReset();
   mockIsOrgMember.mockResolvedValue({ member: false, role: null });
   mockPromote.mockClear();
+  mockOwnsLoadedFile.mockReset();
+  mockOwnsLoadedFile.mockResolvedValue(false);
+  mockGetPreviewBytes.mockReset();
+  mockGetPreviewBytes.mockResolvedValue(new Uint8Array([7, 7, 7]));
 });
 
 describe("preview/[fileAssetId] GET", () => {
@@ -286,5 +310,124 @@ describe("preview/[fileAssetId] GET", () => {
 
     const res = await GET(makeRequest(), makeProps("nonexistent"));
     expect(res.status).toBe(404);
+  });
+});
+
+describe("preview/[fileAssetId] GET — paid listings", () => {
+  it("free listing: no entitlement query, original bytes, long immutable cache", async () => {
+    mockUserId = "other-user";
+    assetRow = asset({ filePrice: 0 });
+    upstreamOk();
+
+    const res = await GET(makeRequest(), makeProps("asset-1"));
+    expect(res.status).toBe(200);
+    expect(mockOwnsLoadedFile).not.toHaveBeenCalled();
+    expect(mockGetPreviewBytes).not.toHaveBeenCalled();
+    expect(mockFetch).toHaveBeenCalled();
+    expect(res.headers.get("Cache-Control")).toBe(
+      "private, max-age=86400, immutable"
+    );
+  });
+
+  it("paid listing, anon: low-detail copy, never the original", async () => {
+    mockUserId = null;
+    assetRow = asset({ filePrice: 500 });
+
+    const res = await GET(makeRequest(), makeProps("asset-1"));
+    expect(res.status).toBe(200);
+    expect(mockFetch).not.toHaveBeenCalled();
+    expect(mockGetPreviewBytes).toHaveBeenCalledWith({
+      id: "asset-1",
+      storageKey: "uploads/owner-1/abc/model.stl",
+      format: "stl",
+    });
+    expect(new Uint8Array(await res.arrayBuffer())).toEqual(
+      new Uint8Array([7, 7, 7])
+    );
+    expect(res.headers.get("Content-Type")).toBe("model/stl");
+    expect(res.headers.get("Cache-Control")).toBe("private, no-cache");
+    expect(res.headers.get("ETag")).toBe('"asset-1.preview.v1"');
+  });
+
+  it("paid listing, signed-in non-buyer: entitlement checked, low-detail copy", async () => {
+    mockUserId = "other-user";
+    assetRow = asset({ filePrice: 500, fileOrganizationId: "org-1" });
+
+    const res = await GET(makeRequest(), makeProps("asset-1"));
+    expect(res.status).toBe(200);
+    expect(mockOwnsLoadedFile).toHaveBeenCalledWith("other-user", {
+      id: "file-1",
+      price: 500,
+      userId: "owner-1",
+      organizationId: "org-1",
+    });
+    expect(mockGetPreviewBytes).toHaveBeenCalled();
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it("paid listing, buyer: full original, revalidating cache with the full ETag", async () => {
+    mockUserId = "buyer";
+    assetRow = asset({ filePrice: 500 });
+    mockOwnsLoadedFile.mockResolvedValue(true);
+    upstreamOk();
+
+    const res = await GET(makeRequest(), makeProps("asset-1"));
+    expect(res.status).toBe(200);
+    expect(mockGetPreviewBytes).not.toHaveBeenCalled();
+    expect(mockFetch).toHaveBeenCalled();
+    expect(res.headers.get("Cache-Control")).toBe("private, no-cache");
+    expect(res.headers.get("ETag")).toBe('"asset-1.full"');
+  });
+
+  it("paid listing, owner: full original without an entitlement query", async () => {
+    mockUserId = "owner-1";
+    assetRow = asset({ filePrice: 500 });
+    upstreamOk();
+
+    const res = await GET(makeRequest(), makeProps("asset-1"));
+    expect(res.status).toBe(200);
+    expect(mockOwnsLoadedFile).not.toHaveBeenCalled();
+    expect(mockGetPreviewBytes).not.toHaveBeenCalled();
+  });
+
+  it("a cached low-detail copy is NOT revalidated once the viewer has bought the file", async () => {
+    mockUserId = "buyer";
+    assetRow = asset({ filePrice: 500 });
+    mockOwnsLoadedFile.mockResolvedValue(true);
+    upstreamOk();
+
+    const res = await GET(
+      new Request("http://localhost/api/files/preview/asset-1", {
+        headers: { "If-None-Match": '"asset-1.preview.v1"' },
+      }),
+      makeProps("asset-1")
+    );
+    expect(res.status).toBe(200);
+    expect(res.headers.get("ETag")).toBe('"asset-1.full"');
+  });
+
+  it("a matching ETag gets a 304 without touching R2", async () => {
+    mockUserId = null;
+    assetRow = asset({ filePrice: 500 });
+
+    const res = await GET(
+      new Request("http://localhost/api/files/preview/asset-1", {
+        headers: { "If-None-Match": '"asset-1.preview.v1"' },
+      }),
+      makeProps("asset-1")
+    );
+    expect(res.status).toBe(304);
+    expect(mockGetPreviewBytes).not.toHaveBeenCalled();
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it("paid STEP/AMF with no low-detail copy: 403, never the original", async () => {
+    mockUserId = null;
+    assetRow = asset({ filePrice: 500, format: "step" });
+    mockGetPreviewBytes.mockResolvedValue(null);
+
+    const res = await GET(makeRequest(), makeProps("asset-1"));
+    expect(res.status).toBe(403);
+    expect(mockFetch).not.toHaveBeenCalled();
   });
 });
