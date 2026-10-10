@@ -63,7 +63,7 @@ export default function TermsPage() {
           You can cancel for a refund until production starts. After that,
           orders can&apos;t be cancelled, but if your part arrives damaged,
           defective or not as ordered, email{" "}
-          <a href={mail}>{SUPPORT_EMAIL}</a> within 30 days of delivery with
+          <a href={mail}>{SUPPORT_EMAIL}</a>{" "}within 30 days of delivery with
           photos and we&apos;ll work with the manufacturer on a reprint or
           refund.
         </li>
@@ -108,7 +108,7 @@ export default function TermsPage() {
         including weapons, firearm parts and items that are prohibited where
         they will be shipped. We may remove content or suspend accounts that
         break these terms. To report infringement, email{" "}
-        <a href={mail}>{SUPPORT_EMAIL}</a> with the work, where it appears on
+        <a href={mail}>{SUPPORT_EMAIL}</a>{" "}with the work, where it appears on
         Materialize, and your contact details.
       </p>
 

@@ -32,36 +32,36 @@ export default function PrivacyPage() {
       <h2>What we collect</h2>
       <ul>
         <li>
-          <strong>Account details:</strong> email address, name, username,
+          <strong>Account details:</strong>{" "}email address, name, username,
           profile photo, and anything you add to your profile (bio, links).
           If you sign in with Google or Apple, we receive your name, email
           and profile photo from them.
         </li>
         <li>
-          <strong>Content you upload:</strong> 3D model files, photos,
+          <strong>Content you upload:</strong>{" "}3D model files, photos,
           descriptions, comments, projects and collections, plus the
           thumbnails and geometry data we generate from your models.
         </li>
         <li>
-          <strong>Order details:</strong> shipping name, address and phone
+          <strong>Order details:</strong>{" "}shipping name, address and phone
           number, the items, materials and prices you choose, and order
           status. We keep your most recent checkout phone number on your
           account.
         </li>
         <li>
-          <strong>Payment details:</strong> handled by Stripe. We never see
+          <strong>Payment details:</strong>{" "}handled by Stripe. We never see
           or store your full card number; we keep Stripe&apos;s references
           to your payments. If you sell files, Stripe collects the identity
           and bank details it needs to pay you.
         </li>
         <li>
-          <strong>Connected apps:</strong> when you connect an AI assistant
+          <strong>Connected apps:</strong>{" "}when you connect an AI assistant
           (such as ChatGPT or Claude) or create an access token, we record
           which app it is, the permissions you granted, when it was last
           used, and any spending limits you set.
         </li>
         <li>
-          <strong>Technical data:</strong> error reports (which can include
+          <strong>Technical data:</strong>{" "}error reports (which can include
           your browser, device and the page you were on), and for uploads
           made without an account, a one-way hash of your IP address to
           limit abuse. We don&apos;t use advertising trackers.
@@ -87,13 +87,13 @@ export default function PrivacyPage() {
       <h2>Who we share it with</h2>
       <ul>
         <li>
-          <strong>Manufacturing partners:</strong> when you order a print,
+          <strong>Manufacturing partners:</strong>{" "}when you order a print,
           your model file, chosen material, and shipping name, address and
           phone number go to CraftCloud and the print shop that makes and
           ships it.
         </li>
         <li>
-          <strong>Service providers</strong> that run Materialize on our
+          <strong>Service providers</strong>{" "}that run Materialize on our
           behalf: Clerk (sign-in), Stripe (payments and creator payouts),
           Vercel (hosting), Neon (database), Cloudflare (file storage),
           Resend (email) and Sentry (error reporting). If you use AI design
@@ -101,17 +101,17 @@ export default function PrivacyPage() {
           provider that runs them.
         </li>
         <li>
-          <strong>Other users:</strong> see &ldquo;What&apos;s public&rdquo;
+          <strong>Other users:</strong>{" "}see &ldquo;What&apos;s public&rdquo;
           below.
         </li>
         <li>
-          <strong>Apps you connect:</strong> an AI assistant you connect
+          <strong>Apps you connect:</strong>{" "}an AI assistant you connect
           receives the data its tools return to you, such as quotes, order
           status and your files. What that app does with it is covered by
           its own privacy policy.
         </li>
         <li>
-          <strong>When required:</strong> to comply with the law, respond to
+          <strong>When required:</strong>{" "}to comply with the law, respond to
           valid legal requests, or protect the rights and safety of our
           users, or as part of a transfer of the business (in which case
           this policy continues to apply).

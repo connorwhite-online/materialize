@@ -15,7 +15,7 @@ export default function SupportPage() {
   return (
     <LegalPage title="Support" showUpdated={false}>
       <p>
-        Email <a href={mail}>{SUPPORT_EMAIL}</a> and we&apos;ll get back to you,
+        Email <a href={mail}>{SUPPORT_EMAIL}</a>{" "}and we&apos;ll get back to you,
         usually within one business day. For an order, include its order
         number or the email you checked out with.
       </p>
@@ -57,14 +57,14 @@ export default function SupportPage() {
         </li>
         <li>
           Using Claude? See <Link href="/support/claude">Materialize in
-          Claude</Link> for how to connect and what it can do.
+          Claude</Link>{" "}for how to connect and what it can do.
         </li>
       </ul>
 
       <h2>Account and privacy</h2>
       <p>
         To get a copy of your data or delete your account, email us. See the{" "}
-        <Link href="/privacy">Privacy Policy</Link> and{" "}
+        <Link href="/privacy">Privacy Policy</Link>{" "}and{" "}
         <Link href="/terms">Terms of Service</Link>.
       </p>
     </LegalPage>
