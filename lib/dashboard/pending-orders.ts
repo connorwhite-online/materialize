@@ -51,6 +51,11 @@ export type PendingOrder = {
   title: string | null;
   /** Listing thumbnail for that part, when one was ever captured. */
   thumbnailUrl: string | null;
+  /**
+   * Thumbnails for up to the first three distinct parts, in order —
+   * `null` where a part has none. Multi-file cards fan these as a stack.
+   */
+  thumbnails: (string | null)[];
   /** Units of the (first) part. */
   quantity: number;
   /** Order total in cents (production + shipping + our fee). */
@@ -117,6 +122,8 @@ export function sortHomeOrders<
 
 const PENDING_MAX = 12;
 const MATERIAL_BUDGET_MS = 350;
+/** Parts fanned in a multi-file card's thumbnail stack. */
+const STACK_MAX = 3;
 
 function materialFields(m: OrderMaterialDisplay | undefined) {
   return {
@@ -185,6 +192,7 @@ async function loadPendingOrdersOnce(userId: string): Promise<PendingOrder[]> {
       : [];
 
   const fileIdsByOrder = new Map<string, Set<string>>();
+  const stackIdsByOrder = new Map<string, string[]>();
   const firstItemByOrder = new Map<
     string,
     { fileAssetId: string; quantity: number; materialConfigId: string }
@@ -194,6 +202,11 @@ async function loadPendingOrdersOnce(userId: string): Promise<PendingOrder[]> {
     if (!set) {
       set = new Set();
       fileIdsByOrder.set(item.printOrderId, set);
+    }
+    if (!set.has(item.fileAssetId)) {
+      const stack = stackIdsByOrder.get(item.printOrderId) ?? [];
+      if (stack.length < STACK_MAX) stack.push(item.fileAssetId);
+      stackIdsByOrder.set(item.printOrderId, stack);
     }
     set.add(item.fileAssetId);
     if (!firstItemByOrder.has(item.printOrderId)) {
@@ -206,7 +219,7 @@ async function loadPendingOrdersOnce(userId: string): Promise<PendingOrder[]> {
   const leadAssetIds = [
     ...new Set(
       draftsRaw
-        .map((d) => d.fileAssetId ?? firstItemByOrder.get(d.id)?.fileAssetId)
+        .flatMap((d) => (d.fileAssetId ? [d.fileAssetId] : stackIdsByOrder.get(d.id) ?? []))
         .filter((id): id is string => Boolean(id))
     ),
   ];
@@ -253,6 +266,9 @@ async function loadPendingOrdersOnce(userId: string): Promise<PendingOrder[]> {
       fileCount: multiFiles ? Math.max(multiFiles.size, 1) : 1,
       title: displayPartName(part?.name ?? part?.originalFilename),
       thumbnailUrl: part?.thumbnailUrl ?? null,
+      thumbnails: (d.fileAssetId ? [d.fileAssetId] : stackIdsByOrder.get(d.id) ?? []).map(
+        (id) => partByAsset.get(id)?.thumbnailUrl ?? null
+      ),
       quantity: Math.max(1, d.quantity ?? first?.quantity ?? 1),
       totalCents: d.totalPrice > 0 ? d.totalPrice : null,
       ...materialFields(materials.get(d.material ?? first?.materialConfigId ?? "")),

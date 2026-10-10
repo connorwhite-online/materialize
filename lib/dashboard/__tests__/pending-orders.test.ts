@@ -18,6 +18,7 @@ function order(overrides: Partial<PendingOrder> = {}): PendingOrder {
     fileCount: 1,
     title: null,
     thumbnailUrl: null,
+    thumbnails: [],
     quantity: 1,
     totalCents: null,
     materialName: null,

@@ -27,6 +27,7 @@ function order(overrides: Partial<PendingOrder> = {}): PendingOrder {
     fileCount: 1,
     title: null,
     thumbnailUrl: null,
+    thumbnails: [],
     quantity: 1,
     totalCents: null,
     materialName: null,
@@ -96,12 +97,20 @@ describe("PendingOrderTile", () => {
     expect(html).not.toContain("1 file");
   });
 
-  it("badges extra parts on a multi-file order", () => {
+  it("fans a multi-file order's parts as a stack and badges the overflow", () => {
     const html = renderToStaticMarkup(
-      <PendingOrderTile order={order({ title: "Fan shroud", fileCount: 3 })} />
+      <PendingOrderTile
+        order={order({
+          title: "Fan shroud",
+          fileCount: 5,
+          thumbnails: ["/api/thumbnails/a", null, "/api/thumbnails/c"],
+        })}
+      />
     );
+    expect(html).toContain("Fan shroud + 4 more");
+    expect(html).toContain("/api/thumbnails/a");
+    expect(html).toContain("/api/thumbnails/c");
     expect(html).toContain("+2");
-    expect(html).toContain("3 files");
   });
 
   it("shows a plural file count for multi-item orders", () => {
