@@ -1,8 +1,11 @@
-<svg width="196" height="100" viewBox="0 0 196 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+<svg width="196" height="196" viewBox="0 -48 196 196" fill="none" xmlns="http://www.w3.org/2000/svg">
   <style>
     /* Theme-responsive favicon: dark mark on light UI, light mark on dark UI.
        Geometry must match MARK_PATH in components/brand/logo-paths.ts — this
-       is a static asset, so it is the one place the path is duplicated. */
+       is a static asset, so it is the one place the path is duplicated.
+       The viewBox pads the 196×100 mark into a square: connector hosts
+       (Claude, ChatGPT) and browsers show favicons square, and a
+       non-square icon gets squashed. */
     path { fill: #0a0a0a; }
     @media (prefers-color-scheme: dark) {
       path { fill: #fafafa; }
