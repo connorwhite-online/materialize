@@ -708,6 +708,17 @@ export async function archiveFileListing(fileId: string) {
 // file for the full status-by-status rationale and the CON-153/
 // CON-164/MTR-231 references.
 
+// What an owner's Delete does when the file can't be hard-deleted. It
+// also clears flaggedReason: the owner library keeps auto-flagged files
+// on screen (shownInOwnerLibrary) so the owner notices them, and a
+// flagged file the owner then deletes must leave the library like any
+// other. flaggedAt and flaggedAgainstFileId stay as the audit trail.
+const OWNER_ARCHIVE = {
+  status: "archived" as const,
+  visibility: "private" as const,
+  flaggedReason: null,
+};
+
 export async function deleteFileListing(
   fileId: string
 ): Promise<
@@ -752,7 +763,7 @@ export async function deleteFileListing(
     if (totalBuyers > 0) {
       await db
         .update(files)
-        .set({ status: "archived", visibility: "private" })
+        .set(OWNER_ARCHIVE)
         .where(eq(files.id, fileId));
       revalidatePath(`/files/${file.slug}`);
       revalidatePath("/files");
@@ -819,7 +830,7 @@ export async function deleteFileListing(
       if (inFlight > 0) {
         await db
           .update(files)
-          .set({ status: "archived", visibility: "private" })
+          .set(OWNER_ARCHIVE)
           .where(eq(files.id, fileId));
         revalidatePath(`/files/${file.slug}`);
         revalidatePath("/files");

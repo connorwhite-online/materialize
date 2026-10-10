@@ -13,6 +13,7 @@ import {
 } from "@/lib/db/schema";
 import { eq, and, asc, desc, inArray, sql } from "drizzle-orm";
 import { notUnsavedStudioDraft } from "@/lib/studio-drafts";
+import { shownInOwnerLibrary } from "@/lib/files/owner-library";
 import { currentAssetsByFileId } from "@/lib/files/current-version";
 import { CollectionSection } from "./collection-section";
 import { LibrarySection } from "./library-section";
@@ -99,7 +100,9 @@ export async function LibraryTab({
   // Unsaved text-to-CAD drafts live in the studio, not the library —
   // even for the owner (docs/text-to-cad/05 §B).
   const fileConditions = [eq(files.userId, userId), notUnsavedStudioDraft()];
-  if (!isOwner) {
+  if (isOwner) {
+    fileConditions.push(shownInOwnerLibrary());
+  } else {
     fileConditions.push(eq(files.status, "published"));
     fileConditions.push(eq(files.visibility, "public"));
   }
