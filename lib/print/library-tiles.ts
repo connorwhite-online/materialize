@@ -9,6 +9,7 @@ import {
 import { eq, and, desc, inArray, sql } from "drizzle-orm";
 import { withDbRetry } from "@/lib/db/retry";
 import { notUnsavedStudioDraft } from "@/lib/studio-drafts";
+import { shownInOwnerLibrary } from "@/lib/files/owner-library";
 import { currentAssetsByFileId } from "@/lib/files/current-version";
 
 // Cap owned + purchased file fetches at the same user-friendly ceiling
@@ -62,7 +63,13 @@ async function loadLibraryTilesOnce(userId: string): Promise<LibraryTile[]> {
         currentAssetId: files.currentAssetId,
       })
       .from(files)
-      .where(and(eq(files.userId, userId), notUnsavedStudioDraft()))
+      .where(
+        and(
+          eq(files.userId, userId),
+          notUnsavedStudioDraft(),
+          shownInOwnerLibrary()
+        )
+      )
       .orderBy(desc(files.createdAt))
       .limit(LIBRARY_MAX_FILES + 1),
     db

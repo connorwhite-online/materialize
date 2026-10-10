@@ -576,6 +576,7 @@ describe("deleteFileListing", () => {
     expect(mockSet).toHaveBeenCalledWith({
       status: "archived",
       visibility: "private",
+      flaggedReason: null,
     });
   });
 
@@ -607,6 +608,7 @@ describe("deleteFileListing", () => {
     expect(mockSet).toHaveBeenCalledWith({
       status: "archived",
       visibility: "private",
+      flaggedReason: null,
     });
     expect(mockDeleteObject).not.toHaveBeenCalled();
     expect(mockDbDelete).not.toHaveBeenCalled();
@@ -633,6 +635,7 @@ describe("deleteFileListing", () => {
     expect(mockSet).toHaveBeenCalledWith({
       status: "archived",
       visibility: "private",
+      flaggedReason: null,
     });
     expect(mockDeleteObject).not.toHaveBeenCalled();
     expect(mockDbDelete).not.toHaveBeenCalled();
@@ -654,6 +657,7 @@ describe("deleteFileListing", () => {
     expect(mockSet).toHaveBeenCalledWith({
       status: "archived",
       visibility: "private",
+      flaggedReason: null,
     });
     expect(mockDeleteObject).not.toHaveBeenCalled();
   });
