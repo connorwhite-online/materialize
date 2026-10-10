@@ -2,6 +2,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const createCart = vi.fn();
 vi.mock("../client", () => ({ createCart: (...a: unknown[]) => createCart(...a) }));
+const readShared = vi.fn(async () => new Map());
+const writeShared = vi.fn(async () => {});
+vi.mock("../vendor-minimums-store", () => ({
+  readSharedMinimums: (...a: unknown[]) => readShared(...(a as [])),
+  writeSharedMinimums: (...a: unknown[]) => writeShared(...(a as [])),
+}));
 
 import {
   clearVendorMinimumCache,
@@ -14,6 +20,9 @@ const probe = (vendorId: string) => ({ vendorId, quoteId: `q-${vendorId}`, shipp
 beforeEach(() => {
   clearVendorMinimumCache();
   createCart.mockReset();
+  readShared.mockReset();
+  readShared.mockResolvedValue(new Map());
+  writeShared.mockReset();
 });
 
 describe("getVendorMinimums", () => {
@@ -53,5 +62,22 @@ describe("getVendorMinimums", () => {
     const probes = Array.from({ length: MAX_PROBES_PER_REQUEST + 10 }, (_, i) => probe(`v${i}`));
     await getVendorMinimums(probes, "USD");
     expect(createCart).toHaveBeenCalledTimes(MAX_PROBES_PER_REQUEST);
+  });
+
+  it("uses another instance's probe instead of creating a cart", async () => {
+    readShared.mockResolvedValue(
+      new Map([["a", { minimum: 33, fetchedAt: Date.now() }]])
+    );
+    const out = await getVendorMinimums([probe("a")], "USD");
+    expect(out).toEqual({ a: 33 });
+    expect(createCart).not.toHaveBeenCalled();
+  });
+
+  it("shares what it probes with other instances", async () => {
+    createCart.mockResolvedValue({ minimumProductionPrice: { b: { price: 12, productionFee: 0 } } });
+    await getVendorMinimums([probe("b")], "USD", 1000);
+    expect(writeShared).toHaveBeenCalledWith("USD", [
+      { vendorId: "b", minimum: 12, fetchedAt: 1000 },
+    ]);
   });
 });

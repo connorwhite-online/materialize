@@ -498,6 +498,13 @@
       "when": 1786100500000,
       "tag": "0071_rate_limit_counters",
       "breakpoints": true
+    },
+    {
+      "idx": 72,
+      "version": "7",
+      "when": 1786100600000,
+      "tag": "0072_craftcloud_vendor_minimums",
+      "breakpoints": true
     }
   ]
 }

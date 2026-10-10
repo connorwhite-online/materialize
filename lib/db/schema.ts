@@ -2030,3 +2030,23 @@ export const rateLimitCounters = pgTable(
     index("rate_limit_counters_window_idx").on(table.windowStart),
   ]
 );
+
+// Vendor minimum order values learned from disposable CraftCloud carts
+// (lib/craftcloud/vendor-minimums.ts). Shared across server instances so
+// a cold instance doesn't re-probe every vendor; `minimum` is in the
+// currency's major unit, 0 meaning no minimum.
+export const craftCloudVendorMinimums = pgTable(
+  "craftcloud_vendor_minimums",
+  {
+    currency: text("currency").notNull(),
+    vendorId: text("vendor_id").notNull(),
+    minimum: doublePrecision("minimum").notNull(),
+    fetchedAt: timestamp("fetched_at", { withTimezone: true }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("craftcloud_vendor_minimums_currency_vendor_uq").on(
+      table.currency,
+      table.vendorId
+    ),
+  ]
+);

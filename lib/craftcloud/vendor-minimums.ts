@@ -2,6 +2,10 @@ import "server-only";
 import { createCart } from "./client";
 import type { Currency } from "./types";
 import { logError } from "@/lib/logger";
+import {
+  readSharedMinimums,
+  writeSharedMinimums,
+} from "./vendor-minimums-store";
 
 /**
  * Vendor minimum order values, learned from disposable CraftCloud carts.
@@ -10,7 +14,8 @@ import { logError } from "@/lib/logger";
  * (`minimumProductionPrice[vendorId].price`), never on a quote. It is a
  * property of the vendor — the same for every material and quote it
  * prices — so one cart per vendor is enough, and the answer is cached
- * per server instance. Creating a cart places nothing and reserves
+ * per server instance and, behind that, in Postgres for every instance
+ * (vendor-minimums-store.ts). Creating a cart places nothing and reserves
  * nothing we need to release.
  *
  * Consumed by the print picker so vendors are ranked, and priced, by
@@ -50,16 +55,36 @@ export async function getVendorMinimums(
   const pending: MinimumProbe[] = [];
   const seen = new Set<string>();
 
+  const misses: MinimumProbe[] = [];
   for (const probe of probes) {
     if (seen.has(probe.vendorId)) continue;
     seen.add(probe.vendorId);
     const hit = cache.get(cacheKey(currency, probe.vendorId));
     if (hit && now - hit.fetchedAt < TTL_MS) {
       out[probe.vendorId] = hit.minimum;
+    } else {
+      misses.push(probe);
+    }
+  }
+
+  // Another instance may already have probed these vendors.
+  const shared = await readSharedMinimums(
+    currency,
+    misses.map((p) => p.vendorId),
+    new Date(now - TTL_MS)
+  );
+  for (const probe of misses) {
+    const hit = shared.get(probe.vendorId);
+    if (hit) {
+      cache.set(cacheKey(currency, probe.vendorId), hit);
+      out[probe.vendorId] = hit.minimum;
     } else if (pending.length < MAX_PROBES_PER_REQUEST) {
       pending.push(probe);
     }
   }
+
+  const learned: { vendorId: string; minimum: number; fetchedAt: number }[] =
+    [];
 
   let next = 0;
   async function worker() {
@@ -77,6 +102,7 @@ export async function getVendorMinimums(
           fetchedAt: now,
         });
         out[probe.vendorId] = minimum;
+        learned.push({ vendorId: probe.vendorId, minimum, fetchedAt: now });
       } catch (err) {
         // Stale quote id or a CraftCloud hiccup — skip; the picker
         // treats an unknown vendor as having no minimum until asked again.
@@ -93,6 +119,7 @@ export async function getVendorMinimums(
   await Promise.all(
     Array.from({ length: Math.min(CONCURRENCY, pending.length) }, worker)
   );
+  await writeSharedMinimums(currency, learned);
   return out;
 }
 
