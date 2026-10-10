@@ -1,5 +1,10 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { mintWidgetModelToken, verifyWidgetModelToken } from "../model-token";
+import { createHash, createHmac } from "node:crypto";
+import {
+  mintWidgetModelToken,
+  readWidgetModelToken,
+  verifyWidgetModelToken,
+} from "../model-token";
 import { quoteWidgetHtml } from "../quote-widget";
 import { materialsWidgetHtml } from "../materials-widget";
 import { toCm3 } from "@/lib/mcp/internal/quotes";
@@ -17,6 +22,31 @@ describe("widget model token", () => {
     expect(verifyWidgetModelToken("asset-a", t, now + 25 * 3600 * 1000)).toBe(false);
     expect(verifyWidgetModelToken("asset-a", null, now)).toBe(false);
     expect(verifyWidgetModelToken("asset-a", "garbage", now)).toBe(false);
+  });
+
+  it("carries a signed variant that defaults to preview", () => {
+    const now = Date.UTC(2026, 9, 9);
+    expect(readWidgetModelToken("asset-a", mintWidgetModelToken("asset-a", now), now)).toBe(
+      "preview"
+    );
+    const full = mintWidgetModelToken("asset-a", now, "full");
+    expect(readWidgetModelToken("asset-a", full, now)).toBe("full");
+    // Upgrading a preview token's variant breaks the signature.
+    const preview = mintWidgetModelToken("asset-a", now, "preview");
+    const forged = preview.replace(".preview.", ".full.");
+    expect(readWidgetModelToken("asset-a", forged, now)).toBeNull();
+    expect(readWidgetModelToken("asset-a", full.replace(".full.", ".bogus."), now)).toBeNull();
+  });
+
+  it("still accepts a pre-variant token, but only as preview", () => {
+    const now = Date.UTC(2026, 9, 9);
+    const exp = now + 1000;
+    const key = createHash("sha256")
+      .update("materialize:widget-model-token:v1:sk_test_widget")
+      .digest();
+    const legacy = `${exp}.${createHmac("sha256", key).update(`asset-a.${exp}`).digest("base64url")}`;
+    expect(readWidgetModelToken("asset-a", legacy, now)).toBe("preview");
+    expect(readWidgetModelToken("asset-b", legacy, now)).toBeNull();
   });
 });
 

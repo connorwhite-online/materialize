@@ -1673,7 +1673,11 @@ const handler = createMcpHandler(
           // The widget's 3D view; best-effort, the card renders without it.
           let model: Awaited<ReturnType<typeof widgetModelLink>> | null = null;
           try {
-            model = await widgetModelLink(result.part.fileAssetId, result.part.format);
+            model = await widgetModelLink(
+              result.part.fileAssetId,
+              result.part.format,
+              auth.userId
+            );
           } catch (err) {
             logError("mcp.quote.widgetModelLink", err);
           }
