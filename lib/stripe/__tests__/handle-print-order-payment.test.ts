@@ -929,7 +929,9 @@ describe("handlePrintOrderPayment — paid-session cross-checks (single)", () =>
     expect(mockCreateOrder).toHaveBeenCalledTimes(1);
   });
 
-  it("does NOT place (and logs) when the paid session isn't the order's session", async () => {
+  it("still places (and logs) when a paid session isn't the order's stored one but the amount matches", async () => {
+    // e.g. a double submit minted two sessions and the buyer paid the
+    // first — a real payment that must not be stranded.
     dbOrder = { ...singleOrder };
     claimReturns = [{ id: "order-1" }];
 
@@ -938,8 +940,7 @@ describe("handlePrintOrderPayment — paid-session cross-checks (single)", () =>
       session: { id: "cs_other", amountTotal: 1545, paymentStatus: "paid" },
     });
 
-    expect(mockCreateOrder).not.toHaveBeenCalled();
-    expect(mockUpdateSet).not.toHaveBeenCalled();
+    expect(mockCreateOrder).toHaveBeenCalledTimes(1);
     expect(logError).toHaveBeenCalledWith(
       "handlePrintOrderPayment.sessionMismatch",
       expect.any(Error)

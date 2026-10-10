@@ -465,9 +465,11 @@ export async function persistSavedFeeCard(
  * Is this paid session the one we charged for this order, for the
  * amount we charged? Logs and returns false on any mismatch.
  *
- * - Session id: only checked when the order holds a Checkout session id.
- *   `pi_…` (agent off-session charge), `session_claim:` sentinels and
- *   null carry nothing to compare against.
+ * - Session id: a mismatch is logged but does not block. The session's
+ *   metadata already names this order and only our server creates
+ *   sessions, and a second session for the same order (a double submit
+ *   that minted two) is a real payment that must still be placed. The
+ *   amount check below is the guard.
  * - Amount: only for single-item orders (fileAssetId set), whose line
  *   items `expectedSingleItemCheckoutCents` mirrors. Multi-item orders
  *   are priced from printOrderItems and are not re-derived here.
@@ -483,7 +485,7 @@ function sessionMatchesOrder(
     logError(
       "handlePrintOrderPayment.sessionMismatch",
       new Error(
-        `paid session ${session.id} does not match order ${order.id}'s session — not placing`,
+        `paid session ${session.id} does not match order ${order.id}'s stored session`,
         {
           cause: {
             printOrderId: order.id,
@@ -493,7 +495,6 @@ function sessionMatchesOrder(
         }
       )
     );
-    return false;
   }
 
   if (order.fileAssetId && session.amountTotal != null) {
