@@ -8,6 +8,8 @@ import {
 import { PayoutActions } from "./payout-actions";
 import { PayoutStatusBanner } from "./payout-status-banner";
 
+export const metadata = { title: "Payouts" };
+
 export default async function PayoutsSettingsPage({
   searchParams,
 }: {

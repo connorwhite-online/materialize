@@ -101,6 +101,7 @@ export function TokenPolicyEditor({
         <Switch
           checked={enabled}
           onCheckedChange={handleToggle}
+          aria-label="Auto-approve within policy"
           disabled={disabled || pending}
           size="sm"
         />

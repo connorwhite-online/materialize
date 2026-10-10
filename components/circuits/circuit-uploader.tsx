@@ -137,7 +137,11 @@ export function CircuitUploader({
           onPaste={onPaste}
         />
         {fileInput}
-        {error && <p className="text-xs text-destructive">{error}</p>}
+        {error && (
+        <p role="alert" className="text-xs text-destructive">
+          {error}
+        </p>
+      )}
       </div>
     );
   }
@@ -172,7 +176,11 @@ export function CircuitUploader({
         {isLarge && <span className="text-xs font-medium">Add diagram</span>}
       </button>
       {fileInput}
-      {error && <p className="text-xs text-destructive">{error}</p>}
+      {error && (
+        <p role="alert" className="text-xs text-destructive">
+          {error}
+        </p>
+      )}
     </div>
   );
 }

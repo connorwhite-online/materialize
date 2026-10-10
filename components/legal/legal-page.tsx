@@ -18,7 +18,7 @@ export function LegalPage({
   children: React.ReactNode;
 }) {
   return (
-    <main className="mx-auto w-full max-w-2xl px-4 pt-10 pb-24 sm:pt-16">
+    <div className="mx-auto w-full max-w-2xl px-4 pt-10 pb-24 sm:pt-16">
       <h1 className="text-3xl font-semibold tracking-tight">{title}</h1>
       {showUpdated && (
         <p className="mt-2 text-sm text-muted-foreground">
@@ -42,6 +42,6 @@ export function LegalPage({
           Support
         </Link>
       </nav>
-    </main>
+    </div>
   );
 }

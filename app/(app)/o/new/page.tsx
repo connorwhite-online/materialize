@@ -14,6 +14,8 @@ import { CreateOrganization } from "@clerk/nextjs";
 // it behind auth and route the user to their new org's profile on
 // success via afterCreateOrganizationUrl.
 
+export const metadata = { title: "New organization" };
+
 export default async function NewOrganizationPage() {
   const { userId } = await auth();
   if (!userId) redirect("/sign-in?redirect_url=/o/new");
@@ -29,7 +31,7 @@ export default async function NewOrganizationPage() {
       </div>
       <CreateOrganization
         routing="hash"
-        afterCreateOrganizationUrl={(org) => `/${org.slug}`}
+        afterCreateOrganizationUrl="/:slug"
       />
     </div>
   );

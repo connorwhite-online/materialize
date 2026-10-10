@@ -41,6 +41,7 @@ export function UploadVisibilitySetting({
         <Switch
           checked={value === "public"}
           onCheckedChange={handleChange}
+          aria-label="Auto-publish print uploads to my profile"
           disabled={pending}
         />
       </div>

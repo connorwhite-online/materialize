@@ -8,6 +8,8 @@ import { notUnsavedStudioDraft } from "@/lib/studio-drafts";
 import { CreateFormHeader } from "@/components/create-form-header";
 import { ProjectCreateForm } from "@/components/projects/project-create-form";
 
+export const metadata = { title: "New project" };
+
 export default async function NewProjectPage() {
   const { userId } = await auth();
   if (!userId) redirect("/sign-in");

@@ -8,6 +8,8 @@ import { db } from "@/lib/db";
 import { users } from "@/lib/db/schema";
 import { TokensManager } from "./tokens-manager";
 
+export const metadata = { title: "API tokens" };
+
 export default async function TokensSettingsPage() {
   const { userId } = await auth();
   if (!userId) return null;

@@ -55,6 +55,7 @@ export function NotificationItem({
       />
       <div className="min-w-0 flex-1 space-y-0.5">
         <div className="flex items-baseline gap-1.5 text-sm">
+          {isUnread && <span className="sr-only">Unread: </span>}
           <span className="truncate font-medium">{name}</span>
           <span className="truncate text-muted-foreground">{message}</span>
           <span className="ml-auto shrink-0 text-xs text-muted-foreground tabular-nums">
@@ -73,7 +74,7 @@ export function NotificationItem({
       {isUnread && (
         <span
           className="mt-2 size-2 shrink-0 rounded-full bg-primary"
-          aria-label="Unread"
+          aria-hidden="true"
         />
       )}
     </button>

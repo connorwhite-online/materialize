@@ -225,7 +225,7 @@ export function BuildGuideEditor({
 
       {/* Extra bottom padding so the floating toolbar never covers the
           last lines of the guide when scrolled to the end. */}
-      <main className="mx-auto max-w-3xl px-4 pb-32 pt-8">
+      <div className="mx-auto max-w-3xl px-4 pb-32 pt-8">
         {error && (
           <p className="mb-3 text-sm text-destructive" role="alert">
             {error}
@@ -241,7 +241,7 @@ export function BuildGuideEditor({
             "Start with a heading for each chapter (they become collapsible sections), then write the steps. Paste a README, or use the toolbar to format, insert images, and add galleries."
           }
         />
-      </main>
+      </div>
 
       {/* Floating formatting toolbar, centered just above the bottom edge.
           The full-width wrapper is click-through; only the pill itself

@@ -72,6 +72,9 @@ export function RichTextEditor({
     immediatelyRender: false,
     editorProps: {
       attributes: {
+        role: "textbox",
+        "aria-multiline": "true",
+        "aria-label": placeholder ?? "Rich text editor",
         class:
           "rte-content min-h-40 focus:outline-none text-sm leading-relaxed text-foreground",
       },
@@ -94,7 +97,15 @@ export function RichTextEditor({
     );
   }
 
-  return <EditorContent editor={editor} className={className} />;
+  return (
+    <EditorContent
+      editor={editor}
+      className={cn(
+        "rounded-lg focus-within:ring-2 focus-within:ring-ring/50",
+        className
+      )}
+    />
+  );
 }
 
 export type { Editor };

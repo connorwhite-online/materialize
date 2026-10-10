@@ -162,7 +162,7 @@ export function CircuitLightbox({
         ) : (
           <img
             src={circuit.previewUrl}
-            alt={circuit.caption || ""}
+            alt={circuit.caption || `Circuit diagram ${index + 1}`}
             className="max-h-[70vh] max-w-full object-contain"
           />
         )}

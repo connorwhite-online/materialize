@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { TopBar } from "@/components/nav/top-bar";
 import { AppShell } from "@/components/nav/app-shell";
 import { MobileNav } from "@/components/nav/mobile-nav";
+import { SkipLink } from "@/components/nav/skip-link";
 import { HomeDashboard } from "@/components/home/home-dashboard";
 import { HomeFaq } from "@/components/home/home-faq";
 import { EnclosureStage } from "@/components/landing/enclosure-stage-lazy";
@@ -146,6 +147,7 @@ export default async function HomePage() {
           `nav` (no alwaysVisible) and the morphing MobileNav takes over
           on small screens. */}
       <LandingProvider>
+        <SkipLink />
         <TopBar landing initialUnreadCount={0} textToCad={textToCad} />
 
         {/* The Pneuma Q enclosure is one fixed canvas behind the page
@@ -157,10 +159,16 @@ export default async function HomePage() {
         <EnclosureStage />
 
         <LandingHero>
-          <main className="flex flex-1 items-end justify-start px-6 pb-28 sm:px-8 nav:px-16 nav:pb-24 lg:px-24 xl:px-32">
+          <main
+            id="main-content"
+            tabIndex={-1}
+            className="flex flex-1 items-end justify-start px-6 pb-28 sm:px-8 nav:px-16 nav:pb-24 lg:px-24 xl:px-32 outline-none"
+          >
             <StepCopy />
+            {/* Inside <main> so the tour controls sit in a landmark; it is
+                absolutely positioned against LandingHero either way. */}
+            <StepCarousel />
           </main>
-          <StepCarousel />
         </LandingHero>
 
         {/* FAQ screen: a full-height panel over the closed-up enclosure.

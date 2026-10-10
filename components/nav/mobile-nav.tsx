@@ -425,6 +425,49 @@ export function MobileNav({
     };
   }, [open]);
 
+  // Focus management. On open: focus the first menu link and make the
+  // page behind inert so Tab / screen-reader browse can't reach it. On
+  // close: put focus back on the toggle (the identity pill and the
+  // trailing toggle are different elements, so it is looked up by
+  // `aria-controls` once the pill has re-mounted).
+  const wasOpenRef = useRef(false);
+  useEffect(() => {
+    if (!open) {
+      if (wasOpenRef.current) {
+        wasOpenRef.current = false;
+        let tries = 0;
+        let raf = 0;
+        const restore = () => {
+          const btn = document.querySelector<HTMLElement>(
+            `button[aria-controls="${menuId}"][aria-expanded="false"]:not([tabindex="-1"])`
+          );
+          if (btn) btn.focus();
+          else if (tries++ < 40) raf = requestAnimationFrame(restore);
+        };
+        raf = requestAnimationFrame(restore);
+        return () => cancelAnimationFrame(raf);
+      }
+      return;
+    }
+    wasOpenRef.current = true;
+    const inertTargets = [document.getElementById("main-content")].filter(
+      (el): el is HTMLElement => el !== null
+    );
+    inertTargets.forEach((el) => el.setAttribute("inert", ""));
+    let tries = 0;
+    let raf = 0;
+    const focusFirst = () => {
+      const menu = menuNavRef.current;
+      if (menu) menu.focus({ preventScroll: true });
+      else if (tries++ < 10) raf = requestAnimationFrame(focusFirst);
+    };
+    raf = requestAnimationFrame(focusFirst);
+    return () => {
+      cancelAnimationFrame(raf);
+      inertTargets.forEach((el) => el.removeAttribute("inert"));
+    };
+  }, [open, menuId]);
+
   const handleDragEnd = (_: unknown, info: PanInfo) => {
     if (info.offset.y > DRAG_CLOSE_OFFSET || info.velocity.y > DRAG_CLOSE_VELOCITY) {
       close();
@@ -598,6 +641,10 @@ export function MobileNav({
                     ref={menuNavRef}
                     id={menuId}
                     aria-label="Primary"
+                    // Focus target on open: the menu itself, not its first
+                    // row, so nothing lights up until someone presses Tab.
+                    tabIndex={-1}
+                    className="outline-none"
                     style={{ width: expandedWidth }}
                   >
                     <motion.ul
@@ -627,10 +674,14 @@ export function MobileNav({
                               aria-current={active ? "page" : undefined}
                               className={cn(
                                 "flex items-center gap-3 rounded-[22px] px-3 py-2.5",
-                                "text-[0.9375rem] font-medium transition-colors",
+                                "text-[0.9375rem] font-medium transition-colors outline-none",
+                                // Keyboard focus borrows the row's own fills
+                                // rather than drawing a ring: the pressed fill
+                                // on an idle row, a shade deeper on the
+                                // current page's row (already bg-muted).
                                 active
-                                  ? "bg-muted text-foreground"
-                                  : "text-muted-foreground active:bg-muted/60"
+                                  ? "bg-muted text-foreground focus-visible:bg-foreground/[0.12]"
+                                  : "text-muted-foreground active:bg-muted/60 focus-visible:bg-muted/60 focus-visible:text-foreground"
                               )}
                             >
                               <Icon
@@ -706,7 +757,7 @@ export function MobileNav({
                           aria-current={
                             pathname === ownProfilePath ? "page" : undefined
                           }
-                          className="mx-1.5 flex min-w-0 flex-1 items-center gap-2.5 rounded-[22px] p-1 pr-3 transition-colors active:bg-muted/60"
+                          className="mx-1.5 flex min-w-0 flex-1 items-center gap-2.5 rounded-[22px] p-1 pr-3 outline-none transition-colors active:bg-muted/60 focus-visible:bg-muted/60"
                         >
                           <UserAvatar
                             seed={user.username || user.id}
@@ -994,7 +1045,7 @@ function TrailingCluster({
         // 44px is the smallest comfortable touch target, and this one
         // opens and closes the whole nav. The glyph stays optically
         // small; the padding does the work.
-        className="flex h-11 w-11 items-center justify-center rounded-full text-muted-foreground transition-colors active:bg-muted/60"
+        className="flex h-11 w-11 items-center justify-center rounded-full text-muted-foreground outline-none transition-colors active:bg-muted/60 focus-visible:bg-muted/60 focus-visible:text-foreground"
       >
         <Grabber size={24} open={open} />
       </button>

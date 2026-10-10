@@ -419,7 +419,7 @@ export function MaterialStep({
           setActiveGroup(value === ALL_GROUPS ? null : value)
         }
       >
-        <SelectTrigger className="min-w-44">
+        <SelectTrigger className="min-w-44" aria-label="Material family">
           <SelectValue>
             {(value) => {
               if (value === ALL_GROUPS || value == null) return "All materials";

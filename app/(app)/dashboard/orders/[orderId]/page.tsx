@@ -35,6 +35,8 @@ const STATUS_LABELS: Record<string, string> = {
   cancelled: "Cancelled",
 };
 
+export const metadata = { title: "Order details" };
+
 export default async function OrderDetailPage(props: {
   params: Promise<{ orderId: string }>;
   searchParams: Promise<{ payment?: string }>;

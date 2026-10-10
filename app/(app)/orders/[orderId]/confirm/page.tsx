@@ -12,6 +12,8 @@ interface PageProps {
   searchParams: Promise<{ token?: string; payment?: string }>;
 }
 
+export const metadata = { title: "Confirm order" };
+
 export default async function ConfirmAgentOrderPage({
   params,
   searchParams,

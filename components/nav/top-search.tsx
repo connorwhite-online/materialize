@@ -159,7 +159,7 @@ export function TopSearch() {
         )}
       >
         <div className="flex h-8 items-center gap-1">
-          <div className="flex h-full min-w-0 flex-1 items-center rounded-[16px] bg-muted/80 pl-3 pr-1.5">
+          <div className="flex h-full min-w-0 flex-1 items-center rounded-[16px] bg-muted/80 pl-3 pr-1.5 transition-colors has-[input:focus]:bg-muted">
             <Browse
               size={16}
               className="mr-2 shrink-0 text-muted-foreground"
@@ -204,6 +204,10 @@ export function TopSearch() {
           </span>
         </div>
 
+        {/* cmdk always points the input's aria-controls at the list, so
+            keep an empty, hidden one mounted while results are closed —
+            otherwise the combobox references an id that doesn't exist. */}
+        {!showList && <Command.List hidden />}
         <AnimatePresence initial={false}>
           {showList && (
             <motion.div

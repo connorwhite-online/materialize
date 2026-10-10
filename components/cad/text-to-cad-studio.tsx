@@ -2030,6 +2030,7 @@ export function TextToCadStudio({
                   <div className="mt-1 flex items-center gap-2">
                     <input
                       value={nameDraft}
+                      aria-label="Thread name"
                       autoFocus
                       maxLength={60}
                       onChange={(e) => setNameDraft(e.target.value)}
@@ -2037,7 +2038,7 @@ export function TextToCadStudio({
                         if (e.key === "Enter") saveName();
                         if (e.key === "Escape") setRenaming(false);
                       }}
-                      className="field-text w-56 rounded-md border border-foreground/20 bg-card px-2 py-1 outline-none focus:border-foreground/40 sm:text-sm"
+                      className="field-text w-56 rounded-md border border-foreground/20 bg-card px-2 py-1 outline-none focus:border-foreground/40 focus-visible:ring-2 focus-visible:ring-ring/50 sm:text-sm"
                     />
                     <button
                       type="button"
@@ -2655,6 +2656,7 @@ export function TextToCadStudio({
                       </span>
                       <input
                         value={a.note}
+                        aria-label={`Annotation ${i + 1} note`}
                         onChange={(e) =>
                           setAnnotations((prev) =>
                             prev.map((x) =>
@@ -2667,7 +2669,7 @@ export function TextToCadStudio({
                         } — at (${a.point
                           .map((n) => n.toFixed(0))
                           .join(", ")}) mm`}
-                        className="field-text min-w-0 flex-1 rounded-md border border-foreground/15 bg-card px-2 py-1 outline-none focus:border-foreground/30 sm:text-sm"
+                        className="field-text min-w-0 flex-1 rounded-md border border-foreground/15 bg-card px-2 py-1 outline-none focus:border-foreground/30 focus-visible:ring-2 focus-visible:ring-ring/50 sm:text-sm"
                       />
                       <button
                         type="button"
@@ -2971,7 +2973,7 @@ export function TextToCadStudio({
               e.preventDefault();
               if (!generating) addFiles(e.dataTransfer.files);
             }}
-            className="rounded-2xl border border-foreground/15 bg-card/95 p-2 shadow-lg backdrop-blur supports-[backdrop-filter]:bg-card/80"
+            className="rounded-2xl border border-foreground/15 bg-card/95 p-2 shadow-lg backdrop-blur supports-[backdrop-filter]:bg-card/80 focus-within:ring-2 focus-within:ring-ring/50"
           >
             {images.length > 0 && (
               <div className="mb-2 flex flex-wrap gap-2 px-1">
@@ -3083,6 +3085,7 @@ export function TextToCadStudio({
               rows={1}
               maxLength={2000}
               disabled={generating}
+              aria-label="Describe what to build or change"
               placeholder={
                 activeThread
                   ? "What do you want to change?"
@@ -3705,7 +3708,7 @@ export function Questionnaire({
             if (usingCustom && !question.answering) onAnswer({ text: custom.trim() });
           }}
           className={cn(
-            "flex items-center gap-2 rounded-xl border border-dashed p-1.5 pl-3 transition-colors",
+            "flex items-center gap-2 rounded-xl border border-dashed p-1.5 pl-3 transition-colors focus-within:ring-2 focus-within:ring-ring/50",
             usingCustom ? "border-foreground/50" : "border-foreground/25"
           )}
         >

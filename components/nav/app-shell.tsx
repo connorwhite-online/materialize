@@ -4,6 +4,7 @@ import { SandboxProvider } from "@/components/sandbox-context";
 import { CartPanel } from "@/components/print/cart-panel";
 import { TopBar } from "@/components/nav/top-bar";
 import { MobileNav } from "@/components/nav/mobile-nav";
+import { SkipLink } from "@/components/nav/skip-link";
 
 /**
  * Shared authed chrome: top bar at nav+, the morphing mobile nav
@@ -27,11 +28,16 @@ export function AppShell({
     <SandboxProvider sandbox={sandbox}>
       <CartProvider>
         <div className="flex min-h-screen flex-col">
+          <SkipLink />
           <TopBar
             initialUnreadCount={initialUnreadCount}
             textToCad={textToCad}
           />
-          <main className="flex-1 pb-28 nav:pb-0 nav:pt-16">{children}</main>
+          <main
+            id="main-content"
+            tabIndex={-1}
+            className="flex-1 pb-28 outline-none nav:pb-0 nav:pt-16"
+          >{children}</main>
           <MobileNav
             initialUnreadCount={initialUnreadCount}
             textToCad={textToCad}

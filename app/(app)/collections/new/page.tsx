@@ -4,6 +4,8 @@ import { FolderOpenIcon } from "lucide-react";
 import { CollectionCreateForm } from "@/components/collections/collection-create-form";
 import { CreateFormHeader } from "@/components/create-form-header";
 
+export const metadata = { title: "New collection" };
+
 export default async function NewCollectionPage() {
   const { userId } = await auth();
   if (!userId) redirect("/sign-in");

@@ -223,6 +223,7 @@ export function BakeoffPanel() {
         <textarea
           value={prompt}
           onChange={(e) => setPrompt(e.target.value)}
+          aria-label="Part description"
           placeholder="Describe a part — both engines build it from this same prompt."
           rows={3}
           className="field-text w-full resize-y rounded-xl border border-border bg-background p-3 outline-none focus:ring-2 focus:ring-ring sm:text-sm"

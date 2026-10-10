@@ -121,18 +121,21 @@ export function BomEditor({ projectId, initial, onSaved }: Props) {
             >
               <div className="grid gap-2 sm:grid-cols-[1fr_5rem_4rem]">
                 <Input
+                  aria-label={`Part ${i + 1} name`}
                   placeholder="Part name (e.g. M3x10 socket head screw)"
                   value={item.name}
                   maxLength={MAX_BOM_NAME_LENGTH}
                   onChange={(e) => updateRow(i, { name: e.target.value })}
                 />
                 <Input
+                  aria-label={`Part ${i + 1} quantity`}
                   placeholder="Qty"
                   inputMode="decimal"
                   value={item.quantity}
                   onChange={(e) => updateRow(i, { quantity: e.target.value })}
                 />
                 <Input
+                  aria-label={`Part ${i + 1} unit`}
                   placeholder="Unit"
                   value={item.unit}
                   maxLength={MAX_BOM_UNIT_LENGTH}
@@ -140,12 +143,14 @@ export function BomEditor({ projectId, initial, onSaved }: Props) {
                 />
               </div>
               <Input
+                aria-label={`Part ${i + 1} notes`}
                 placeholder="Notes (optional)"
                 value={item.notes}
                 maxLength={MAX_BOM_NOTES_LENGTH}
                 onChange={(e) => updateRow(i, { notes: e.target.value })}
               />
               <Input
+                aria-label={`Part ${i + 1} source URL`}
                 placeholder="https://… (where to buy, optional)"
                 value={item.sourceUrl}
                 maxLength={MAX_BOM_URL_LENGTH}

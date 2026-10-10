@@ -10,6 +10,8 @@ import { isOrgMember } from "@/lib/authorization";
 // redirects the owner there. For orgs it hosts Clerk's
 // <OrganizationProfile />.
 
+export const metadata = { title: "Settings" };
+
 export default async function HandleSettingsPage(props: {
   params: Promise<{ handle: string }>;
 }) {

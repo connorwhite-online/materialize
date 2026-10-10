@@ -51,6 +51,8 @@ type Item = FileItem | ProjectItem;
 // to the user so nothing silently disappears.
 const COLLECTION_MAX_ITEMS = 500;
 
+export const metadata = { title: "Collection" };
+
 export default async function CollectionPage(props: {
   params: Promise<{ slug: string }>;
 }) {

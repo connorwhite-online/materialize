@@ -255,7 +255,7 @@ function PhotoPostRow({
           >
             <img
               src={photo.downloadUrl}
-              alt={photo.caption || ""}
+              alt={photo.caption || "Photo shared in comments"}
               loading="lazy"
               decoding="async"
               className="block max-h-80 max-w-full object-contain"
@@ -497,9 +497,16 @@ function EditInline({
         onChange={(e) => setBody(e.target.value)}
         maxLength={MAX_COMMENT_LENGTH}
         autoFocus
+        aria-label="Edit comment"
+        aria-invalid={error ? true : undefined}
+        aria-describedby={error ? "edit-comment-error" : undefined}
         className="min-h-20"
       />
-      {error && <p className="text-xs text-destructive">{error}</p>}
+      {error && (
+        <p id="edit-comment-error" role="alert" className="text-xs text-destructive">
+          {error}
+        </p>
+      )}
       <div className="flex items-center justify-end gap-2">
         <Button variant="ghost" size="sm" onClick={onDone} disabled={pending}>
           Cancel

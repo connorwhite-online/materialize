@@ -121,6 +121,17 @@ export function CartProvider({ children }: { children: ReactNode }) {
 
   const itemCount = dbItemCount + localItems.length;
 
+  // Screen-reader announcement for cart changes (rendered in a hidden
+  // role="status" region below). A counter suffix isn't needed: the
+  // region is cleared and re-set so identical text re-announces.
+  const [announcement, setAnnouncement] = useState("");
+  const announce = useCallback((msg: string) => {
+    setAnnouncement("");
+    setTimeout(() => setAnnouncement(msg), 50);
+  }, []);
+  const itemsRef = useRef<CartItemWithMeta[]>([]);
+  itemsRef.current = items;
+
   const refresh = useCallback(async () => {
     setLoading(true);
     try {
@@ -150,6 +161,7 @@ export function CartProvider({ children }: { children: ReactNode }) {
       const result = await addToCart(params);
       if ("cartItemId" in result) {
         setDbItemCount((c) => c + 1);
+        announce("Added item to cart");
         // The /print cart-slot stack renders cart groups inline, so
         // the caller expects items to be queryable immediately after
         // a successful add — not only once the modal panel is
@@ -158,7 +170,7 @@ export function CartProvider({ children }: { children: ReactNode }) {
       }
       return result;
     },
-    [refresh]
+    [refresh, announce]
   );
 
   const addLocalItem = useCallback(
@@ -180,20 +192,29 @@ export function CartProvider({ children }: { children: ReactNode }) {
         ...prev,
         { ...params, localId: crypto.randomUUID() },
       ]);
+      announce(`Added ${params.originalFilename} to cart`);
       return { ok: true };
     },
-    [items, localItems]
+    [items, localItems, announce]
   );
 
   const removeItem = useCallback(async (id: string) => {
+    const removed = itemsRef.current.find((i) => i.id === id);
     await removeFromCart(id);
     setItems((prev) => prev.filter((i) => i.id !== id));
     setDbItemCount((c) => Math.max(0, c - 1));
-  }, []);
+    announce(
+      `Removed ${removed ? (removed.fileName ?? removed.originalFilename) : "item"} from cart`
+    );
+  }, [announce]);
 
+  const localItemsRef = useRef<LocalCartItem[]>([]);
+  localItemsRef.current = localItems;
   const removeLocalItem = useCallback((localId: string) => {
+    const removed = localItemsRef.current.find((i) => i.localId === localId);
     setLocalItems((prev) => prev.filter((i) => i.localId !== localId));
-  }, []);
+    announce(`Removed ${removed?.originalFilename ?? "item"} from cart`);
+  }, [announce]);
 
   const setRepricing = useCallback((id: string, on: boolean) => {
     setRepricingIds((prev) => {
@@ -463,6 +484,11 @@ export function CartProvider({ children }: { children: ReactNode }) {
   );
 
   return (
-    <CartContext.Provider value={value}>{children}</CartContext.Provider>
+    <CartContext.Provider value={value}>
+      {children}
+      <div role="status" aria-live="polite" className="sr-only">
+        {announcement}
+      </div>
+    </CartContext.Provider>
   );
 }

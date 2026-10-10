@@ -25,7 +25,7 @@ export default function SignInPage() {
   }, [authLoaded, isSignedIn, router, redirectUrl]);
 
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center px-4">
+    <main className="flex min-h-screen flex-col items-center justify-center px-4">
       <Link
         href="/"
         aria-label="Materialize — home"
@@ -39,12 +39,14 @@ export default function SignInPage() {
 
       <Card className="w-full max-w-sm">
         <CardHeader className="text-center">
-          <CardTitle className="text-xl">Sign in</CardTitle>
+          <CardTitle className="text-xl">
+            <h1>Sign in</h1>
+          </CardTitle>
         </CardHeader>
         <CardContent>
           <SignInForm redirectUrl={redirectUrl} socialFirst />
         </CardContent>
       </Card>
-    </div>
+    </main>
   );
 }

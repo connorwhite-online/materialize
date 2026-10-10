@@ -436,6 +436,7 @@ export default async function BrowsePage(props: {
 
     return (
       <div className="mx-auto max-w-7xl px-4 py-6">
+        <h1 className="sr-only">Browse files, projects and creators</h1>
         {header}
 
         {/* Projects */}
@@ -712,6 +713,11 @@ export default async function BrowsePage(props: {
 
   return (
     <div className="mx-auto max-w-7xl px-4 py-6">
+      {!(activeCategory && !query) && (
+        <h1 className="sr-only">
+          {query ? `Search results for ${query}` : "Browse files"}
+        </h1>
+      )}
       {header}
 
       {activeCategory && !query && (

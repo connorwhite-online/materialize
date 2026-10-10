@@ -9,6 +9,7 @@ import {
   useReducedMotion,
   type PanInfo,
 } from "motion/react";
+import { useDialogFocus } from "@/lib/hooks/use-dialog-focus";
 import { useKeyboardOverlap } from "@/lib/hooks/use-keyboard-sticky-bottom";
 import { cn } from "@/lib/utils";
 
@@ -122,6 +123,49 @@ export function NativeSheet({
   return createPortal(
     <AnimatePresence>
       {open && (
+        <SheetDialog
+          ariaLabel={ariaLabel}
+          keyboardOverlap={keyboardOverlap}
+          dismissible={dismissible}
+          onClose={onClose}
+          reducedMotion={!!reducedMotion}
+          dragControls={dragControls}
+          onDragEnd={onDragEnd}
+          className={className}
+        >
+          {children}
+        </SheetDialog>
+      )}
+    </AnimatePresence>,
+    document.body
+  );
+}
+
+function SheetDialog({
+  ariaLabel,
+  keyboardOverlap,
+  dismissible,
+  onClose,
+  reducedMotion,
+  dragControls,
+  onDragEnd,
+  className,
+  children,
+}: {
+  ariaLabel: string;
+  keyboardOverlap: number;
+  dismissible: boolean;
+  onClose: () => void;
+  reducedMotion: boolean;
+  dragControls: ReturnType<typeof useDragControls>;
+  onDragEnd: (_: unknown, info: PanInfo) => void;
+  className?: string;
+  children: React.ReactNode;
+}) {
+  const panelRef = useRef<HTMLDivElement | null>(null);
+  // Initial focus, Tab trap, and focus return to the opener.
+  useDialogFocus(panelRef);
+  return (
         <div
           className="fixed inset-0 z-[70] flex items-end justify-center sm:p-6"
           role="dialog"
@@ -145,8 +189,10 @@ export function NativeSheet({
             onClick={dismissible ? onClose : undefined}
           />
           <motion.div
+            ref={panelRef}
+            tabIndex={-1}
             className={cn(
-              "relative flex w-full flex-col sm:max-w-md",
+              "outline-none relative flex w-full flex-col sm:max-w-md",
               // Never taller than the viewport — content past the cap
               // scrolls inside the sheet instead of running off-screen.
               "max-h-[calc(100dvh-2rem)] sm:max-h-[calc(100dvh-4rem)]",
@@ -198,8 +244,5 @@ export function NativeSheet({
             </div>
           </motion.div>
         </div>
-      )}
-    </AnimatePresence>,
-    document.body
   );
 }

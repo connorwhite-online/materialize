@@ -141,9 +141,8 @@ export function CardImageCarousel({
             <button
               key={i}
               type="button"
-              role="tab"
-              aria-selected={i === activeIndex}
-              aria-label={`Image ${i + 1}`}
+              aria-current={i === activeIndex ? "true" : undefined}
+              aria-label={`Show photo ${i + 1} of ${images.length}`}
               onClick={(e) => {
                 e.preventDefault();
                 e.stopPropagation();
@@ -151,7 +150,7 @@ export function CardImageCarousel({
               }}
               // Fixed-width slot so the active dot's width animation
               // doesn't reflow siblings and jitter the centered pill.
-              className="flex h-2 w-4 shrink-0 cursor-pointer items-center justify-center"
+              className="relative flex h-2 w-4 shrink-0 cursor-pointer items-center justify-center after:absolute after:-inset-x-1 after:-inset-y-2 after:content-['']"
             >
               <span
                 aria-hidden
