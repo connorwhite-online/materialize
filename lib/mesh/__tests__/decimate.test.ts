@@ -13,7 +13,7 @@ import {
   type IndexedMesh,
 } from "../decimate";
 
-/** UV sphere as a flat triangle list — dense enough that a 96-cell grid must weld it. */
+/** UV sphere as a flat triangle list — dense enough that a 64-cell grid must weld it. */
 function sphere(radius: number, segments: number, rings: number): Float64Array {
   const point = (r: number, s: number): [number, number, number] => {
     const theta = (r / rings) * Math.PI;
@@ -51,7 +51,7 @@ const DENSE = sphere(50, 400, 200); // ~159k triangles
 
 describe("decimateTriangles", () => {
   it("exports the grid resolution the preview pipeline uses", () => {
-    expect(PREVIEW_GRID_CELLS).toBe(96);
+    expect(PREVIEW_GRID_CELLS).toBe(64);
   });
 
   it("drops the triangle count on a dense mesh", () => {

@@ -17,11 +17,11 @@ import { parseMeshTriangles } from "@/lib/hashing/mesh-fingerprint";
 /**
  * Grid resolution along the mesh's LONGEST bounding-box extent. A cell is
  * `longestExtent / PREVIEW_GRID_CELLS` on every axis (cubic cells), so a
- * 200mm part welds everything inside ~2mm. Changing this changes every
+ * 200mm part welds everything inside ~3mm. Changing this changes every
  * preview's bytes: bump PREVIEW_KEY_VERSION in lib/files/model-preview.ts
  * with it, or cached previews keep the old resolution forever.
  */
-export const PREVIEW_GRID_CELLS = 96;
+export const PREVIEW_GRID_CELLS = 64;
 
 /** Indexed triangle mesh. `positions` is xyz per vertex, `indices` 3 per triangle. */
 export type IndexedMesh = {
