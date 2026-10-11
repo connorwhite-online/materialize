@@ -3,6 +3,7 @@ import Link from "next/link";
 import { auth } from "@clerk/nextjs/server";
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
+import { confirmationTokenMatches } from "@/lib/mcp/confirmation-token";
 import { printOrders, fileAssets, files } from "@/lib/db/schema";
 import { findMaterialConfig, findProvider } from "@/lib/craftcloud/catalog";
 import { CancelOrderForm } from "./cancel-form";
@@ -34,7 +35,7 @@ export default async function CancelAgentOrderPage({
 
   if (!order) notFound();
   if (order.userId !== userId) notFound();
-  if (order.confirmationToken !== token) notFound();
+  if (!confirmationTokenMatches(order.confirmationToken, token)) notFound();
 
   // Three states: still cancellable, already cancelled, window passed.
   const inWindow =

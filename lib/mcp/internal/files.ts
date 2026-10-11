@@ -23,10 +23,15 @@ import { fetchModelBytes, ModelFetchError } from "./fetch-model";
 import { hasDimensions, measureGeometry } from "./geometry";
 import { notUnsavedStudioDraft } from "@/lib/studio-drafts";
 import { isCurrentAsset } from "@/lib/files/current-version";
+import {
+  archiveFileListingRow,
+  findFileDeleteBlocker,
+  type FileDeleteBlocker,
+} from "@/lib/files/delete-guard";
 import { uploadModel } from "@/lib/craftcloud/client";
 import { logError } from "@/lib/logger";
 import { LICENSE_ENUM_VALUES, type LicenseId } from "@/lib/licenses";
-import { DESIGN_TAG_OPTIONS } from "@/lib/validations/file";
+import { DESIGN_TAG_OPTIONS, MAX_PRICE_CENTS } from "@/lib/validations/file";
 import { stripPhotoMetadata } from "@/lib/photos/strip-metadata";
 
 const SUPPORTED_FORMATS = ["stl", "obj", "3mf", "step", "amf"] as const;
@@ -80,8 +85,14 @@ function normalizeMetadata(
   if (meta.description !== undefined) {
     out.description = meta.description ? meta.description.slice(0, 5000) : null;
   }
-  if (typeof meta.priceCents === "number" && meta.priceCents >= 0) {
-    out.price = Math.round(meta.priceCents);
+  // Negative / non-finite prices are ignored; anything above the web
+  // form's ceiling is clamped to it.
+  if (
+    typeof meta.priceCents === "number" &&
+    Number.isFinite(meta.priceCents) &&
+    meta.priceCents >= 0
+  ) {
+    out.price = Math.min(Math.round(meta.priceCents), MAX_PRICE_CENTS);
   }
   if (
     meta.license &&
@@ -728,6 +739,13 @@ export interface AgentFileSummary {
   license: string;
 }
 
+/**
+ * Cap on materialize_list_files. The tool takes no paging input (its
+ * schema is frozen for the ChatGPT plugin review), so an unbounded
+ * library would otherwise ship as one ever-growing response.
+ */
+export const MAX_LISTED_FILES = 200;
+
 export async function listFilesForUser(
   userId: string
 ): Promise<AgentFileSummary[]> {
@@ -763,7 +781,8 @@ export async function listFilesForUser(
         isCurrentAsset()
       )
     )
-    .orderBy(desc(fileAssets.createdAt));
+    .orderBy(desc(fileAssets.createdAt))
+    .limit(MAX_LISTED_FILES);
 
   return rows.map((r) => ({
     fileAssetId: r.assetId,
@@ -787,7 +806,11 @@ export async function listFilesForUser(
 export async function deleteFileForUser(params: {
   userId: string;
   fileAssetId: string;
-}): Promise<{ ok: true } | { error: string }> {
+}): Promise<
+  | { ok: true; archived: false }
+  | { ok: true; archived: true; reason: FileDeleteBlocker["reason"]; count: number }
+  | { error: string }
+> {
   const [asset] = await db
     .select({
       assetId: fileAssets.id,
@@ -803,6 +826,17 @@ export async function deleteFileForUser(params: {
     return { error: "File not found" };
   }
 
+  // Same gate as the web deleteFileListing: anyone else's purchase, cart
+  // line or in-flight print order on any version of this file archives
+  // the listing instead of cascading their rows away.
+  const blocker = await findFileDeleteBlocker(asset.fileId);
+  if (blocker) {
+    await archiveFileListingRow(asset.fileId);
+    return { ok: true, archived: true, reason: blocker.reason, count: blocker.count };
+  }
+
+  // Settled orders (received, refunded, …) still hold order history the
+  // cascade would erase — refuse rather than archive, as before.
   const referencedByOrder = await db
     .select({ id: printOrders.id })
     .from(printOrders)
@@ -828,5 +862,5 @@ export async function deleteFileForUser(params: {
   }
 
   await db.delete(files).where(eq(files.id, asset.fileId));
-  return { ok: true };
+  return { ok: true, archived: false };
 }

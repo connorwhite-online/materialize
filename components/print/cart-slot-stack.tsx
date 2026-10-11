@@ -29,6 +29,8 @@ type DisplayItem = {
   quantity: number;
   materialPrice: number;
   shippingPrice: number;
+  /** Cents; the paid-listing price this line also buys (0 if none). */
+  licenseCents: number;
   staleQuote: boolean;
 };
 
@@ -49,6 +51,7 @@ function toDisplayItems(
       quantity: i.quantity,
       materialPrice: i.materialPrice,
       shippingPrice: i.shippingPrice,
+      licenseCents: i.licenseCents ?? 0,
       staleQuote: now - new Date(i.updatedAt).getTime() > STALE_QUOTE_AGE_MS,
     })),
     ...localItems.map<DisplayItem>((i) => ({
@@ -62,6 +65,8 @@ function toDisplayItems(
       quantity: i.quantity,
       materialPrice: Math.round(i.materialPrice * 100),
       shippingPrice: Math.round(i.shippingPrice * 100),
+      // Local items are the visitor's own uploads — nothing to buy.
+      licenseCents: 0,
       staleQuote: false,
     })),
   ];
@@ -275,7 +280,8 @@ function CartSlot({
   // base so freight doesn't scale our cut. Single-sourced from
   // lib/fees.ts so this can't drift from the server's clamp math.
   const serviceFee = calcServiceFee(material, checkoutModel);
-  const total = material + serviceFee + shipping;
+  const license = group.items.reduce((sum, i) => sum + i.licenseCents, 0);
+  const total = material + serviceFee + shipping + license;
   const itemCount = group.items.reduce((sum, i) => sum + i.quantity, 0);
 
   const handleCheckout = async () => {
@@ -458,6 +464,12 @@ function CartSlot({
               <span>Material</span>
               <SlotPriceCell cents={material} pending={groupRepricing} />
             </div>
+            {license > 0 && (
+              <div className="flex justify-between text-muted-foreground">
+                <span>File price</span>
+                <span>${(license / 100).toFixed(2)}</span>
+              </div>
+            )}
             <div className="flex justify-between text-muted-foreground">
               <span>Service fee (3%)</span>
               <SlotPriceCell cents={serviceFee} pending={groupRepricing} />

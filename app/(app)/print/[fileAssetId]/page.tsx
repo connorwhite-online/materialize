@@ -2,6 +2,8 @@ import { notFound } from "next/navigation";
 import { auth } from "@clerk/nextjs/server";
 import { db } from "@/lib/db";
 import { fileAssets, files } from "@/lib/db/schema";
+import { isPublicListing } from "@/lib/files/public-listing";
+import { resolvePrintLicense } from "@/lib/print/license";
 import { eq } from "drizzle-orm";
 import { FileAssetPrintShell } from "@/components/print/file-asset-print-shell";
 import { loadPreviewView } from "@/lib/files/load-preview-view";
@@ -43,6 +45,7 @@ export default async function PrintConfigPage(props: {
       listingFileId: files.id,
       fileUserId: files.userId,
       fileStatus: files.status,
+      fileVisibility: files.visibility,
       recommendedMaterialId: files.recommendedMaterialId,
       recommendedCcMaterialId: files.recommendedCcMaterialId,
       recommendedCcFinishGroupId: files.recommendedCcFinishGroupId,
@@ -59,7 +62,7 @@ export default async function PrintConfigPage(props: {
   // routes. Without this, any visitor could load another user's private
   // model metadata and config UI by guessing the asset id.
   const isOwner = userId && asset.fileUserId === userId;
-  const isPublished = asset.fileStatus === "published";
+  const isPublished = isPublicListing(asset);
   if (!isOwner && !isPublished) notFound();
 
   const recommendedMaterial = asset.recommendedMaterialId
@@ -74,11 +77,38 @@ export default async function PrintConfigPage(props: {
   // Resolve the preselect material: explicit ?material= wins, then a
   // directly-stored CraftCloud UUID (most reliable — no fuzzy lookup),
   // then fall back to the fuzzy editorial-slug resolver.
+  //
+  // The resolver (catalog fetch on a cold instance) and the preview
+  // view read (DB) are independent, so they run concurrently. The
+  // resolver is only invoked when the cheaper sources came up empty.
+  //
+  // previewView is loaded separately from the asset row on purpose —
+  // see `loadPreviewView`. Null when the listing never set a snapshot
+  // (automatic head-on capture) and also when the read fails, so a
+  // schema that lags a deploy costs the camera angle rather than the
+  // quote page. Draft / unlinked assets have no listing row.
+  const directPreselectMaterialId =
+    preselectMaterialId ?? asset.recommendedCcMaterialId ?? null;
+  const [resolvedRecommendedMaterialId, previewView, licensed] =
+    await Promise.all([
+      directPreselectMaterialId
+        ? null
+        : resolveRecommendedCraftCloudMaterialId(asset.recommendedMaterialId),
+      asset.listingFileId ? loadPreviewView(asset.listingFileId) : null,
+      // A paid listing the viewer doesn't own: printing it also buys it,
+      // so its price belongs in the totals they see. (A creator without
+      // payouts surfaces as a checkout error instead.)
+      isOwner ? null : resolvePrintLicense(userId, asset.id),
+    ]);
+  const fileLicense =
+    licensed?.ok && licensed.license
+      ? {
+          fileName: licensed.license.fileName,
+          licenseCents: licensed.license.licenseCents,
+        }
+      : null;
   const resolvedPreselectMaterialId =
-    preselectMaterialId ??
-    asset.recommendedCcMaterialId ??
-    (await resolveRecommendedCraftCloudMaterialId(asset.recommendedMaterialId)) ??
-    undefined;
+    directPreselectMaterialId ?? resolvedRecommendedMaterialId ?? undefined;
 
   // Finish group preselect: explicit ?finish= wins, then the DB value.
   // Only used when a material preselect is also resolved — a finish group
@@ -87,15 +117,6 @@ export default async function PrintConfigPage(props: {
     resolvedPreselectMaterialId
       ? (preselectFinishGroupId ?? asset.recommendedCcFinishGroupId ?? undefined)
       : undefined;
-
-  // Loaded separately from the asset row on purpose — see
-  // `loadPreviewView`. Null when the listing never set a snapshot
-  // (automatic head-on capture) and also when the read fails, so a
-  // schema that lags a deploy costs the camera angle rather than the
-  // quote page. Draft / unlinked assets have no listing row.
-  const previewView = asset.listingFileId
-    ? await loadPreviewView(asset.listingFileId)
-    : null;
 
   const configureHeader = (
     <div>
@@ -142,6 +163,7 @@ export default async function PrintConfigPage(props: {
         configureHeader={configureHeader}
         projectSlug={projectSlug}
         checkoutModel={getCheckoutModel()}
+        fileLicense={fileLicense}
         initialView={previewView}
       />
     </div>

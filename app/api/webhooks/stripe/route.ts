@@ -173,7 +173,17 @@ export async function POST(request: Request) {
           typeof session.payment_intent === "string"
             ? session.payment_intent
             : session.payment_intent?.id;
-        await handlePrintOrderPayment(printOrderId, { paymentIntentId });
+        await handlePrintOrderPayment(printOrderId, {
+          paymentIntentId,
+          // The session itself, so the handler can cross-check it
+          // against the order (id + amount) and release the payment
+          // when the order is gone or cancelled.
+          session: {
+            id: session.id,
+            amountTotal: session.amount_total,
+            paymentStatus: session.payment_status,
+          },
+        });
       } catch (error) {
         logError(
           "stripe-webhook-handler",

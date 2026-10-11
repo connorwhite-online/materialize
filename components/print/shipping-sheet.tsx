@@ -24,7 +24,7 @@ import {
   shippingOptionsForVendor,
   type ShippingOption,
 } from "./shipping-options";
-import type { MinimumFeeInfo } from "./price-display";
+import type { MinimumFeeInfo, PrintFileLicense } from "./price-display";
 
 /**
  * Dynamic checkout sheet opened by tapping a vendor quote.
@@ -79,6 +79,12 @@ interface ShippingSheetProps {
   shippingLocked?: boolean;
   shippingLockedNotice?: string | null;
   checkoutModel?: CheckoutModel;
+  /**
+   * A paid listing the buyer doesn't own yet: printing it also buys it
+   * (lib/print/license.ts), so its price is its own line and part of
+   * the total. Server-derived on the page; null otherwise.
+   */
+  fileLicense?: PrintFileLicense | null;
   /** Address-step props — only needed once the buyer proceeds. */
   onAddressSubmit: (data: AddressSubmitData) => void;
   isSubmittingAddress: boolean;
@@ -112,6 +118,7 @@ export function ShippingSheet({
   shippingLocked,
   shippingLockedNotice,
   checkoutModel = "single",
+  fileLicense = null,
   onAddressSubmit,
   isSubmittingAddress,
   anonMode = false,
@@ -147,7 +154,8 @@ export function ShippingSheet({
   const preShipping = materialCost + minimumFee;
   const serviceFee =
     calcServiceFee(Math.round(preShipping * 100), checkoutModel) / 100;
-  const total = preShipping + serviceFee + shippingCost;
+  const licenseCost = (fileLicense?.licenseCents ?? 0) / 100;
+  const total = preShipping + serviceFee + shippingCost + licenseCost;
 
   return (
     <NativeSheet
@@ -292,6 +300,21 @@ export function ShippingSheet({
 
               <Separator />
 
+              {fileLicense && (
+                <div>
+                  <div className="flex justify-between text-sm">
+                    <span className="text-muted-foreground">File price</span>
+                    <span className="tabular-nums">
+                      ${licenseCost.toFixed(2)}
+                    </span>
+                  </div>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Paid to the creator once. You&apos;ll own{" "}
+                    {fileLicense.fileName} after your order is placed.
+                  </p>
+                </div>
+              )}
+
               <div className="flex justify-between text-sm">
                 <span className="text-muted-foreground">Service fee (3%)</span>
                 <span className="tabular-nums">${serviceFee.toFixed(2)}</span>
@@ -321,9 +344,9 @@ export function ShippingSheet({
             {checkoutModel === "two_step" && (
               <p className="mt-3 rounded-lg border border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
                 You&apos;ll see two charges: a hold for the Materialize
-                service fee shown above (only charged once your order is
-                placed) and CraftCloud&apos;s charge for production +
-                shipping.
+                service fee{fileLicense ? " and file price" : ""} shown above
+                (only charged once your order is placed) and CraftCloud&apos;s
+                charge for production + shipping.
               </p>
             )}
 

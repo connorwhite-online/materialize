@@ -9,6 +9,16 @@ let selectedOrder: unknown = null;
 let claimReturns: Array<{ id: string }> = [{ id: "order-id-1" }];
 const mockDbUpdateSet = vi.fn();
 
+// Paid-listing licenses are covered in lib/print/__tests__/license.test.ts;
+// here every printed file is free.
+vi.mock("@/lib/print/license", () => ({
+  LICENSE_PAYOUTS_DISABLED_ERROR: "license payouts disabled",
+  resolvePrintLicense: vi.fn(async () => ({ ok: true, license: null })),
+  buildLicenseLineItems: vi.fn(async () => []),
+  grantPrintLicenses: vi.fn(async () => {}),
+  revokePrintLicenses: vi.fn(async () => {}),
+}));
+
 vi.mock("@/lib/db", () => ({
   db: {
     select: () => ({

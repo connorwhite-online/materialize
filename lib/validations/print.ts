@@ -5,7 +5,15 @@ const CURRENCIES = [
 ] as const;
 
 const quotesCommonSchema = z.object({
-  currency: z.enum(CURRENCIES).default("USD"),
+  // Quotes are always requested in USD, whatever the client asks for:
+  // every checkout charges Stripe in USD, so a GBP or JPY quote would be
+  // billed as if its number were dollars (and refused at checkout by
+  // lib/pricing/reconcile-quote.ts). Shipping is still priced for the
+  // buyer's country via countryCode.
+  currency: z
+    .enum(CURRENCIES)
+    .default("USD")
+    .transform(() => "USD" as const),
   countryCode: z.string().length(2).default("US"),
   quantity: z.coerce.number().int().min(1).max(100).default(1),
   // Scope the CraftCloud price request to a specific material.

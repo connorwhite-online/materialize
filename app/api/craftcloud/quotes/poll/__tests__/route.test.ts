@@ -3,9 +3,15 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 // --- Mocks -----------------------------------------------------------
 
 const mockGetPrice = vi.fn();
-vi.mock("@/lib/craftcloud/client", () => ({
-  getPrice: (...args: unknown[]) => mockGetPrice(...args),
-}));
+vi.mock("@/lib/craftcloud/client", async () => {
+  const actual = await vi.importActual<
+    typeof import("@/lib/craftcloud/client")
+  >("@/lib/craftcloud/client");
+  return {
+    CraftCloudApiError: actual.CraftCloudApiError,
+    getPrice: (...args: unknown[]) => mockGetPrice(...args),
+  };
+});
 
 const mockGetCraftCloudCatalog = vi.fn();
 const mockGetProviderIndex = vi.fn();
@@ -15,11 +21,30 @@ vi.mock("@/lib/craftcloud/catalog", () => ({
 }));
 
 const mockLogError = vi.fn();
+const { consumeRateLimitMock } = vi.hoisted(() => ({
+  consumeRateLimitMock: vi.fn(async () => ({ ok: true }) as const),
+}));
+vi.mock("@/lib/rate-limit", () => ({
+  RATE_LIMITS: {
+    quoteStart: { name: "quote-start", limit: 1, windowMs: 1 },
+    quotePoll: { name: "quote-poll", limit: 1, windowMs: 1 },
+    modelUpload: { name: "model-upload", limit: 1, windowMs: 1 },
+  },
+  consumeRateLimit: consumeRateLimitMock,
+  rateLimitCallerKey: () => "ip:test",
+  rateLimitedResponse: (s: number) =>
+    Response.json({ error: "Too many requests" }, {
+      status: 429,
+      headers: { "Retry-After": String(s) },
+    }),
+}));
+
 vi.mock("@/lib/logger", () => ({
   logError: (...args: unknown[]) => mockLogError(...args),
 }));
 
 import { GET } from "../route";
+import { CraftCloudApiError } from "@/lib/craftcloud/client";
 
 function pollRequest(query: string): Request {
   return new Request(`http://localhost/api/craftcloud/quotes/poll${query}`);
@@ -261,5 +286,89 @@ describe("GET /api/craftcloud/quotes/poll", () => {
     expect(json.error).toMatch(/Failed to fetch quote snapshot/);
     expect(mockLogError).toHaveBeenCalledOnce();
     expect(mockLogError.mock.calls[0][0]).toBe("api/craftcloud/quotes/poll");
+  });
+
+  it("rejects a malformed priceId with 400 and does not call upstream", async () => {
+    for (const bad of ["../cart", "a%2Fb", "x".repeat(101), "id with space"]) {
+      const res = await GET(pollRequest(`?priceId=${encodeURIComponent(bad)}`));
+      expect(res.status).toBe(400);
+    }
+    expect(mockGetPrice).not.toHaveBeenCalled();
+  });
+
+  // The client's poll loop bails after 3 consecutive 4xx (stale
+  // priceId). That exit only works if upstream 4xx survives as 4xx.
+  it("passes an upstream 4xx (expired priceId) through as 410, without Sentry", async () => {
+    mockGetPrice.mockRejectedValue(
+      new CraftCloudApiError(404, '{"error":"price not found"}', "/v5/price/p")
+    );
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const res = await GET(pollRequest("?priceId=price-1"));
+
+    expect(res.status).toBe(410);
+    expect(mockLogError).not.toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
+  it("keeps upstream 5xx as 5xx (502) and logs it", async () => {
+    mockGetPrice.mockRejectedValue(
+      new CraftCloudApiError(503, "down", "/v5/price/p")
+    );
+    const res = await GET(pollRequest("?priceId=price-1"));
+    expect(res.status).toBe(502);
+    expect(mockLogError).toHaveBeenCalledOnce();
+  });
+
+  it("maps an upstream timeout to 504", async () => {
+    mockGetPrice.mockRejectedValue(
+      new CraftCloudApiError(504, "Request timed out", "/v5/price/p")
+    );
+    const res = await GET(pollRequest("?priceId=price-1"));
+    expect(res.status).toBe(504);
+  });
+
+  it("treats upstream 429 as transient (5xx), not a stale priceId", async () => {
+    mockGetPrice.mockRejectedValue(
+      new CraftCloudApiError(429, "slow down", "/v5/price/p")
+    );
+    const res = await GET(pollRequest("?priceId=price-1"));
+    expect(res.status).toBeGreaterThanOrEqual(500);
+  });
+
+  it("forwards the request's abort signal to getPrice", async () => {
+    mockGetPrice.mockResolvedValue({ quotes: [], shipping: [], allComplete: false });
+    const req = pollRequest("?priceId=price-1");
+    await GET(req);
+    expect(mockGetPrice).toHaveBeenCalledWith("price-1", {
+      signal: req.signal,
+    });
+  });
+
+  it("fetches the snapshot and catalog concurrently", async () => {
+    let resolvePrice!: (v: unknown) => void;
+    mockGetPrice.mockReturnValue(
+      new Promise((r) => {
+        resolvePrice = r;
+      })
+    );
+    const pending = GET(pollRequest("?priceId=price-1"));
+    await vi.waitFor(() => expect(mockGetPrice).toHaveBeenCalled());
+    // Catalog fetch started before getPrice settled.
+    expect(mockGetCraftCloudCatalog).toHaveBeenCalled();
+    expect(mockGetProviderIndex).toHaveBeenCalled();
+    resolvePrice({ quotes: [], shipping: [], allComplete: true });
+    expect((await pending).status).toBe(200);
+  });
+
+  it("429s a rate-limited caller before calling CraftCloud", async () => {
+    consumeRateLimitMock.mockResolvedValueOnce({
+      ok: false,
+      retryAfterSeconds: 30,
+    } as never);
+    const res = await GET(pollRequest("?priceId=price-1"));
+    expect(res.status).toBe(429);
+    expect(res.headers.get("Retry-After")).toBe("30");
+    expect(mockGetPrice).not.toHaveBeenCalled();
   });
 });

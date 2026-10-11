@@ -119,9 +119,13 @@ export function OrderStatusTracker({
         </Card>
       )}
 
-      {/* Cancel option — only for orders not yet in production */}
+      {/* Placed but not yet in production — there is no CraftCloud
+          cancel API, so cancellation goes through support (see
+          requestOrderRefund, which refuses self-service refunds here). */}
       {currentStatus === "ordered" && (
-        <CancelOrderOption orderId={orderId} />
+        <p className="mt-4 text-xs text-muted-foreground">
+          Need to cancel? Email support@materialize.cc — we&apos;ll check with the manufacturer before production starts.
+        </p>
       )}
 
       {/* In production or shipped — contact support for changes */}
@@ -130,51 +134,6 @@ export function OrderStatusTracker({
           Need to make a change? Contact support — your order is already being manufactured.
         </p>
       )}
-    </div>
-  );
-}
-
-function CancelOrderOption({ orderId }: { orderId: string }) {
-  const [confirming, setConfirming] = useState(false);
-  const [processing, setProcessing] = useState(false);
-  const [result, setResult] = useState<string | null>(null);
-
-  const handleCancel = async () => {
-    setProcessing(true);
-    const res = await requestOrderRefund(orderId);
-    if ("error" in res) {
-      setResult(res.error);
-    } else {
-      setResult("Order cancelled and refund issued.");
-    }
-    setProcessing(false);
-    setConfirming(false);
-  };
-
-  if (result) {
-    return <p className="mt-4 text-xs text-muted-foreground">{result}</p>;
-  }
-
-  if (!confirming) {
-    return (
-      <button
-        onClick={() => setConfirming(true)}
-        className="mt-4 text-xs text-muted-foreground hover:text-foreground transition-colors"
-      >
-        Cancel order
-      </button>
-    );
-  }
-
-  return (
-    <div className="mt-4 flex items-center gap-2">
-      <p className="text-xs text-muted-foreground">Are you sure?</p>
-      <Button size="xs" variant="destructive" onClick={handleCancel} disabled={processing}>
-        {processing ? "Cancelling..." : "Yes, cancel and refund"}
-      </Button>
-      <Button size="xs" variant="ghost" onClick={() => setConfirming(false)}>
-        No
-      </Button>
     </div>
   );
 }

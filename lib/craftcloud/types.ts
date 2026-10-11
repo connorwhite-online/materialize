@@ -92,6 +92,12 @@ export interface Cart {
   currency: Currency;
   countryCode?: string;
   expiresAt?: number;
+  /**
+   * The shipping options the cart was created with, priced by
+   * CraftCloud (required in the v5 cart response schema; absent from
+   * the mock cart).
+   */
+  shippings?: ShippingOption[];
   amounts?: {
     total?: {
       net?: number;

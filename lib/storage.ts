@@ -45,12 +45,24 @@ function getBucket() {
 export async function generateUploadUrl(
   key: string,
   contentType: string,
-  expiresIn = 3600
+  expiresIn = 3600,
+  options?: {
+    /**
+     * Exact byte length the PUT must carry. Signed into the URL
+     * (`X-Amz-SignedHeaders` gains `content-length`), so R2 rejects a
+     * body of any other size — this is what makes a presign route's
+     * size check binding rather than advisory. Browsers set
+     * Content-Length from the File/Blob body automatically, so the
+     * caller must PUT exactly the file whose `size` it declared.
+     */
+    contentLength?: number;
+  }
 ): Promise<string> {
   const command = new PutObjectCommand({
     Bucket: getBucket(),
     Key: key,
     ContentType: contentType,
+    ContentLength: options?.contentLength,
   });
   return getSignedUrl(getS3(), command, { expiresIn });
 }

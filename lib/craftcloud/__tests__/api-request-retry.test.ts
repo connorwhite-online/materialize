@@ -113,4 +113,94 @@ describe("apiRequest retry behavior", () => {
     ).rejects.toBeInstanceOf(CraftCloudApiError);
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
+
+  it("createOrder never times out client-side — an abort can't tell us whether it placed", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({ orderId: "o1" }));
+    await createOrder({
+      cartId: "cart-1",
+      user: {
+        emailAddress: "a@b.c",
+        shipping: {
+          firstName: "A",
+          lastName: "B",
+          address: "1",
+          city: "C",
+          zipCode: "00000",
+          countryCode: "US",
+        },
+        billing: {
+          firstName: "A",
+          lastName: "B",
+          address: "1",
+          city: "C",
+          zipCode: "00000",
+          countryCode: "US",
+          isCompany: false,
+        },
+      },
+    });
+    expect(fetchMock.mock.calls[0][1].signal).toBeUndefined();
+  });
+});
+
+describe("apiRequest timeouts + path encoding", () => {
+  beforeEach(() => {
+    fetchMock.mockReset();
+  });
+
+  const timeoutError = () =>
+    Object.assign(new Error("The operation timed out."), {
+      name: "TimeoutError",
+    });
+
+  it("passes an AbortSignal on every request", async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({ priceId: "p1", quotes: [], shipping: [], allComplete: true })
+    );
+    await getPrice("p1");
+    expect(fetchMock.mock.calls[0][1].signal).toBeInstanceOf(AbortSignal);
+  });
+
+  it("GET treats a timeout as transient and retries it", async () => {
+    fetchMock
+      .mockRejectedValueOnce(timeoutError())
+      .mockResolvedValueOnce(
+        jsonResponse({ priceId: "p1", quotes: [], shipping: [], allComplete: true })
+      );
+    const out = await getPrice("p1");
+    expect(out.priceId).toBe("p1");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("a persistent GET timeout surfaces as a 504 CraftCloudApiError", async () => {
+    fetchMock.mockImplementation(() => Promise.reject(timeoutError()));
+    const err = await getPrice("p1").catch((e) => e);
+    expect(err).toBeInstanceOf(CraftCloudApiError);
+    expect(err.status).toBe(504);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
+  it("does not retry once the caller's signal has aborted", async () => {
+    const controller = new AbortController();
+    fetchMock.mockImplementation(() => {
+      controller.abort();
+      return Promise.reject(
+        Object.assign(new Error("aborted"), { name: "AbortError" })
+      );
+    });
+    await expect(
+      getPrice("p1", { signal: controller.signal })
+    ).rejects.toMatchObject({ name: "AbortError" });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("encodes path params", async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({ priceId: "x", quotes: [], shipping: [], allComplete: true })
+    );
+    await getPrice("../cart/evil?x=1");
+    expect(String(fetchMock.mock.calls[0][0])).toContain(
+      "/v5/price/..%2Fcart%2Fevil%3Fx%3D1"
+    );
+  });
 });

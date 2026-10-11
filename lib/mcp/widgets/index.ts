@@ -1,6 +1,10 @@
 import "server-only";
 
 import { createHash } from "node:crypto";
+import { eq } from "drizzle-orm";
+import { db } from "@/lib/db";
+import { fileAssets, files } from "@/lib/db/schema";
+import { ownsLoadedFile } from "@/lib/entitlement";
 import { deriveAppUrl } from "@/lib/utils/request-url";
 import { mintWidgetModelToken } from "./model-token";
 import { materialsWidgetHtml } from "./materials-widget";
@@ -103,11 +107,44 @@ export function registerWidgets(server: ResourceServer) {
   }
 }
 
-/** A short-lived link the quote widget's 3D view can fetch the model from. */
-export async function widgetModelLink(fileAssetId: string, format: string) {
+/**
+ * A short-lived link the quote widget's 3D view can fetch the model from.
+ *
+ * `userId` is the MCP caller. Quoting is open to any public listing, so
+ * the link only carries the full-resolution original when the caller is
+ * entitled to the file (lib/entitlement.ts); everyone else's link serves
+ * the low-detail copy of a paid listing (lib/files/model-preview.ts).
+ */
+export async function widgetModelLink(
+  fileAssetId: string,
+  format: string,
+  userId: string | null
+) {
   const appUrl = await deriveAppUrl();
+  const variant = (await callerEntitledToAsset(userId, fileAssetId))
+    ? "full"
+    : "preview";
   return {
-    url: `${appUrl}/api/widget/model/${fileAssetId}?t=${encodeURIComponent(mintWidgetModelToken(fileAssetId))}`,
+    url: `${appUrl}/api/widget/model/${fileAssetId}?t=${encodeURIComponent(mintWidgetModelToken(fileAssetId, Date.now(), variant))}`,
     format,
   };
+}
+
+async function callerEntitledToAsset(
+  userId: string | null,
+  fileAssetId: string
+): Promise<boolean> {
+  const [row] = await db
+    .select({
+      id: files.id,
+      price: files.price,
+      userId: files.userId,
+      organizationId: files.organizationId,
+    })
+    .from(fileAssets)
+    .innerJoin(files, eq(fileAssets.fileId, files.id))
+    .where(eq(fileAssets.id, fileAssetId))
+    .limit(1);
+  if (!row) return false;
+  return ownsLoadedFile(userId, row);
 }

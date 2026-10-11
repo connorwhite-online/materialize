@@ -410,6 +410,7 @@ describe("cart-context: updateQuantity re-pricing", () => {
     expect(repriceCartItemImpl).toHaveBeenCalledWith({
       cartItemId: "ci-1",
       quantity: 3,
+      priceId: "price-1",
       quoteId: "quote-2",
       materialPrice: 12.5,
     });

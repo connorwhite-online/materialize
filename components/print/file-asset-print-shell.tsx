@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { type ReactNode } from "react";
+import type { PrintFileLicense } from "./price-display";
 import { QuoteConfigurator } from "@/components/print/quote-configurator";
 import { CartSlotStack } from "@/components/print/cart-slot-stack";
 import type { CheckoutModel } from "@/lib/env";
@@ -40,6 +41,8 @@ interface FileAssetPrintShellProps {
    * two-charge disclosure under "two_step". Defaults to "single".
    */
   checkoutModel?: CheckoutModel;
+  /** Paid listing the buyer doesn't own: printing it also buys it. */
+  fileLicense?: PrintFileLicense | null;
   /**
    * Owner-chosen snapshot angle from the listing. Forwarded to the
    * configurator so the print-page viewer opens on the same view as
@@ -67,6 +70,7 @@ export function FileAssetPrintShell({
   configureHeader,
   projectSlug,
   checkoutModel = "single",
+  fileLicense = null,
   initialView,
 }: FileAssetPrintShellProps) {
   const router = useRouter();
@@ -96,6 +100,7 @@ export function FileAssetPrintShell({
       preselectMaterialId={preselectMaterialId}
       preselectFinishGroupId={preselectFinishGroupId}
       checkoutModel={checkoutModel}
+      fileLicense={fileLicense}
       initialView={initialView}
       onAddedToCart={handleAddedToCart}
       headerSlot={configureHeader}

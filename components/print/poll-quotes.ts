@@ -16,6 +16,23 @@ export interface QuoteSnapshot {
 }
 
 /**
+ * Identity of a snapshot for "did anything change?" checks: the quote
+ * ids, the shipping ids and the completion flag. A CraftCloud quoteId
+ * names one priced offer, so the same ids mean the same prices. Lets
+ * onSnapshot consumers skip setState for the repeat snapshots the
+ * stability window produces.
+ */
+export function quoteSnapshotKey(
+  snapshot: Pick<QuoteSnapshot, "quotes" | "shipping" | "allComplete">
+): string {
+  const quoteIds = (snapshot.quotes ?? []).map((q) => q.quoteId).join(",");
+  const shippingIds = (snapshot.shipping ?? [])
+    .map((s) => s.shippingId)
+    .join(",");
+  return `${snapshot.allComplete ? 1 : 0}|${quoteIds}|${shippingIds}`;
+}
+
+/**
  * Why the poll loop exited. The UI uses this to distinguish "we have
  * the full vendor set, the price grid below is final" from "we ran
  * out of patience and there might be more quotes still landing if you

@@ -14,7 +14,10 @@ import {
   tokenSpendingLedger,
   users,
 } from "@/lib/db/schema";
-import { createCart, getPrice, CraftCloudApiError } from "@/lib/craftcloud/client";
+import { createCart, CraftCloudApiError } from "@/lib/craftcloud/client";
+import { CHECKOUT_CURRENCY, reconcileQuote } from "@/lib/pricing/reconcile-quote";
+import { resolvePrintLicense } from "@/lib/print/license";
+import { userCanPrintAsset } from "@/lib/entitlement";
 import { findMaterialConfig, findProvider } from "@/lib/craftcloud/catalog";
 import { evaluateSpendingPolicy } from "@/lib/billing/policy";
 import { getStripe } from "@/lib/stripe";
@@ -24,57 +27,13 @@ import { calcServiceFee } from "@/lib/fees";
 
 const CONFIRMATION_TTL_MS = 24 * 60 * 60 * 1000;
 
-const QUOTE_EXPIRED_ERROR =
-  "This quote has expired. Re-run materialize_get_quote and try again.";
-
-// Rounding-only tolerance — see the identical constant + rationale in
-// app/actions/print.ts (duplicated rather than extracted into a
-// shared helper; MTR-162 tracks that extraction as a deliberate
-// follow-up AFTER this money-critical change lands). MTR-130.
-const PRICE_RECONCILE_TOLERANCE_CENTS = 1;
-
-/**
- * Re-derive the authoritative per-unit material price for a quote
- * from CraftCloud instead of trusting the agent-supplied
- * materialPriceCents. Worst-case exposure on this path: an
- * off-session auto-charge with nobody present to notice a tampered
- * total, so this is not optional. See app/actions/print.ts's twin for
- * the full rationale — kept in sync there.
- */
-async function reconcileMaterialPrice(params: {
-  priceId: string;
-  quoteId: string;
-  claimedPriceCents: number;
-}): Promise<{ ok: true; priceCents: number } | { ok: false; error: string }> {
-  let snapshot;
-  try {
-    snapshot = await getPrice(params.priceId);
-  } catch (error) {
-    if (error instanceof CraftCloudApiError && error.isQuoteExpired()) {
-      return { ok: false, error: QUOTE_EXPIRED_ERROR };
-    }
-    throw error;
-  }
-
-  const quote = snapshot.quotes?.find((q) => q.quoteId === params.quoteId);
-  if (!quote) {
-    return { ok: false, error: QUOTE_EXPIRED_ERROR };
-  }
-
-  const authoritativeCents = Math.round(quote.price * 100);
-  if (
-    Math.abs(authoritativeCents - params.claimedPriceCents) >
-    PRICE_RECONCILE_TOLERANCE_CENTS
-  ) {
-    return {
-      ok: false,
-      error:
-        "Pricing has changed since this quote was generated. Re-run materialize_get_quote and try again.",
-    };
-  }
-
-  return { ok: true, priceCents: authoritativeCents };
-}
+const RECONCILE_MESSAGES = {
+  expired: "This quote has expired. Re-run materialize_get_quote and try again.",
+  priceChanged:
+    "Pricing has changed since this quote was generated. Re-run materialize_get_quote and try again.",
+  quantityMismatch:
+    "quantity must match the quantity the quote was priced for. Re-run materialize_get_quote with this quantity and try again.",
+};
 
 /**
  * Kill switch for the auto-approve flow. Default-off so deploying
@@ -137,6 +96,12 @@ export interface CreateAgentOrderResult {
   totalPriceCents: number;
   serviceFeeCents: number;
   /**
+   * The paid listing's price when printing it also buys it (the user
+   * didn't own the file). Charged on top of totalPriceCents +
+   * serviceFeeCents; absent when zero.
+   */
+  licenseFeeCents?: number;
+  /**
    * The line items behind totalPriceCents, so an agent can explain the
    * price instead of reporting an unexplained difference from the quote
    * (ChatGPT did: "$75.76 Materialize did not explain"). Absent on an
@@ -178,7 +143,10 @@ export async function createAgentInitiatedOrder(
       autoApprovedUntil: printOrders.autoApprovedUntil,
       totalPrice: printOrders.totalPrice,
       serviceFee: printOrders.serviceFee,
+      licenseFee: printOrders.licenseFee,
       status: printOrders.status,
+      fileAssetId: printOrders.fileAssetId,
+      quantity: printOrders.quantity,
     })
     .from(printOrders)
     .where(
@@ -190,6 +158,18 @@ export async function createAgentInitiatedOrder(
     .limit(1);
 
   if (existing) {
+    // A key names one order. Reusing it for a different file or
+    // quantity is an agent bug, and answering with the old order would
+    // tell it the new one exists.
+    if (
+      existing.fileAssetId !== input.fileAssetId ||
+      existing.quantity !== input.quantity
+    ) {
+      return {
+        error:
+          "This idempotencyKey was already used for a different order. Use a new key for a new order.",
+      };
+    }
     // The replay applies whether the original order is still
     // awaiting confirmation OR was auto-approved within the
     // cancellation window — both are pre-fulfillment states the
@@ -219,47 +199,64 @@ export async function createAgentInitiatedOrder(
         existing.autoApprovedUntil?.toISOString() ?? undefined,
       totalPriceCents: existing.totalPrice,
       serviceFeeCents: existing.serviceFee,
+      ...(existing.licenseFee ? { licenseFeeCents: existing.licenseFee } : {}),
     };
   }
 
-  const [assetRow] = await db
-    .select({
-      assetId: fileAssets.id,
-      ownerId: files.userId,
-    })
-    .from(fileAssets)
-    .innerJoin(files, eq(fileAssets.fileId, files.id))
-    .where(eq(fileAssets.id, input.fileAssetId))
-    .limit(1);
-
-  if (!assetRow) return { error: "File not found" };
-  if (assetRow.ownerId !== input.userId) {
-    return { error: "Forbidden: file does not belong to this user" };
+  // Same gate as the web checkout (CON-73): the owner's own asset, or
+  // a published listing — which is also what materialize_get_quote
+  // will quote, so the documented quote → order flow works end to end.
+  if (!(await userCanPrintAsset(input.userId, input.fileAssetId))) {
+    return { error: "File not found" };
   }
 
-  // Re-derive the authoritative per-unit price from CraftCloud instead
-  // of trusting the agent-supplied materialPriceCents — this is the
-  // highest-risk path for tampering (uncapped revenue leakage on the
-  // auto-approved off-session charge, with no human present to notice
-  // a mismatched total). MTR-130.
-  const materialReconciled = await reconcileMaterialPrice({
-    priceId: input.priceId,
-    quoteId: input.quoteId,
-    claimedPriceCents: input.materialPriceCents,
-  });
-  if (!materialReconciled.ok) return { error: materialReconciled.error };
-  const materialPriceCents = materialReconciled.priceCents;
+  // Printing a paid listing the user doesn't own also buys it.
+  const licensed = await resolvePrintLicense(input.userId, input.fileAssetId);
+  if (!licensed.ok) return { error: licensed.error };
+  const licenseFee = licensed.license?.licenseCents ?? 0;
+
+  // Re-derive everything billed from CraftCloud's snapshot of the quote
+  // instead of trusting the agent — this is the highest-risk path for
+  // tampering (an off-session auto-charge with nobody present to notice
+  // a mismatched total). Price (MTR-130), the quote's own quantity
+  // (CraftCloud prints what the quoteId bakes in), vendor (keys the
+  // minimum fee and the spending policy's vendor allowlist), material
+  // (the policy's material allowlist) and the chosen shipping's price.
+  const reconciled = await reconcileQuote(
+    {
+      priceId: input.priceId,
+      quoteId: input.quoteId,
+      claimedPriceCents: input.materialPriceCents,
+      expectedQuantity: input.quantity,
+      shippingId: input.shippingId,
+    },
+    RECONCILE_MESSAGES
+  );
+  if (!reconciled.ok) return { error: reconciled.error };
+  const { quote } = reconciled;
+  if (
+    quote.vendorId !== input.vendorId ||
+    quote.materialConfigId !== input.materialConfigId
+  ) {
+    return {
+      error:
+        "vendorId and materialConfigId must match the quote. Re-run materialize_get_quote and pass the values it returned.",
+    };
+  }
+  const materialPriceCents = reconciled.priceCents;
+  const shippingPriceCents = reconciled.shipping!.priceCents;
 
   let cartId: string;
   let productionFeeCents = 0;
   try {
     const cart = await createCart({
       shippingIds: [input.shippingId],
-      currency: input.currency,
+      // The quote was just reconciled as USD; the cart must match.
+      currency: CHECKOUT_CURRENCY,
       quotes: [{ id: input.quoteId }],
     });
     cartId = cart.cartId;
-    const minimum = cart.minimumProductionPrice?.[input.vendorId];
+    const minimum = cart.minimumProductionPrice?.[quote.vendorId];
     productionFeeCents = Math.round((minimum?.productionFee ?? 0) * 100);
   } catch (error) {
     logError("createAgentInitiatedOrder.createCart", error);
@@ -271,13 +268,13 @@ export async function createAgentInitiatedOrder(
 
   const preShippingTotal =
     materialPriceCents * input.quantity + productionFeeCents;
-  const totalPrice = preShippingTotal + input.shippingPriceCents;
+  const totalPrice = preShippingTotal + shippingPriceCents;
   const serviceFee = calcServiceFee(preShippingTotal);
   // What the user will actually be charged — service fee on top of
   // the line items. Keep this consistent with mintStripeSession in
   // app/actions/agent-orders.ts so the auto-approved charge equals
   // the email-confirm charge for the same order shape.
-  const grandTotalCents = totalPrice + serviceFee;
+  const grandTotalCents = totalPrice + serviceFee + licenseFee;
 
   const confirmationToken = nanoid(32);
   const confirmationExpiresAt = new Date(Date.now() + CONFIRMATION_TTL_MS);
@@ -333,8 +330,9 @@ export async function createAgentInitiatedOrder(
         craftCloudCartId: cartId,
         totalPrice,
         serviceFee,
+        licenseFee,
         materialSubtotal: materialPriceCents,
-        shippingSubtotal: input.shippingPriceCents,
+        shippingSubtotal: shippingPriceCents,
         quantity: input.quantity,
         material: input.materialConfigId,
         vendor: input.vendorId,
@@ -412,7 +410,10 @@ export async function createAgentInitiatedOrder(
         // instead of charging the customer twice. Pairs with a unique DB
         // constraint on (userId, agentIdempotencyKey) — proposed as a
         // follow-up migration, see PR notes.
-        { idempotencyKey: `agent-charge:${input.idempotencyKey}` }
+        // Scoped by user: Stripe idempotency keys are account-wide, so two
+        // users' agents picking the same key ("order-1") would otherwise
+        // collide and the second charge would silently fail over to email.
+        { idempotencyKey: `agent-charge:${input.userId}:${input.idempotencyKey}` }
       );
 
       if (intent.status === "succeeded") {
@@ -471,10 +472,11 @@ export async function createAgentInitiatedOrder(
     cancellationDeadline: autoApprovedUntil?.toISOString(),
     totalPriceCents: totalPrice,
     serviceFeeCents: serviceFee,
+    ...(licenseFee ? { licenseFeeCents: licenseFee } : {}),
     breakdown: {
       productionCents: materialPriceCents * input.quantity,
       minimumFeeCents: productionFeeCents,
-      shippingCents: input.shippingPriceCents,
+      shippingCents: shippingPriceCents,
     },
     remainingPeriodBudgetCents,
     fallbackReason,
@@ -487,11 +489,13 @@ export interface AgentOrderSummary {
   terminal: boolean;
   initiatedByAgent: boolean;
   agentName: string | null;
-  /** What the user pays: totalPriceCents + serviceFeeCents. */
+  /** What the user pays: totalPriceCents + serviceFeeCents + licenseFeeCents. */
   amountDueCents: number;
   /** Items + shipping, before the service fee. Not the total. */
   totalPriceCents: number;
   serviceFeeCents: number;
+  /** The paid listing's price when printing it also bought it; absent when zero. */
+  licenseFeeCents?: number;
   currency: "USD";
   vendor: { id: string | null; name: string | null };
   material: {
@@ -595,9 +599,10 @@ async function shapeOrderRow(
     terminal: TERMINAL_STATUSES.has(row.status),
     initiatedByAgent: row.initiatedByTokenId != null,
     agentName: row.agentName,
-    amountDueCents: row.totalPrice + row.serviceFee,
+    amountDueCents: row.totalPrice + row.serviceFee + row.licenseFee,
     totalPriceCents: row.totalPrice,
     serviceFeeCents: row.serviceFee,
+    ...(row.licenseFee ? { licenseFeeCents: row.licenseFee } : {}),
     currency: "USD",
     vendor: {
       id: row.vendor,

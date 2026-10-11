@@ -3,6 +3,7 @@ import { files, fileAssets, projects, projectFiles, projectPhotos, users } from 
 import { eq, asc, inArray } from "drizzle-orm";
 import { currentAssetsByFileId } from "@/lib/files/current-version";
 import { withDbRetry } from "@/lib/db/retry";
+import { isPublicListing } from "@/lib/files/public-listing";
 import { isOrgMember } from "@/lib/authorization";
 import { generateDownloadUrl } from "@/lib/storage";
 import type { LibraryTile } from "./library-tiles";
@@ -90,6 +91,7 @@ async function loadProjectPrintTilesOnce(
       slug: files.slug,
       thumbnailUrl: files.thumbnailUrl,
       status: files.status,
+      visibility: files.visibility,
       currentAssetId: files.currentAssetId,
       position: projectFiles.position,
     })
@@ -104,13 +106,15 @@ async function loadProjectPrintTilesOnce(
     return null;
   }
 
-  // Non-owners can only print published listings — a draft bundled
+  // Non-owners can only print public listings — a draft or private file bundled
   // into an otherwise-public project stays hidden from the hub (and
   // `addToCart` would reject it server-side anyway via
   // userCanPrintAsset). Owners print everything.
   const printable = isOwner
     ? bundled
-    : bundled.filter((f) => f.status === "published");
+    : bundled.filter((f) =>
+        isPublicListing({ fileStatus: f.status, fileVisibility: f.visibility })
+      );
 
   const fileIds = printable.map((f) => f.id);
   // Resolve project cover photo using the same priority order as the OG

@@ -3,6 +3,7 @@ import Link from "next/link";
 import { auth } from "@clerk/nextjs/server";
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
+import { confirmationTokenMatches } from "@/lib/mcp/confirmation-token";
 import { printOrders, fileAssets, files } from "@/lib/db/schema";
 import { findMaterialConfig, findProvider } from "@/lib/craftcloud/catalog";
 import { ConfirmOrderForm } from "./confirm-form";
@@ -34,7 +35,7 @@ export default async function ConfirmAgentOrderPage({
 
   if (!order) notFound();
   if (order.userId !== userId) notFound();
-  if (order.confirmationToken !== token) notFound();
+  if (!confirmationTokenMatches(order.confirmationToken, token)) notFound();
 
   const expired =
     order.confirmationExpiresAt &&
@@ -174,7 +175,9 @@ export default async function ConfirmAgentOrderPage({
             </>
           ) : order.status === "cart_created" ? (
             <>
-              This order is awaiting payment.{" "}
+              {payment === "cancelled"
+                ? "Payment was cancelled. The order is saved and awaiting payment."
+                : "This order is awaiting payment."}{" "}
               <Link
                 href={`/dashboard/orders`}
                 className="underline hover:text-foreground"

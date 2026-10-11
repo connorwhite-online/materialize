@@ -7,6 +7,8 @@ import { createOrder } from "@/lib/craftcloud/client";
 import { getStripe } from "@/lib/stripe";
 import { logError } from "@/lib/logger";
 import { notifyPrintOrderPlaced } from "@/lib/notifications/print-order";
+import { grantPrintLicenses } from "@/lib/print/license";
+import { expectedSingleItemCheckoutCents } from "@/lib/print/checkout-amount";
 
 /**
  * Fires after a successful Stripe `checkout.session.completed`
@@ -117,9 +119,20 @@ async function clearCartItemsForOrder(
   }
 }
 
+/**
+ * The Checkout session behind a webhook delivery. Only the Stripe
+ * webhook passes it; the auto-approved placement cron (an off-session
+ * PaymentIntent, no session) does not, and skips every session check.
+ */
+export interface PrintOrderCheckoutSession {
+  id: string;
+  amountTotal: number | null;
+  paymentStatus: string;
+}
+
 export async function handlePrintOrderPayment(
   printOrderId: string,
-  opts?: { paymentIntentId?: string }
+  opts?: { paymentIntentId?: string; session?: PrintOrderCheckoutSession }
 ): Promise<void> {
   // Fetch-first purely to branch on the persisted checkout model —
   // the single-mode claim below still re-checks everything it gates
@@ -129,8 +142,36 @@ export async function handlePrintOrderPayment(
     .from(printOrders)
     .where(eq(printOrders.id, printOrderId));
 
+  // A completed checkout for an order that no longer exists (discarded
+  // draft) or was cancelled (the stale-order sweep) can never be
+  // placed. Previously that either threw "not found" on every Stripe
+  // retry or returned silently — the buyer kept paying for nothing.
+  // Give the money back instead, and page a human.
+  if (opts?.session && (!existing || existing.status === "cancelled")) {
+    await releaseOrphanedPayment(
+      printOrderId,
+      existing?.status ?? null,
+      opts.session,
+      opts.paymentIntentId
+    );
+    return;
+  }
+
   if (existing?.checkoutModel === "two_step") {
     await handleTwoStepFeeAuthorization(printOrderId, opts?.paymentIntentId);
+    return;
+  }
+
+  // Cheap cross-checks before we spend the buyer's money at CraftCloud.
+  // A mismatch is never expected (sessions are minted server-side from
+  // the row), so it's left for manual review rather than guessed at:
+  // the order stays cart_created, nothing is placed, and the error log
+  // carries everything needed to reconcile it.
+  if (
+    opts?.session &&
+    existing?.status === "cart_created" &&
+    !sessionMatchesOrder(existing, opts.session)
+  ) {
     return;
   }
 
@@ -171,6 +212,10 @@ export async function handlePrintOrderPayment(
     if (order.status !== "cart_created") {
       if (order.status === "ordered") {
         await clearCartItemsForOrder(printOrderId, order.userId);
+        // Idempotent; finishes a grant an earlier delivery died in.
+        if (order.licenseFee > 0) {
+          await grantPrintLicenses(printOrderId, opts?.paymentIntentId ?? null);
+        }
       }
       return;
     }
@@ -190,6 +235,9 @@ export async function handlePrintOrderPayment(
         .set({ status: "ordered" })
         .where(eq(printOrders.id, printOrderId));
       await clearCartItemsForOrder(printOrderId, order.userId);
+      if (order.licenseFee > 0) {
+        await grantPrintLicenses(printOrderId, opts?.paymentIntentId ?? null);
+      }
     }
     return;
   }
@@ -260,6 +308,13 @@ export async function handlePrintOrderPayment(
   // order placement we just committed.
   if (placed.length > 0) {
     await notifyPrintOrderPlaced(printOrderId);
+  }
+
+  // Placed: a paid listing printed with this order is now the buyer's,
+  // and its creator is paid (lib/print/license.ts). Idempotent, so it
+  // runs whichever worker won the write. Never throws.
+  if (order.licenseFee > 0) {
+    await grantPrintLicenses(printOrderId, opts?.paymentIntentId ?? null);
   }
 
   // MONEY-2: clear the cart lines this order came from now that it has
@@ -418,6 +473,126 @@ export async function persistSavedFeeCard(
     await db.update(users).set(set).where(eq(users.id, userId));
   } catch (err) {
     logError("handlePrintOrderPayment.persistSavedFeeCard", err);
+  }
+}
+
+/**
+ * Is this paid session the one we charged for this order, for the
+ * amount we charged? Logs and returns false on any mismatch.
+ *
+ * - Session id: a mismatch is logged but does not block. The session's
+ *   metadata already names this order and only our server creates
+ *   sessions, and a second session for the same order (a double submit
+ *   that minted two) is a real payment that must still be placed. The
+ *   amount check below is the guard.
+ * - Amount: only for single-item orders (fileAssetId set), whose line
+ *   items `expectedSingleItemCheckoutCents` mirrors. Multi-item orders
+ *   are priced from printOrderItems and are not re-derived here.
+ */
+function sessionMatchesOrder(
+  order: typeof printOrders.$inferSelect,
+  session: PrintOrderCheckoutSession
+): boolean {
+  const stored = order.stripeSessionId;
+  const storedIsSession =
+    !!stored && !stored.startsWith("pi_") && !stored.startsWith("session_claim:");
+  if (storedIsSession && stored !== session.id) {
+    logError(
+      "handlePrintOrderPayment.sessionMismatch",
+      new Error(
+        `paid session ${session.id} does not match order ${order.id}'s stored session`,
+        {
+          cause: {
+            printOrderId: order.id,
+            sessionId: session.id,
+            orderSessionId: stored,
+          },
+        }
+      )
+    );
+  }
+
+  if (order.fileAssetId && session.amountTotal != null) {
+    const expected = expectedSingleItemCheckoutCents(order);
+    if (session.amountTotal !== expected) {
+      logError(
+        "handlePrintOrderPayment.amountMismatch",
+        new Error(
+          `paid session ${session.id} charged ${session.amountTotal} but order ${order.id} expects ${expected} — not placing`,
+          {
+            cause: {
+              printOrderId: order.id,
+              sessionId: session.id,
+              amountTotal: session.amountTotal,
+              expected,
+            },
+          }
+        )
+      );
+      return false;
+    }
+  }
+  return true;
+}
+
+/**
+ * Give back money taken for a print order that can no longer be
+ * placed (row missing or cancelled). The PaymentIntent's own status
+ * decides how:
+ *
+ *   - `succeeded` → refund in full (single checkout).
+ *   - `requires_capture` → cancel the hold (a two_step fee
+ *     authorization — per the two_step money invariant we cancel holds,
+ *     we never refund them).
+ *   - anything else → nothing was taken; nothing to give back.
+ *
+ * The refund key is per session, so a Stripe retry (or the
+ * checkout.session.completed + async_payment_succeeded pair) can never
+ * refund twice. Stripe errors propagate so the webhook 500s and Stripe
+ * retries — except "already refunded", which is the goal state.
+ */
+async function releaseOrphanedPayment(
+  printOrderId: string,
+  status: string | null,
+  session: PrintOrderCheckoutSession,
+  paymentIntentId: string | undefined
+): Promise<void> {
+  logError(
+    "handlePrintOrderPayment.orphanedPayment",
+    new Error(
+      `checkout ${session.id} completed for ${status ? `a ${status}` : "a missing"} print order ${printOrderId} — releasing the payment`,
+      {
+        cause: {
+          printOrderId,
+          sessionId: session.id,
+          paymentIntentId,
+          status,
+          amountTotal: session.amountTotal,
+        },
+      }
+    )
+  );
+  if (!paymentIntentId) return;
+
+  const stripe = getStripe();
+  const pi = await stripe.paymentIntents.retrieve(paymentIntentId);
+  if (pi.status === "requires_capture") {
+    await stripe.paymentIntents.cancel(paymentIntentId);
+    return;
+  }
+  if (pi.status !== "succeeded") return;
+
+  try {
+    await stripe.refunds.create(
+      {
+        payment_intent: paymentIntentId,
+        metadata: { printOrderId, source: "webhook_orphaned_order" },
+      },
+      { idempotencyKey: `print-refund-orphan:${session.id}` }
+    );
+  } catch (err) {
+    if ((err as { code?: string })?.code === "charge_already_refunded") return;
+    throw err;
   }
 }
 

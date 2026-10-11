@@ -69,6 +69,11 @@ interface CheckoutFormProps {
   totalPrice: number;
   /** Platform fee (3%), in cents. */
   serviceFee: number;
+  /**
+   * Price of the paid listing(s) this print also buys, in cents
+   * (lib/print/license.ts). Charged on top; 0 when none.
+   */
+  licenseFee?: number;
 }
 
 export function CheckoutForm({
@@ -78,6 +83,7 @@ export function CheckoutForm({
   productionFee,
   totalPrice,
   serviceFee,
+  licenseFee = 0,
 }: CheckoutFormProps) {
   const router = useRouter();
   const [submitting, setSubmitting] = useState(false);
@@ -236,6 +242,21 @@ export function CheckoutForm({
               </div>
             )}
 
+            {licenseFee > 0 && (
+              <div>
+                <div className="flex justify-between text-sm">
+                  <span className="text-muted-foreground">File price</span>
+                  <span className="tabular-nums">
+                    ${(licenseFee / 100).toFixed(2)}
+                  </span>
+                </div>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Paid to the creator once. You&apos;ll own the file after your
+                  order is placed.
+                </p>
+              </div>
+            )}
+
             <div className="flex justify-between text-sm">
               <span className="text-muted-foreground">Service fee (3%)</span>
               <span className="tabular-nums">
@@ -257,7 +278,7 @@ export function CheckoutForm({
             <div className="flex justify-between font-semibold">
               <span>Total</span>
               <span className="tabular-nums">
-                ${((totalPrice + serviceFee) / 100).toFixed(2)}
+                ${((totalPrice + serviceFee + licenseFee) / 100).toFixed(2)}
               </span>
             </div>
           </CardContent>

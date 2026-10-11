@@ -137,6 +137,62 @@ describe("catalog fetch retry", () => {
     }
   });
 
+  it("dedupes concurrent cold callers onto one catalog fetch", async () => {
+    fetchMock.mockImplementation(() =>
+      Promise.resolve(jsonResponse({ materialStructure: [] }))
+    );
+    const { getCraftCloudCatalog } = await freshModule();
+
+    const [a, b, c] = await Promise.all([
+      getCraftCloudCatalog(),
+      getCraftCloudCatalog(),
+      getCraftCloudCatalog(),
+    ]);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(a).toBe(b);
+    expect(b).toBe(c);
+  });
+
+  it("dedupes concurrent cold callers onto one provider fetch", async () => {
+    fetchMock.mockImplementation(() =>
+      Promise.resolve(jsonResponse([{ vendorId: "v1", name: "Vendor One" }]))
+    );
+    const { getProviderIndex } = await freshModule();
+
+    await Promise.all([getProviderIndex(), getProviderIndex()]);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not cache a failed in-flight load — the next caller retries", async () => {
+    fetchMock.mockResolvedValueOnce(statusResponse(404));
+    const { getProviderIndex } = await freshModule();
+
+    await expect(getProviderIndex()).rejects.toThrow("provider fetch failed: 404");
+
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse([{ vendorId: "v1", name: "Vendor One" }])
+    );
+    const providers = await getProviderIndex();
+    expect(providers.get("v1")?.name).toBe("Vendor One");
+  });
+
+  it("passes a timeout signal and retries a timed-out attempt", async () => {
+    const timeout = Object.assign(new Error("timed out"), {
+      name: "TimeoutError",
+    });
+    fetchMock
+      .mockRejectedValueOnce(timeout)
+      .mockResolvedValueOnce(jsonResponse([{ vendorId: "v1", name: "V" }]));
+    const { getProviderIndex } = await freshModule();
+
+    await getProviderIndex();
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls[0][1].signal).toBeInstanceOf(AbortSignal);
+  });
+
   it("re-fetches providers once the TTL elapses within a warm instance", async () => {
     vi.useFakeTimers();
     try {

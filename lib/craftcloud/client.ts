@@ -109,10 +109,35 @@ function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+/**
+ * Per-attempt timeouts for server-side CraftCloud calls. Without one,
+ * a hung upstream holds the route (and the user's spinner) until the
+ * platform kills the function. GETs are short and retried; mutating
+ * calls get longer because they are never retried, so a premature
+ * abort is a user-visible failure.
+ */
+export const GET_TIMEOUT_MS = 10_000;
+export const MUTATION_TIMEOUT_MS = 20_000;
+
+export interface ApiRequestOptions {
+  /** Caller cancellation (e.g. the incoming request's signal). */
+  signal?: AbortSignal;
+  /**
+   * Override the default timeout; `null` means none. Only for calls
+   * where giving up is worse than waiting — see realCreateOrder.
+   */
+  timeoutMs?: number | null;
+}
+
+function isTimeoutError(err: unknown): boolean {
+  return (err as { name?: string } | null)?.name === "TimeoutError";
+}
+
 async function apiRequest<T>(
   method: string,
   path: string,
-  body?: unknown
+  body?: unknown,
+  options: ApiRequestOptions = {}
 ): Promise<T> {
   // Only auto-retry GETs. POSTs that mutate (createCart, createOrder)
   // are not idempotent on CraftCloud's side — retrying after a
@@ -120,16 +145,32 @@ async function apiRequest<T>(
   // us to tell if the prior attempt succeeded. The webhook layer's
   // atomic claim handles end-to-end retries for createOrder.
   const canRetry = method.toUpperCase() === "GET";
+  const timeoutMs =
+    options.timeoutMs === undefined
+      ? canRetry
+        ? GET_TIMEOUT_MS
+        : MUTATION_TIMEOUT_MS
+      : options.timeoutMs;
+  const callerSignal = options.signal;
 
   let lastError: unknown;
   for (let attempt = 0; attempt < (canRetry ? RETRY_ATTEMPTS : 1); attempt++) {
     try {
+      // Fresh timeout per attempt, so one slow attempt doesn't eat the
+      // retries' budget. The caller's signal still cancels everything.
+      const timeout =
+        timeoutMs === null ? undefined : AbortSignal.timeout(timeoutMs);
+      const signal =
+        callerSignal && timeout
+          ? AbortSignal.any([callerSignal, timeout])
+          : (callerSignal ?? timeout);
       const res = await fetch(`${BASE_URL}${path}`, {
         method,
         headers: {
           "Content-Type": "application/json; charset=UTF-8",
         },
         body: body ? JSON.stringify(body) : undefined,
+        signal,
       });
 
       if (res.ok) return res.json();
@@ -142,14 +183,29 @@ async function apiRequest<T>(
         throw error;
       }
     } catch (err) {
+      // The caller gave up — never retry, and let the abort surface
+      // as-is so it isn't mistaken for a CraftCloud failure.
+      if (callerSignal?.aborted) throw err;
+
       // fetch() rejects on network errors (DNS, ECONNRESET, etc.) —
-      // those are always transient.
-      if (err instanceof CraftCloudApiError) {
-        if (!canRetry || !TRANSIENT_STATUSES.has(err.status)) throw err;
-        lastError = err;
+      // those are always transient. A timeout surfaces as a 504
+      // CraftCloudApiError so callers' existing status handling (and
+      // the transient set) treats it like an upstream gateway timeout.
+      const normalized = isTimeoutError(err)
+        ? new CraftCloudApiError(
+            504,
+            `Request timed out after ${timeoutMs}ms`,
+            path
+          )
+        : err;
+      if (normalized instanceof CraftCloudApiError) {
+        if (!canRetry || !TRANSIENT_STATUSES.has(normalized.status)) {
+          throw normalized;
+        }
+        lastError = normalized;
       } else {
-        if (!canRetry) throw err;
-        lastError = err;
+        if (!canRetry) throw normalized;
+        lastError = normalized;
       }
     }
 
@@ -200,8 +256,10 @@ async function realUploadModel(
  * response is the nearest equivalent signal.
  */
 async function realGetModel(modelId: string): Promise<CraftCloudModel & { parsing: boolean }> {
-  const path = `/v5/model/${modelId}`;
-  const res = await fetch(`${BASE_URL}${path}`);
+  const path = `/v5/model/${encodeURIComponent(modelId)}`;
+  const res = await fetch(`${BASE_URL}${path}`, {
+    signal: AbortSignal.timeout(GET_TIMEOUT_MS),
+  });
   const parsing = res.status === 206;
   // SEC-26 — 206 ("still parsing") is itself in the 2xx `res.ok` range,
   // so this only rejects genuine non-2xx responses. Before this check,
@@ -222,8 +280,16 @@ async function realCreatePriceRequest(params: PriceRequest): Promise<{ priceId: 
   return apiRequest("POST", "/v5/price", params);
 }
 
-async function realGetPrice(priceId: string): Promise<PriceResponse> {
-  return apiRequest("GET", `/v5/price/${priceId}`);
+async function realGetPrice(
+  priceId: string,
+  options?: ApiRequestOptions
+): Promise<PriceResponse> {
+  return apiRequest(
+    "GET",
+    `/v5/price/${encodeURIComponent(priceId)}`,
+    undefined,
+    options
+  );
 }
 
 async function realCreateCart(params: CartRequest): Promise<Cart> {
@@ -231,13 +297,19 @@ async function realCreateCart(params: CartRequest): Promise<Cart> {
 }
 
 async function realCreateOrder(params: OrderRequest): Promise<Order> {
-  return apiRequest("POST", "/v5/order", params);
+  // No timeout, on purpose. Placing an order is not idempotent, and a
+  // client-side abort doesn't tell us whether CraftCloud placed it: the
+  // webhook would release its `placing:` claim, Stripe would retry, and
+  // a slow-but-successful first call becomes two paid vendor orders. A
+  // hung call instead dies with the function and leaves the claim in
+  // place, which blocks retries and surfaces for manual reconciliation.
+  return apiRequest("POST", "/v5/order", params, { timeoutMs: null });
 }
 
 async function realGetOrderStatus(orderId: string): Promise<OrderStatusResponse> {
   const raw = await apiRequest<RawOrderStatusResponse>(
     "GET",
-    `/v5/order/${orderId}/status`
+    `/v5/order/${encodeURIComponent(orderId)}/status`
   );
   return normalizeOrderStatus(orderId, raw);
 }
@@ -300,7 +372,10 @@ export async function createPriceRequest(params: PriceRequest): Promise<{ priceI
   return realCreatePriceRequest(params);
 }
 
-export async function getPrice(priceId: string): Promise<PriceResponse> {
+export async function getPrice(
+  priceId: string,
+  options?: ApiRequestOptions
+): Promise<PriceResponse> {
   if (USE_MOCK) {
     // Prefer real catalog config ids so the poll enricher can attach
     // finish names / images. Fall back to the hardcoded mock roster
@@ -316,7 +391,7 @@ export async function getPrice(priceId: string): Promise<PriceResponse> {
     }
     return getMockPriceResponse(priceId, configIds);
   }
-  return realGetPrice(priceId);
+  return realGetPrice(priceId, options);
 }
 
 export async function createCart(params: CartRequest): Promise<Cart> {

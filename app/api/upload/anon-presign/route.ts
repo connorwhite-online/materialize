@@ -5,6 +5,7 @@ import { anonUploadGrants } from "@/lib/db/schema";
 import { generateUploadUrl } from "@/lib/storage";
 import { fileExtensionToFormat, MAX_FILE_SIZE } from "@/lib/validations/file";
 import { logError } from "@/lib/logger";
+import { invalidJsonResponse, readJsonObject } from "@/lib/http/json-body";
 import {
   ANON_UPLOAD_PREFIX,
   checkAnonUploadLimit,
@@ -59,7 +60,9 @@ export async function POST(request: Request) {
       );
     }
 
-    const { filename, contentType, fileSize } = (await request.json()) as {
+    const body = await readJsonObject(request);
+    if (!body) return invalidJsonResponse();
+    const { filename, contentType, fileSize } = body as {
       filename?: string;
       contentType?: string;
       fileSize?: number;
@@ -70,7 +73,7 @@ export async function POST(request: Request) {
     }
     if (
       typeof fileSize !== "number" ||
-      !Number.isFinite(fileSize) ||
+      !Number.isInteger(fileSize) ||
       fileSize <= 0
     ) {
       return Response.json({ error: "Invalid file size" }, { status: 400 });
@@ -107,9 +110,13 @@ export async function POST(request: Request) {
       fileSize,
     });
 
+    // Sign the declared size so the MAX_FILE_SIZE check above binds
+    // the actual PUT, not just this request's claim.
     const uploadUrl = await generateUploadUrl(
       storageKey,
-      contentType || "application/octet-stream"
+      contentType || "application/octet-stream",
+      undefined,
+      { contentLength: fileSize }
     );
 
     return Response.json({ uploadUrl, storageKey, format });

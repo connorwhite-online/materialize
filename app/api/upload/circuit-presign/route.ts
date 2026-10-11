@@ -3,6 +3,7 @@ import { generateUploadUrl } from "@/lib/storage";
 import { nanoid } from "nanoid";
 import { sanitizeFilename } from "../presign/route";
 import { logError } from "@/lib/logger";
+import { invalidJsonResponse, readJsonObject } from "@/lib/http/json-body";
 
 /**
  * Presign for circuit / wiring uploads attached to a project. Accepts
@@ -45,7 +46,8 @@ export async function POST(request: Request) {
       return Response.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const body = await request.json();
+    const body = await readJsonObject(request);
+    if (!body) return invalidJsonResponse();
     const { filename, contentType, fileSize } = body as {
       filename?: string;
       contentType?: string;
@@ -57,7 +59,7 @@ export async function POST(request: Request) {
     }
     if (
       typeof fileSize !== "number" ||
-      !Number.isFinite(fileSize) ||
+      !Number.isInteger(fileSize) ||
       fileSize <= 0
     ) {
       return Response.json({ error: "Invalid file size" }, { status: 400 });
@@ -96,7 +98,14 @@ export async function POST(request: Request) {
     const signedContentType = imageExt ? ct : "application/octet-stream";
     const safeName = sanitizeFilename(filename);
     const storageKey = `circuits/${userId}/${nanoid()}/${safeName}`;
-    const uploadUrl = await generateUploadUrl(storageKey, signedContentType);
+    // Signed size: R2 rejects a PUT whose body isn't exactly fileSize,
+    // so MAX_CIRCUIT_SIZE can't be bypassed by lying here.
+    const uploadUrl = await generateUploadUrl(
+      storageKey,
+      signedContentType,
+      undefined,
+      { contentLength: fileSize }
+    );
 
     return Response.json({ uploadUrl, storageKey });
   } catch (error) {

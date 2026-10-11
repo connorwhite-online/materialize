@@ -48,6 +48,16 @@ const USERS = { __table: "users" };
 const TOKEN_SPENDING_LEDGER = { __table: "token_spending_ledger" };
 const PRINT_ORDER_ITEMS = { __table: "print_order_items" };
 
+// Paid-listing licenses are covered in lib/print/__tests__/license.test.ts;
+// here every printed file is free.
+vi.mock("@/lib/print/license", () => ({
+  LICENSE_PAYOUTS_DISABLED_ERROR: "license payouts disabled",
+  resolvePrintLicense: vi.fn(async () => ({ ok: true, license: null })),
+  buildLicenseLineItems: vi.fn(async () => []),
+  grantPrintLicenses: vi.fn(async () => {}),
+  revokePrintLicenses: vi.fn(async () => {}),
+}));
+
 vi.mock("@/lib/db/schema", () => ({
   printOrders: PRINT_ORDERS,
   fileAssets: FILE_ASSETS,
@@ -115,10 +125,32 @@ const getPriceMock = vi.fn((..._args: unknown[]) =>
   Promise.resolve({
     priceId: "price-1",
     allComplete: true,
-    quotes: [{ quoteId: "quote-1", price: 45, currency: "USD" }],
-    shipping: [],
+    quotes: [
+      {
+        quoteId: "quote-1",
+        price: 45,
+        currency: "USD",
+        quantity: 1,
+        vendorId: "vendor-1",
+        materialConfigId: "mat-config-1",
+      },
+    ],
+    shipping: [
+      { shippingId: "ship-1", vendorId: "vendor-1", price: 5, currency: "USD" },
+    ],
   })
 );
+
+// The print gate (owner, or a published listing) — driven by the
+// FILE_ASSETS fixture's ownerId so tests can flip ownership.
+vi.mock("@/lib/entitlement", () => ({
+  userCanPrintAsset: async (userId: string) => {
+    const [row] = (dbFixture.selectByTable.get(FILE_ASSETS) ?? []) as Array<{
+      ownerId: string;
+    }>;
+    return row?.ownerId === userId;
+  },
+}));
 vi.mock("@/lib/craftcloud/client", () => ({
   createCart: (...args: unknown[]) => createCartMock(...args),
   getPrice: (...args: unknown[]) => getPriceMock(...args),
@@ -215,8 +247,19 @@ beforeEach(() => {
   getPriceMock.mockResolvedValue({
     priceId: "price-1",
     allComplete: true,
-    quotes: [{ quoteId: "quote-1", price: 45, currency: "USD" }],
-    shipping: [],
+    quotes: [
+      {
+        quoteId: "quote-1",
+        price: 45,
+        currency: "USD",
+        quantity: 1,
+        vendorId: "vendor-1",
+        materialConfigId: "mat-config-1",
+      },
+    ],
+    shipping: [
+      { shippingId: "ship-1", vendorId: "vendor-1", price: 5, currency: "USD" },
+    ],
   });
   evaluateMock.mockReset();
   paymentIntentsCreateMock.mockReset();
@@ -405,6 +448,8 @@ describe("createAgentInitiatedOrder — feature flag on", () => {
         autoApprovedUntil: null,
         totalPrice: 5000,
         serviceFee: 150,
+        fileAssetId: "asset-1",
+        quantity: 1,
         status: "awaiting_agent_approval",
       },
     ]);
@@ -432,6 +477,8 @@ describe("createAgentInitiatedOrder — feature flag on", () => {
         autoApprovedUntil: futureWindow,
         totalPrice: 5000,
         serviceFee: 150,
+        fileAssetId: "asset-1",
+        quantity: 1,
         status: "auto_approved",
       },
     ]);
@@ -454,6 +501,8 @@ describe("createAgentInitiatedOrder — feature flag on", () => {
         autoApprovedUntil: new Date(Date.now() - 60_000), // window passed
         totalPrice: 5000,
         serviceFee: 150,
+        fileAssetId: "asset-1",
+        quantity: 1,
         status: "auto_approved",
       },
     ]);
@@ -481,7 +530,7 @@ describe("createAgentInitiatedOrder — feature flag on", () => {
 
     expect("error" in result).toBe(true);
     if ("error" in result) {
-      expect(result.error).toMatch(/forbidden/i);
+      expect(result.error).toMatch(/not found/i);
     }
     // Should fail before cart creation, charge, or order insert.
     expect(createCartMock).not.toHaveBeenCalled();
@@ -529,7 +578,7 @@ describe("createAgentInitiatedOrder — MTR-130 price reconciliation", () => {
       allComplete: true,
       quotes: [{ quoteId: "some-other-quote", price: 45, currency: "USD" }],
       shipping: [],
-    });
+    } as never);
 
     const { createAgentInitiatedOrder } = await import("../orders");
     const result = await createAgentInitiatedOrder(baseInput);
@@ -559,5 +608,73 @@ describe("createAgentInitiatedOrder — MTR-130 price reconciliation", () => {
       expect(result.error).toMatch(/expired|re-run/i);
     }
     expect(createCartMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("createAgentInitiatedOrder — server-derived quote terms", () => {
+  it("charges CraftCloud's shipping price, not the agent's", async () => {
+    const { createAgentInitiatedOrder } = await import("../orders");
+    const result = await createAgentInitiatedOrder({
+      ...baseInput,
+      shippingPriceCents: 0,
+    });
+    if ("error" in result) throw new Error(result.error);
+    expect(dbFixture.printOrderInserts[0]).toMatchObject({
+      shippingSubtotal: 500,
+    });
+    expect(result.breakdown?.shippingCents).toBe(500);
+  });
+
+  it("rejects a quantity that isn't the quote's own", async () => {
+    const { createAgentInitiatedOrder } = await import("../orders");
+    const result = await createAgentInitiatedOrder({ ...baseInput, quantity: 5 });
+    expect(result).toMatchObject({ error: expect.stringMatching(/quantity/) });
+    expect(createCartMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects a vendorId that isn't the quote's (it keys the minimum fee and policy allowlist)", async () => {
+    const { createAgentInitiatedOrder } = await import("../orders");
+    const result = await createAgentInitiatedOrder({
+      ...baseInput,
+      vendorId: "allowlisted-vendor",
+    });
+    expect(result).toHaveProperty("error");
+    expect(createCartMock).not.toHaveBeenCalled();
+  });
+
+  it("refuses to replay an idempotency key for a different order", async () => {
+    dbFixture.selectByTable.set(PRINT_ORDERS, [
+      {
+        id: "existing-order-1",
+        confirmationToken: "token-abc",
+        confirmationExpiresAt: new Date(Date.now() + 60_000),
+        autoApprovedUntil: null,
+        totalPrice: 5000,
+        serviceFee: 150,
+        fileAssetId: "some-other-asset",
+        quantity: 1,
+        status: "awaiting_agent_approval",
+      },
+    ]);
+    const { createAgentInitiatedOrder } = await import("../orders");
+    const result = await createAgentInitiatedOrder(baseInput);
+    expect(result).toMatchObject({
+      error: expect.stringMatching(/idempotencyKey/),
+    });
+  });
+
+  it("scopes the Stripe idempotency key to the user", async () => {
+    process.env.MATERIALIZE_AGENT_BILLING_ENABLED = "true";
+    dbFixture.selectByTable.set(USERS, [
+      { stripeCustomerId: "cus_1", defaultPaymentMethod: "pm_1" },
+    ]);
+    evaluateMock.mockResolvedValue({ approved: true, cancellationWindowMinutes: 5 });
+    paymentIntentsCreateMock.mockResolvedValue({ id: "pi_1", status: "succeeded" });
+    const { createAgentInitiatedOrder } = await import("../orders");
+    await createAgentInitiatedOrder(baseInput);
+    expect(paymentIntentsCreateMock).toHaveBeenCalledWith(
+      expect.anything(),
+      { idempotencyKey: "agent-charge:user-1:idempotency-key-1" }
+    );
   });
 });

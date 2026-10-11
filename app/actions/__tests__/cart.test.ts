@@ -35,10 +35,40 @@ const mockGetPrice = vi.fn((..._args: unknown[]) =>
   Promise.resolve({
     priceId: "price-1",
     allComplete: true,
-    quotes: [{ quoteId: "quote-1", price: 42.5, currency: "USD" }],
-    shipping: [],
+    quotes: [
+      {
+        quoteId: "quote-1",
+        price: 42.5,
+        quantity: 2,
+        vendorId: "vendor-1",
+        materialConfigId: "config-1",
+        currency: "USD",
+      },
+      // The re-quote repriceCartItem tests persist.
+      {
+        quoteId: "quote-fresh",
+        price: 7.27,
+        quantity: 5,
+        vendorId: "vendor-1",
+        materialConfigId: "config-1",
+        currency: "USD",
+      },
+    ],
+    shipping: [
+      { shippingId: "shipping-1", vendorId: "vendor-1", price: 8, currency: "USD" },
+    ],
   })
 );
+
+// Paid-listing licenses are covered in lib/print/__tests__/license.test.ts;
+// here every printed file is free.
+vi.mock("@/lib/print/license", () => ({
+  LICENSE_PAYOUTS_DISABLED_ERROR: "license payouts disabled",
+  resolvePrintLicense: vi.fn(async () => ({ ok: true, license: null })),
+  buildLicenseLineItems: vi.fn(async () => []),
+  grantPrintLicenses: vi.fn(async () => {}),
+  revokePrintLicenses: vi.fn(async () => {}),
+}));
 
 vi.mock("@/lib/craftcloud/client", () => ({
   getPrice: (...args: unknown[]) => mockGetPrice(...args),
@@ -191,9 +221,9 @@ describe("addToCart", () => {
     // priceId is persisted so a later checkoutVendorGroup can
     // re-reconcile this row against CraftCloud (MTR-130).
     expect(inserted.priceId).toBe("price-1");
-    // ON CONFLICT path is wired to bump the existing row's quantity
-    // (capped at 100 via LEAST). updatedAt also re-stamps so cart
-    // staleness UI reflects the latest touch.
+    // ON CONFLICT path keeps the quote's own quantity (a duplicate add
+    // of the same quoteId is the same line). updatedAt also re-stamps so
+    // cart staleness UI reflects the latest touch.
     const setShape = upsertSet as Record<string, unknown> | null;
     expect(setShape).not.toBeNull();
     expect(setShape).toHaveProperty("quantity");
@@ -216,7 +246,7 @@ describe("addToCart", () => {
       allComplete: true,
       quotes: [{ quoteId: "some-other-quote", price: 42.5, currency: "USD" }],
       shipping: [],
-    });
+    } as never);
     const result = await addToCart(baseParams);
     expect(result).toMatchObject({
       error: expect.stringMatching(/expired|pick a material/i),
@@ -232,6 +262,24 @@ describe("addToCart", () => {
     expect(result).toMatchObject({
       error: expect.stringMatching(/expired|pick a material/i),
     });
+    expect(insertedValues).toHaveLength(0);
+  });
+
+  it("stores CraftCloud's shipping price, not the client's", async () => {
+    const result = await addToCart({ ...baseParams, shippingPrice: 0 });
+    expect(result).toEqual({ cartItemId: "new-cart-item-id" });
+    expect((insertedValues[0] as Record<string, unknown>).shippingPrice).toBe(800);
+  });
+
+  it("rejects a quantity that differs from the quote's own", async () => {
+    const result = await addToCart({ ...baseParams, quantity: 1 });
+    expect(result).toMatchObject({ error: expect.stringMatching(/quantity/i) });
+    expect(insertedValues).toHaveLength(0);
+  });
+
+  it("rejects a vendorId that isn't the quote's vendor", async () => {
+    const result = await addToCart({ ...baseParams, vendorId: "other" });
+    expect(result).toHaveProperty("error");
     expect(insertedValues).toHaveLength(0);
   });
 
@@ -256,6 +304,10 @@ describe("addToCart", () => {
     ];
     const result = await addToCart({ ...baseParams, currency: "USD" });
     expect(result).toMatchObject({ error: expect.stringContaining("EUR") });
+    // A pre-USD line: the error says how to get unstuck.
+    expect(result).toMatchObject({
+      error: expect.stringContaining("change their quantity"),
+    });
     expect(insertedValues).toHaveLength(0);
     expect(upsertSet).toBeNull();
   });
@@ -335,10 +387,13 @@ describe("repriceCartItem", () => {
   });
 
   it("writes quantity, quoteId, and the re-quoted unit price in cents", async () => {
-    cartRows = [{ id: "item-1" }];
+    cartRows = [
+      { id: "item-1", vendorId: "vendor-1", materialConfigId: "config-1" },
+    ];
     const result = await repriceCartItem({
       cartItemId: "item-1",
       quantity: 5,
+      priceId: "price-1",
       quoteId: "quote-fresh",
       materialPrice: 7.27,
     });
@@ -347,18 +402,48 @@ describe("repriceCartItem", () => {
     expect(set.quantity).toBe(5);
     expect(set.quoteId).toBe("quote-fresh");
     expect(set.materialPrice).toBe(727);
-    // priceId is nulled out on reprice — the old priceId's CraftCloud
-    // snapshot won't contain the new quoteId, so leaving it in place
-    // would make checkoutVendorGroup's reconciliation (MTR-130)
-    // false-reject this row later. A null priceId instead falls back
-    // to the legacy "trust as written" bucket.
-    expect(set.priceId).toBeNull();
+    // The re-quote's own priceId is stored so checkout can reconcile
+    // the row again.
+    expect(set.priceId).toBe("price-1");
+    // Re-pricing also moves a pre-USD line onto USD.
+    expect(set.currency).toBe("USD");
+  });
+
+  it("rejects a client price that doesn't match CraftCloud's re-quote", async () => {
+    cartRows = [
+      { id: "item-1", vendorId: "vendor-1", materialConfigId: "config-1" },
+    ];
+    const result = await repriceCartItem({
+      cartItemId: "item-1",
+      quantity: 5,
+      priceId: "price-1",
+      quoteId: "quote-fresh",
+      materialPrice: 0.01,
+    });
+    expect(result).toHaveProperty("error");
+    expect(updatedSet).toBeNull();
+  });
+
+  it("rejects a re-quote whose quantity isn't the requested one", async () => {
+    cartRows = [
+      { id: "item-1", vendorId: "vendor-1", materialConfigId: "config-1" },
+    ];
+    const result = await repriceCartItem({
+      cartItemId: "item-1",
+      quantity: 100,
+      priceId: "price-1",
+      quoteId: "quote-fresh",
+      materialPrice: 7.27,
+    });
+    expect(result).toHaveProperty("error");
+    expect(updatedSet).toBeNull();
   });
 
   it("rejects invalid quantity", async () => {
     const result = await repriceCartItem({
       cartItemId: "item-1",
       quantity: 0,
+      priceId: "price-1",
       quoteId: "q",
       materialPrice: 1,
     });
@@ -369,6 +454,7 @@ describe("repriceCartItem", () => {
     const result = await repriceCartItem({
       cartItemId: "item-1",
       quantity: 2,
+      priceId: "price-1",
       quoteId: "q",
       materialPrice: 0,
     });
@@ -380,6 +466,7 @@ describe("repriceCartItem", () => {
     const result = await repriceCartItem({
       cartItemId: "missing",
       quantity: 2,
+      priceId: "price-1",
       quoteId: "q",
       materialPrice: 5,
     });

@@ -311,4 +311,25 @@ describe("uploadModelToCraftCloud", () => {
     expect(err).toBe(abort);
     expect(err).not.toBeInstanceOf(CraftCloudUploadError);
   });
+
+  it("gives every leg a timeout signal", async () => {
+    const { calls } = stubChain();
+    await uploadModelToCraftCloud(file(), "Caribiner.stl");
+    expect(calls).toHaveLength(3);
+    for (const c of calls) {
+      expect(c.init?.signal).toBeInstanceOf(AbortSignal);
+    }
+  });
+
+  it("surfaces a leg timeout as a step-tagged network failure (not an abort)", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => {
+      throw Object.assign(new Error("signal timed out"), { name: "TimeoutError" });
+    }));
+
+    const err = await uploadModelToCraftCloud(file(), "Caribiner.stl").catch((e) => e);
+    expect(err).toBeInstanceOf(CraftCloudUploadError);
+    expect(err.step).toBe("initiate");
+    expect(err.status).toBe(0);
+    expect(err.responseBody).toMatch(/timed out after \d+ms/);
+  });
 });

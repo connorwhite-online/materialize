@@ -48,20 +48,41 @@ const mockCreateCart = vi.fn((..._args: unknown[]) =>
   })
 );
 // MTR-130: getPrice(priceId) is the source of truth checkoutVendorGroup
-// reconciles each cart item's materialPrice (and, per MONEY-1, its
-// quantity) against — but only when the item carries a priceId (legacy
-// rows, the makeCartItem() default, don't and are skipped — see the
-// reconciliation tests below). quantity: 1 matches makeCartItem()'s
-// default quantity so tests that don't care about the quantity guard
-// reconcile cleanly.
+// reconciles every cart item against — price, quantity (MONEY-1),
+// vendor and shipping. By default it mirrors the current cart rows (a
+// quote per row at the row's own price/quantity, a shipping option per
+// row's shippingId), so tests that don't care about reconciliation
+// check out cleanly; tests that do override it per call.
 const mockGetPrice = vi.fn((..._args: unknown[]) =>
   Promise.resolve({
     priceId: "price-1",
     allComplete: true,
-    quotes: [{ quoteId: "quote-1", price: 10, quantity: 1, currency: "USD" }],
-    shipping: [],
+    quotes: cartItemsRows.map((r) => ({
+      quoteId: r.quoteId,
+      price: (r.materialPrice as number) / 100,
+      quantity: r.quantity,
+      vendorId: r.vendorId,
+      materialConfigId: r.materialConfigId,
+      currency: "USD",
+    })),
+    shipping: cartItemsRows.map((r) => ({
+      shippingId: r.shippingId,
+      vendorId: r.vendorId,
+      price: (r.shippingPrice as number) / 100,
+      currency: "USD",
+    })),
   })
 );
+
+// Paid-listing licenses are covered in lib/print/__tests__/license.test.ts;
+// here every printed file is free.
+vi.mock("@/lib/print/license", () => ({
+  LICENSE_PAYOUTS_DISABLED_ERROR: "license payouts disabled",
+  resolvePrintLicense: vi.fn(async () => ({ ok: true, license: null })),
+  buildLicenseLineItems: vi.fn(async () => []),
+  grantPrintLicenses: vi.fn(async () => {}),
+  revokePrintLicenses: vi.fn(async () => {}),
+}));
 
 vi.mock("@/lib/craftcloud/client", () => ({
   createCart: (...args: unknown[]) => mockCreateCart(...args),
@@ -132,6 +153,7 @@ function makeCartItem(
     id: "ci-1",
     userId: "test-user-id",
     fileAssetId: "asset-1",
+    priceId: "price-1",
     quoteId: "quote-1",
     vendorId: "vendor-1",
     vendorName: "Unionfab",
@@ -231,6 +253,9 @@ describe("checkoutVendorGroup", () => {
   // as written. Rows without one (the makeCartItem() default, used by
   // every test above) are legacy/unreconcilable and skipped.
   it("MTR-130: rejects checkout when a priced cart item's materialPrice was tampered", async () => {
+    // CraftCloud's snapshot holds the real $10 price…
+    mockGetPrice.mockResolvedValueOnce(await mockGetPrice());
+    // …while the stored row claims $1.
     cartItemsRows = [
       makeCartItem({ priceId: "price-1", quoteId: "quote-1", materialPrice: 100 }),
     ];
@@ -256,13 +281,67 @@ describe("checkoutVendorGroup", () => {
     ]);
   });
 
-  it("MTR-130: a legacy cart item with no priceId is trusted as-is (best-effort, not blocked)", async () => {
-    cartItemsRows = [makeCartItem({ priceId: undefined, materialPrice: 1000 })];
+  it("a cart item with no priceId blocks checkout instead of being charged unverified", async () => {
+    cartItemsRows = [makeCartItem({ priceId: null, materialPrice: 1 })];
 
     const result = await checkoutVendorGroup("vendor-1");
 
-    expect(result).toEqual({ orderId: "order-vg-1", cartId: "cart-vg-1" });
-    expect(mockGetPrice).not.toHaveBeenCalled();
+    if (!("error" in result)) throw new Error("expected error");
+    expect(result.error).toMatch(/fresh quote/i);
+    expect(mockCreateCart).not.toHaveBeenCalled();
+  });
+
+  it("charges CraftCloud's shipping price, not the stored row's", async () => {
+    cartItemsRows = [makeCartItem({ shippingPrice: 500 })];
+    const snap = await mockGetPrice();
+    // The row was written with a tampered $0 shipping price.
+    cartItemsRows = [makeCartItem({ shippingPrice: 0 })];
+    mockGetPrice.mockResolvedValueOnce(snap);
+
+    await checkoutVendorGroup("vendor-1");
+
+    expect(findInsert("printOrders")![1]).toMatchObject({
+      shippingSubtotal: 500,
+      totalPrice: 1500,
+    });
+  });
+
+  it("prefers the CraftCloud cart's own shipping price when it reports one", async () => {
+    mockCreateCart.mockResolvedValueOnce({
+      cartId: "cart-vg-1",
+      currency: "USD",
+      shippings: [
+        { shippingId: "ship-1", vendorId: "vendor-1", price: 7.5 },
+      ],
+    } as never);
+
+    await checkoutVendorGroup("vendor-1");
+
+    expect(findInsert("printOrders")![1]).toMatchObject({
+      shippingSubtotal: 750,
+    });
+  });
+
+  it("rejects a row whose quote is for a different vendor than the group", async () => {
+    const snap = await mockGetPrice();
+    snap.quotes[0].vendorId = "cheap-vendor";
+    mockGetPrice.mockResolvedValueOnce(snap);
+
+    const result = await checkoutVendorGroup("vendor-1");
+
+    if (!("error" in result)) throw new Error("expected error");
+    expect(mockCreateCart).not.toHaveBeenCalled();
+  });
+
+  it("fetches each distinct priceId once", async () => {
+    cartItemsRows = [
+      makeCartItem({ id: "ci-1", quoteId: "q-1" }),
+      makeCartItem({ id: "ci-2", quoteId: "q-2" }),
+    ];
+
+    await checkoutVendorGroup("vendor-1");
+
+    expect(mockGetPrice).toHaveBeenCalledTimes(1);
   });
 
   // MONEY-1: a cart line whose `quantity` column drifted from the
@@ -278,7 +357,7 @@ describe("checkoutVendorGroup", () => {
       // quantity column has since moved to 4 without a fresh quote.
       quotes: [{ quoteId: "quote-1", price: 10, quantity: 1, currency: "USD" }],
       shipping: [],
-    });
+    } as never);
     cartItemsRows = [
       makeCartItem({
         priceId: "price-1",
@@ -301,7 +380,7 @@ describe("checkoutVendorGroup", () => {
       allComplete: true,
       quotes: [{ quoteId: "some-other-quote", price: 10, quantity: 1, currency: "USD" }],
       shipping: [],
-    });
+    } as never);
     cartItemsRows = [
       makeCartItem({ priceId: "price-1", quoteId: "quote-1", materialPrice: 1000 }),
     ];

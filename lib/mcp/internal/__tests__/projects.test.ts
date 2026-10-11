@@ -11,6 +11,9 @@ let ownedFilesResponse: Array<{ id: string }> = [];
 let projectFetchResponse: Array<Record<string, unknown>> = [];
 const insertedProjects: Array<Record<string, unknown>> = [];
 const updateCalls: Array<Record<string, unknown>> = [];
+let buyerRowsResponse: Array<{ id: string }> = [];
+const deletedTables: string[] = [];
+const insertedBomRows: Array<Record<string, unknown>> = [];
 
 function chainable<T>(arr: T[]) {
   return Object.assign(arr, { limit: () => arr });
@@ -24,12 +27,18 @@ vi.mock("@/lib/db", () => ({
           if (table.__name === "files") return chainable(ownedFilesResponse);
           if (table.__name === "projects")
             return chainable(projectFetchResponse);
+          if (table.__name === "purchases")
+            return chainable(buyerRowsResponse);
           return chainable([]);
         },
       }),
     }),
     insert: (table: { __name?: string }) => ({
       values: (vals: Record<string, unknown>) => {
+        if (table.__name === "project_bom_items") {
+          insertedBomRows.push(...(vals as unknown as Array<Record<string, unknown>>));
+          return Promise.resolve();
+        }
         if (table.__name === "projects") {
           insertedProjects.push(vals);
           return {
@@ -47,6 +56,12 @@ vi.mock("@/lib/db", () => ({
         return { where: () => Promise.resolve() };
       },
     }),
+    delete: (table: { __name?: string }) => ({
+      where: () => {
+        deletedTables.push(table.__name ?? "?");
+        return Promise.resolve();
+      },
+    }),
   },
 }));
 
@@ -62,6 +77,7 @@ vi.mock("@/lib/db/schema", () => ({
   projectBomItems: { __name: "project_bom_items" },
   projectCircuits: { __name: "project_circuits" },
   projectPhotos: { __name: "project_photos" },
+  purchases: { __name: "purchases" },
 }));
 
 vi.mock("@/lib/logger", () => ({
@@ -70,8 +86,11 @@ vi.mock("@/lib/logger", () => ({
 
 import {
   createProjectForUser,
+  deleteProjectForUser,
+  setProjectBomForUser,
   updateProjectForUser,
 } from "../projects";
+import { MAX_PRICE_CENTS } from "@/lib/validations/project";
 
 const FILE_1 = "11111111-1111-4111-8111-111111111111";
 const SCRIPT_HTML = '<p>Step 1</p><script>alert("xss")</script>';
@@ -81,6 +100,9 @@ beforeEach(() => {
   ownedFilesResponse = [{ id: FILE_1 }];
   insertedProjects.length = 0;
   updateCalls.length = 0;
+  buyerRowsResponse = [];
+  deletedTables.length = 0;
+  insertedBomRows.length = 0;
   projectFetchResponse = [
     { id: "test-project-id", userId: "test-user-id", slug: "chess-set-abc123" },
   ];
@@ -145,5 +167,100 @@ describe("updateProjectForUser buildGuide sanitize (MTR-236)", () => {
     });
     expect((result as { error?: string }).error).toBeUndefined();
     expect(updateCalls[0].buildGuide).toBeNull();
+  });
+});
+
+// The MCP delete used to hard-delete unconditionally, cascading buyers'
+// purchase rows away; it now shares the web deleteProject's gate.
+describe("deleteProjectForUser", () => {
+  it("archives instead of deleting when the project has buyers", async () => {
+    buyerRowsResponse = [{ id: "purchase-1" }, { id: "purchase-2" }];
+    const result = await deleteProjectForUser({
+      userId: "test-user-id",
+      projectId: "test-project-id",
+    });
+    expect(result).toEqual({
+      ok: true,
+      archived: true,
+      reason: "has-buyers",
+      count: 2,
+    });
+    expect(updateCalls).toEqual([{ status: "archived", visibility: "private" }]);
+    expect(deletedTables).toEqual([]);
+  });
+
+  it("hard-deletes when nobody bought it", async () => {
+    const result = await deleteProjectForUser({
+      userId: "test-user-id",
+      projectId: "test-project-id",
+    });
+    expect(result).toEqual({ ok: true, archived: false });
+    expect(deletedTables).toEqual(["projects"]);
+  });
+
+  it("refuses someone else's project", async () => {
+    const result = await deleteProjectForUser({
+      userId: "someone-else",
+      projectId: "test-project-id",
+    });
+    expect(result).toEqual({ error: "Project not found" });
+    expect(deletedTables).toEqual([]);
+  });
+});
+
+describe("project metadata price normalization", () => {
+  it("clamps an oversized price to MAX_PRICE_CENTS", async () => {
+    await updateProjectForUser({
+      userId: "test-user-id",
+      projectId: "test-project-id",
+      metadata: { priceCents: MAX_PRICE_CENTS * 10 },
+    });
+    expect(updateCalls[0].price).toBe(MAX_PRICE_CENTS);
+  });
+
+  it.each([-100, Number.NaN, Number.POSITIVE_INFINITY])(
+    "ignores a %s price",
+    async (priceCents) => {
+      await updateProjectForUser({
+        userId: "test-user-id",
+        projectId: "test-project-id",
+        metadata: { priceCents },
+      });
+      // Nothing valid to write, so no update at all.
+      expect(updateCalls).toEqual([]);
+    }
+  );
+});
+
+describe("setProjectBomForUser sourceUrl", () => {
+  it.each(["javascript:alert(1)", "data:text/html,hi", "not a url"])(
+    "rejects %s before touching the BOM",
+    async (sourceUrl) => {
+      const result = await setProjectBomForUser({
+        userId: "test-user-id",
+        projectId: "test-project-id",
+        items: [{ name: "M3 screw", quantity: 4, sourceUrl }],
+      });
+      expect(result).toEqual({
+        error: 'BOM "M3 screw": sourceUrl must be an http(s) URL',
+      });
+      expect(deletedTables).toEqual([]);
+    }
+  );
+
+  it("keeps http(s) links and treats a blank one as none", async () => {
+    const result = await setProjectBomForUser({
+      userId: "test-user-id",
+      projectId: "test-project-id",
+      items: [
+        { name: "M3 screw", quantity: 4, sourceUrl: " https://example.com/m3 " },
+        { name: "Magnet", quantity: 2, sourceUrl: "  " },
+      ],
+    });
+    expect(result).toEqual({ count: 2 });
+    expect(insertedBomRows.map((r) => r.sourceUrl)).toEqual([
+      "https://example.com/m3",
+      null,
+    ]);
   });
 });

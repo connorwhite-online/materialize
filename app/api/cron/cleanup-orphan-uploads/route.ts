@@ -8,11 +8,17 @@ import {
 import { db } from "@/lib/db";
 import {
   anonUploadGrants,
+  rateLimitCounters,
   disputes,
   fileAssets,
   ownershipClaimIntents,
 } from "@/lib/db/schema";
 import { ANON_UPLOAD_PREFIX } from "@/lib/uploads/anon-grants";
+import {
+  assetIdFromPreviewKey,
+  PREVIEW_PREFIX,
+} from "@/lib/files/model-preview";
+import { RATE_LIMIT_RETENTION_MS } from "@/lib/rate-limit";
 import {
   and,
   eq,
@@ -64,7 +70,14 @@ const UPLOAD_PREFIX = "uploads/";
  * didn't cover it. Also the one prefix unauthenticated callers can
  * write to, which makes sweeping it the backstop on that surface.
  */
-const SWEEP_PREFIXES = [UPLOAD_PREFIX, ANON_UPLOAD_PREFIX];
+/*
+ * Low-detail previews of paid listings (lib/files/model-preview.ts) live
+ * at `previews/{assetId}.v{n}.{ext}`. No column references them — the key
+ * is derived from the asset id — so they are kept while their asset row
+ * exists and swept once it is gone (the age rail still applies). A key
+ * under this prefix that doesn't parse as one of ours is left alone.
+ */
+const SWEEP_PREFIXES = [UPLOAD_PREFIX, ANON_UPLOAD_PREFIX, PREVIEW_PREFIX];
 const ORPHAN_MIN_AGE_HOURS = 24;
 const DELETE_BATCH_SIZE = 100;
 
@@ -129,7 +142,9 @@ export async function GET(request: Request) {
     );
     const [assetRows, stepAssetRows, claimRows, disputeEvidenceRows] =
       await Promise.all([
-        db.select({ storageKey: fileAssets.storageKey }).from(fileAssets),
+        db
+          .select({ id: fileAssets.id, storageKey: fileAssets.storageKey })
+          .from(fileAssets),
         // Studio-generated STEP siblings live under uploads/ too, referenced
         // only via stepStorageKey (MTR-196) — they must be in the keep-set or
         // the sweep deletes every generated STEP once it passes the age rail.
@@ -168,6 +183,7 @@ export async function GET(request: Request) {
             )
           ),
       ]);
+    const liveAssetIds = new Set(assetRows.map((row) => row.id));
     const referenced = new Set(
       [
         ...assetRows.map((row) => row.storageKey),
@@ -207,6 +223,11 @@ export async function GET(request: Request) {
           if (!SWEEP_PREFIXES.some((p) => obj.Key!.startsWith(p))) continue;
           // Known-good — referenced by a fileAssets row.
           if (referenced.has(obj.Key)) continue;
+          if (obj.Key.startsWith(PREVIEW_PREFIX)) {
+            const assetId = assetIdFromPreviewKey(obj.Key);
+            // Not one of our preview keys, or its asset still exists.
+            if (!assetId || liveAssetIds.has(assetId)) continue;
+          }
           // Too young — may still be mid-workflow.
           if (
             obj.LastModified &&
@@ -236,6 +257,21 @@ export async function GET(request: Request) {
       grantsDeleted = removed.length;
     } catch (error) {
       logError("cron/cleanup-orphan-uploads.grants", error);
+    }
+
+    // Rate-limit counters only mean anything inside their window. No
+    // RETURNING: busy days leave many rows and nobody needs their keys.
+    try {
+      await db
+        .delete(rateLimitCounters)
+        .where(
+          lt(
+            rateLimitCounters.windowStart,
+            new Date(now - RATE_LIMIT_RETENTION_MS)
+          )
+        );
+    } catch (error) {
+      logError("cron/cleanup-orphan-uploads.rate-limits", error);
     }
 
     let deleted = 0;

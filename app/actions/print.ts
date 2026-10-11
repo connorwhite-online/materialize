@@ -37,13 +37,12 @@ import { eq, and, isNull, isNotNull, desc } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { z } from "zod";
 import { revalidatePath } from "next/cache";
+import { headers } from "next/headers";
 import { deriveAppUrl } from "@/lib/utils/request-url";
 import {
   createCart,
   createOrder,
   createStripeCheckout,
-  getOrderStatus,
-  getPrice,
   isMockCheckoutMode,
   CraftCloudApiError,
 } from "@/lib/craftcloud/client";
@@ -53,10 +52,21 @@ import { getStripe } from "@/lib/stripe";
 import { printOrderSchema } from "@/lib/validations/print";
 import { checkoutAddressSchema } from "@/lib/validations/address";
 import { logError } from "@/lib/logger";
+import {
+  consumeRateLimit,
+  RATE_LIMITED_MESSAGE,
+  RATE_LIMITS,
+  rateLimitCallerKey,
+} from "@/lib/rate-limit";
 import { userCanPrintAsset } from "@/lib/entitlement";
+import {
+  buildLicenseLineItems,
+  resolvePrintLicense,
+  revokePrintLicenses,
+} from "@/lib/print/license";
 import { promoteStudioDraftsForAssets } from "@/lib/studio-drafts";
 import { dedupeShippingByShipId } from "@/lib/pricing/shipping";
-import type { Address, Currency } from "@/lib/craftcloud/types";
+import type { Address, Currency, PriceResponse } from "@/lib/craftcloud/types";
 import { calcServiceFee } from "@/lib/fees";
 import { rememberCheckoutPhone } from "@/lib/users/checkout-phone";
 import {
@@ -65,10 +75,15 @@ import {
 } from "@/lib/craftcloud/vendor-minimums";
 import { getOrCreateStripeCustomer } from "@/lib/stripe/customers";
 import { persistSavedFeeCard } from "@/lib/stripe/handle-print-order-payment";
+import { closeCheckoutSession } from "@/lib/stripe/checkout-session";
 import { mintPayProductionToken } from "@/lib/orders/pay-production-token";
-
-const QUOTE_EXPIRED_ERROR =
-  "This quote has expired. Please pick a material again — prices may have changed.";
+import {
+  CHECKOUT_CURRENCY,
+  fetchPriceSnapshot,
+  reconcileQuote,
+  reconcileQuoteInSnapshot,
+  shippingOptionsOf,
+} from "@/lib/pricing/reconcile-quote";
 
 /**
  * What completePrintOrder hands back:
@@ -109,89 +124,6 @@ export type CompletePrintOrderResult =
     }
   | { error: string };
 
-// Rounding-only tolerance: getPrice() returns dollars as a float;
-// converting to cents can introduce a fractional-cent difference
-// between what the client displayed and what we re-derive here.
-// Anything beyond this is treated as a tampered or stale price, never
-// a legitimate business discount (MTR-130).
-const PRICE_RECONCILE_TOLERANCE_CENTS = 1;
-
-/**
- * Re-derive the authoritative per-unit material price for a quote
- * from CraftCloud (via the priceId the client already polled to
- * stability) instead of trusting the client-supplied materialPrice.
- * Money-critical — do not weaken the tolerance without a documented
- * policy decision (see MTR-130's STOP condition on divergence
- * tolerance).
- *
- * Returns an error when:
- *   - priceId is unknown/expired to CraftCloud, or
- *   - quoteId can't be found in that price response (consumed/stale), or
- *   - the claimed price diverges from the authoritative one beyond a
- *     rounding tolerance, or
- *   - `expectedQuantity` is given and diverges from the quote's own
- *     baked-in quantity (MONEY-1).
- */
-async function reconcileMaterialPrice(params: {
-  priceId: string;
-  quoteId: string;
-  claimedPriceCents: number;
-  /**
-   * When provided, also verify the CraftCloud quote's own baked-in
-   * quantity matches the quantity we're about to bill. A cart line's
-   * `quoteId` and `quantity` columns can drift apart if a quantity
-   * change's re-quote fails partway (see cart-context.tsx
-   * updateQuantity) — the quoteId still encodes the OLD quantity
-   * while cartItems.quantity holds the NEW one. checkoutVendorGroup
-   * bills `quantity * price` but CraftCloud produces whatever the
-   * quoteId itself bakes in, so a mismatch here must hard-block
-   * checkout rather than silently overcharge or undercharge
-   * (MONEY-1). Only checkoutVendorGroup passes this — createPrintOrder
-   * mints its quote and quantity together in one call and can't drift.
-   */
-  expectedQuantity?: number;
-}): Promise<{ ok: true; priceCents: number } | { ok: false; error: string }> {
-  let snapshot;
-  try {
-    snapshot = await getPrice(params.priceId);
-  } catch (error) {
-    if (error instanceof CraftCloudApiError && error.isQuoteExpired()) {
-      return { ok: false, error: QUOTE_EXPIRED_ERROR };
-    }
-    throw error;
-  }
-
-  const quote = snapshot.quotes?.find((q) => q.quoteId === params.quoteId);
-  if (!quote) {
-    return { ok: false, error: QUOTE_EXPIRED_ERROR };
-  }
-
-  if (
-    params.expectedQuantity !== undefined &&
-    quote.quantity !== params.expectedQuantity
-  ) {
-    return {
-      ok: false,
-      error:
-        "This item's quantity is out of sync with its saved price. Please refresh and try again.",
-    };
-  }
-
-  const authoritativeCents = Math.round(quote.price * 100);
-  if (
-    Math.abs(authoritativeCents - params.claimedPriceCents) >
-    PRICE_RECONCILE_TOLERANCE_CENTS
-  ) {
-    return {
-      ok: false,
-      error:
-        "Pricing has changed since you selected this option. Please refresh and try again.",
-    };
-  }
-
-  return { ok: true, priceCents: authoritativeCents };
-}
-
 /**
  * Lightweight check for vendor minimum production prices. Creates a
  * CraftCloud cart (free, disposable reservation) purely to inspect
@@ -203,6 +135,27 @@ async function reconcileMaterialPrice(params: {
  * `checkoutVendorGroup` re-creates its own cart and applies the same
  * adjustment, so this check is informational only.
  */
+/**
+ * Shared cap for the two unauthenticated cart probes below: each one
+ * creates a throwaway CraftCloud cart, so an unbounded caller costs us
+ * upstream goodwill rather than anything of ours.
+ */
+async function cartProbeAllowed(): Promise<boolean> {
+  const { userId } = await auth();
+  const limited = await consumeRateLimit(
+    RATE_LIMITS.cartProbe,
+    rateLimitCallerKey(await headers(), userId)
+  );
+  return limited.ok;
+}
+
+const cartPricingInput = z.object({
+  quoteId: z.string().min(1).max(200),
+  vendorId: z.string().min(1).max(100),
+  shippingId: z.string().min(1).max(200),
+  currency: z.string().max(3).optional(),
+});
+
 export async function checkCartPricing(params: {
   quoteId: string;
   vendorId: string;
@@ -212,14 +165,20 @@ export async function checkCartPricing(params: {
   | { minimumProductionFee: number; vendorMinimumPrice: number }
   | { error: string }
 > {
+  // Unauthenticated (anon buyers use it), so at least bound what reaches
+  // CraftCloud.
+  const parsed = cartPricingInput.safeParse(params);
+  if (!parsed.success) return { error: "Invalid request" };
+  if (!(await cartProbeAllowed())) return { error: RATE_LIMITED_MESSAGE };
   try {
     const cart = await createCart({
-      shippingIds: [params.shippingId],
-      currency: params.currency,
-      quotes: [{ id: params.quoteId }],
+      shippingIds: [parsed.data.shippingId],
+      // Checkout is USD-only; see lib/pricing/reconcile-quote.ts.
+      currency: "USD",
+      quotes: [{ id: parsed.data.quoteId }],
     });
 
-    const minimum = cart.minimumProductionPrice?.[params.vendorId];
+    const minimum = cart.minimumProductionPrice?.[parsed.data.vendorId];
     return {
       minimumProductionFee: minimum?.productionFee ?? 0,
       vendorMinimumPrice: minimum?.price ?? 0,
@@ -255,6 +214,7 @@ export async function checkVendorMinimums(
 ): Promise<{ minimums: Record<string, number> } | { error: string }> {
   const parsed = vendorMinimumsInput.safeParse(input);
   if (!parsed.success) return { error: "Invalid request" };
+  if (!(await cartProbeAllowed())) return { error: RATE_LIMITED_MESSAGE };
   try {
     const minimums = await getVendorMinimums(
       parsed.data.probes,
@@ -275,7 +235,12 @@ export async function discardDraftOrder(
     if (!userId) return { error: "Unauthorized" };
 
     const [order] = await db
-      .select({ id: printOrders.id, status: printOrders.status })
+      .select({
+        id: printOrders.id,
+        status: printOrders.status,
+        stripeSessionId: printOrders.stripeSessionId,
+        craftCloudOrderId: printOrders.craftCloudOrderId,
+      })
       .from(printOrders)
       .where(and(eq(printOrders.id, orderId), eq(printOrders.userId, userId)));
 
@@ -286,7 +251,59 @@ export async function discardDraftOrder(
       return { error: "Cannot discard an order that has been placed" };
     }
 
-    await db.delete(printOrders).where(eq(printOrders.id, orderId));
+    // cart_created is not proof nothing happened yet:
+    //  - a craftCloudOrderId (real, or a webhook `placing:` sentinel)
+    //    means the vendor order exists or is being placed — two_step
+    //    places it up-front, unpaid;
+    //  - a `pi_…` ref is an off-session charge (agent path) or an
+    //    embedded fee hold — money already moved;
+    //  - a `session_claim:` sentinel means a checkout is being minted
+    //    right now.
+    // None of those rows may simply vanish.
+    if (order.craftCloudOrderId) {
+      return { error: "Cannot discard an order that has been placed" };
+    }
+    const refKind = classifyPaymentRef(order.stripeSessionId);
+    if (refKind === "payment_intent") {
+      return { error: "Cannot discard an order that has been paid" };
+    }
+    if (refKind === "claim") {
+      return {
+        error: "Checkout is in progress for this order. Please try again in a moment.",
+      };
+    }
+    if (refKind === "session") {
+      // Close the Checkout session first, so a still-open tab can't
+      // take a payment for an order row that no longer exists.
+      const closed = await closeCheckoutSession(
+        order.stripeSessionId!,
+        "discardDraftOrder"
+      );
+      if (closed === "completed") {
+        return {
+          error:
+            "This order has already been paid — check your orders in a moment.",
+        };
+      }
+      if (closed === "unknown") {
+        return { error: "Failed to discard draft" };
+      }
+    }
+
+    // Conditional on the state we just verified: if a checkout was
+    // started (or the webhook advanced the row) in between, leave it.
+    await db
+      .delete(printOrders)
+      .where(
+        and(
+          eq(printOrders.id, orderId),
+          eq(printOrders.status, "cart_created"),
+          isNull(printOrders.craftCloudOrderId),
+          order.stripeSessionId
+            ? eq(printOrders.stripeSessionId, order.stripeSessionId)
+            : isNull(printOrders.stripeSessionId)
+        )
+      );
 
     revalidatePath("/dashboard/orders");
     return { success: true };
@@ -338,16 +355,26 @@ export async function createPrintOrder(params: {
       return { error: "File not found" };
     }
 
-    // Re-derive the authoritative per-unit price from CraftCloud
-    // instead of trusting the client-supplied materialPrice — a
-    // tampered request must not flow into the charge (MTR-130).
-    const claimedMaterialSubtotal = Math.round(data.materialPrice * 100);
-    const reconciled = await reconcileMaterialPrice({
+    // Printing a paid listing the buyer doesn't own also buys it.
+    const licensed = await resolvePrintLicense(userId, data.fileAssetId);
+    if (!licensed.ok) return { error: licensed.error };
+    const licenseFee = licensed.license?.licenseCents ?? 0;
+
+    // Re-derive everything we bill from CraftCloud's own snapshot of
+    // this quote rather than trusting the client: the per-unit price
+    // (MTR-130), the quantity the quoteId bakes in (CraftCloud builds the
+    // cart from the quoteId, so a client quantity of 1 against a qty-100
+    // quote would bill 1 and print 100), the vendor (the minimum-fee
+    // lookup keys on it) and the shipping price for the chosen option.
+    const reconciled = await reconcileQuote({
       priceId: data.priceId,
       quoteId: data.quoteId,
-      claimedPriceCents: claimedMaterialSubtotal,
+      claimedPriceCents: Math.round(data.materialPrice * 100),
+      expectedQuantity: data.quantity,
+      shippingId: data.shippingId,
     });
     if (!reconciled.ok) return { error: reconciled.error };
+    const { quote } = reconciled;
 
     // Create Craft Cloud cart. The v5 API only wants { id: quoteId }
     // in each entry — the quote already encodes vendor, material,
@@ -355,7 +382,7 @@ export async function createPrintOrder(params: {
     // trips additionalProperties: false and 400s.
     const cart = await createCart({
       shippingIds: [data.shippingId],
-      currency: data.currency,
+      currency: quote.currency ?? data.currency,
       quotes: [{ id: data.quoteId }],
     });
 
@@ -363,18 +390,18 @@ export async function createPrintOrder(params: {
     // start their machines below a threshold — CraftCloud adds a
     // `productionFee` to bridge the gap. Include it in our totals
     // so the Stripe charge matches what the user was shown.
-    const minimum = cart.minimumProductionPrice?.[data.vendorId];
+    const minimum = cart.minimumProductionPrice?.[quote.vendorId];
     const productionFeeCents = Math.round((minimum?.productionFee ?? 0) * 100);
 
     const materialSubtotal = reconciled.priceCents;
-    const shippingSubtotal = Math.round(data.shippingPrice * 100);
+    const shippingSubtotal = reconciled.shipping!.priceCents;
     // Service fee is 3% of the pre-shipping subtotal — charging
     // a platform fee on freight would make our cut scale with
     // unrelated logistics costs. Shipping is still part of
     // totalPrice (it's money the user owes) but sits outside the
     // service-fee base.
     const preShippingTotal =
-      materialSubtotal * data.quantity + productionFeeCents;
+      materialSubtotal * quote.quantity + productionFeeCents;
     const totalPrice = preShippingTotal + shippingSubtotal;
     const serviceFee = calcServiceFee(preShippingTotal, getCheckoutModel());
 
@@ -387,12 +414,16 @@ export async function createPrintOrder(params: {
         craftCloudCartId: cart.cartId,
         totalPrice,
         serviceFee,
+        licenseFee,
         materialSubtotal,
         shippingSubtotal,
-        quantity: data.quantity,
-        material: data.materialConfigId,
-        vendor: data.vendorId,
-        vendorName: data.vendorName ?? null,
+        quantity: quote.quantity,
+        material: quote.materialConfigId,
+        vendor: quote.vendorId,
+        // Display-only; only trust the client's name when it was naming
+        // the vendor the quote is actually for.
+        vendorName:
+          data.vendorId === quote.vendorId ? (data.vendorName ?? null) : null,
         status: "cart_created",
         // Persisted model drives all later branching — see the
         // checkoutModel note above createPrintOrder.
@@ -428,59 +459,6 @@ export async function createPrintOrder(params: {
   }
 }
 
-export async function checkOrderStatus(
-  orderId: string
-): Promise<{ status: string } | null> {
-  try {
-    const { userId } = await auth();
-    if (!userId) return null;
-
-    const [order] = await db
-      .select()
-      .from(printOrders)
-      .where(and(eq(printOrders.id, orderId), eq(printOrders.userId, userId)));
-
-    if (!order || !order.craftCloudOrderId) return null;
-
-    const status = await getOrderStatus(order.craftCloudOrderId);
-    const vendorStatus =
-      status.vendorStatuses.find((v) => v.vendorId === order.vendor) ??
-      status.vendorStatuses[0];
-
-    const STATUS_MAP: Record<string, typeof order.status> = {
-      ordered: "ordered",
-      in_production: "in_production",
-      shipped: "shipped",
-      received: "received",
-      blocked: "blocked",
-      cancelled: "cancelled",
-    };
-
-    if (vendorStatus && vendorStatus.status !== order.status) {
-      const mappedStatus = STATUS_MAP[vendorStatus.status] || order.status;
-      await db
-        .update(printOrders)
-        .set({
-          status: mappedStatus,
-          trackingInfo: vendorStatus.trackingUrl
-            ? {
-                trackingUrl: vendorStatus.trackingUrl,
-                trackingNumber: vendorStatus.trackingNumber,
-              }
-            : undefined,
-        })
-        .where(eq(printOrders.id, orderId));
-
-      revalidatePath(`/dashboard/orders/${orderId}`);
-    }
-
-    return { status: vendorStatus?.status || order.status };
-  } catch (error) {
-    logError("checkOrderStatus", error);
-    return null;
-  }
-}
-
 /**
  * Check out all cart items for a single vendor. Creates one
  * CraftCloud cart (with all the vendor's quote IDs), one printOrders
@@ -511,38 +489,96 @@ export async function checkoutVendorGroup(
 
     if (items.length === 0) return { error: "No items in cart for this vendor" };
 
-    // Re-derive each item's authoritative per-unit price from
-    // CraftCloud (via the priceId captured when it was added to cart)
-    // instead of trusting the stored cartItems.materialPrice at
-    // checkout time — a tampered add-to-cart write, or a price that
-    // simply went stale between add and checkout, must not silently
-    // flow into the Stripe charge (MTR-130). Legacy rows written
-    // before the priceId column existed have no way to reconcile —
-    // skip them (best-effort) rather than blocking checkout on an
-    // existing cart.
+    // Re-derive each item's per-unit price, quantity and vendor from
+    // CraftCloud's snapshot of its priceId instead of trusting the
+    // stored cart row (MTR-130, MONEY-1). Rows with no priceId (legacy
+    // rows, or ones a client re-priced without one) can't be verified,
+    // so they block checkout instead of being charged as written.
+    if (items.some((i) => !i.priceId)) {
+      return {
+        error:
+          "One or more items in this cart need a fresh quote. Change their quantity to re-price them, or remove and re-add them.",
+      };
+    }
+    // One getPrice per distinct priceId, in parallel.
+    const priceIds = [...new Set(items.map((i) => i.priceId!))];
+    const fetched = await Promise.all(
+      priceIds.map((id) => fetchPriceSnapshot(id))
+    );
+    const snapshots = new Map<string, PriceResponse>();
+    for (let n = 0; n < priceIds.length; n++) {
+      const result = fetched[n];
+      if (!result.ok) return { error: result.error };
+      snapshots.set(priceIds[n], result.snapshot);
+    }
+
     const reconciledMaterialCentsById = new Map<string, number>();
+    const configIdById = new Map<string, string>();
     for (const item of items) {
-      if (!item.priceId) continue;
-      const reconciled = await reconcileMaterialPrice({
-        priceId: item.priceId,
+      const reconciled = reconcileQuoteInSnapshot(snapshots.get(item.priceId!)!, {
         quoteId: item.quoteId,
         claimedPriceCents: item.materialPrice,
         expectedQuantity: item.quantity,
       });
       if (!reconciled.ok) return { error: reconciled.error };
+      if (reconciled.quote.vendorId !== vendorId) {
+        return {
+          error:
+            "This cart is out of sync with its quotes. Remove the items and re-add them from the quote page.",
+        };
+      }
       reconciledMaterialCentsById.set(item.id, reconciled.priceCents);
+      configIdById.set(item.id, reconciled.quote.materialConfigId);
     }
     const materialCentsFor = (item: (typeof items)[number]) =>
-      reconciledMaterialCentsById.get(item.id) ?? item.materialPrice;
+      reconciledMaterialCentsById.get(item.id)!;
+
+    // Paid listings the buyer doesn't own are bought with the print —
+    // once per file, on the first line that carries it, however many
+    // lines or units print it.
+    const licenseCentsById = new Map<string, number>();
+    const licensedFileIds = new Set<string>();
+    for (const item of items) {
+      const licensed = await resolvePrintLicense(userId, item.fileAssetId);
+      if (!licensed.ok) return { error: licensed.error };
+      const license = licensed.license;
+      if (license && !licensedFileIds.has(license.fileId)) {
+        licensedFileIds.add(license.fileId);
+        licenseCentsById.set(item.id, license.licenseCents);
+      }
+    }
+    const licenseFee = [...licenseCentsById.values()].reduce((a, b) => a + b, 0);
 
     const shippingIds = [...new Set(items.map((i) => i.shippingId))];
-    const currency = items[0].currency as Currency;
-
     const cart = await createCart({
       shippingIds,
-      currency,
+      // Every line was just reconciled against a USD quote; a row's
+      // stored currency may predate the USD switch, so it isn't read.
+      currency: CHECKOUT_CURRENCY,
       quotes: items.map((i) => ({ id: i.quoteId })),
     });
+
+    // Shipping is priced by CraftCloud, never by the stored row: prefer
+    // the cart's own priced shipping list, then any snapshot in the
+    // group (a later item inherits the first item's shippingId in
+    // addToCart, so it may only live in the first item's snapshot).
+    const shippingCentsById = new Map<string, number>();
+    for (const shippingId of shippingIds) {
+      const option =
+        cart.shippings?.find(
+          (s) => s.shippingId === shippingId && s.vendorId === vendorId
+        ) ??
+        [...snapshots.values()]
+          .flatMap(shippingOptionsOf)
+          .find((s) => s.shippingId === shippingId && s.vendorId === vendorId);
+      if (!option) {
+        return {
+          error:
+            "Shipping for this cart has changed. Remove the items and re-add them from the quote page.",
+        };
+      }
+      shippingCentsById.set(shippingId, Math.round(option.price * 100));
+    }
 
     // Vendor minimum production fee — same logic as createPrintOrder.
     const minimum = cart.minimumProductionPrice?.[vendorId];
@@ -558,7 +594,12 @@ export async function checkoutVendorGroup(
       (sum, i) => sum + materialCentsFor(i) * i.quantity,
       0
     );
-    const totalShipping = dedupeShippingByShipId(items);
+    const totalShipping = dedupeShippingByShipId(
+      items.map((i) => ({
+        shippingId: i.shippingId,
+        shippingPrice: shippingCentsById.get(i.shippingId)!,
+      }))
+    );
     // See createPrintOrder — service fee is 3% of the pre-shipping
     // subtotal so freight doesn't inflate our cut.
     const preShippingTotal = totalMaterial + productionFeeCents;
@@ -579,6 +620,7 @@ export async function checkoutVendorGroup(
         craftCloudCartId: cart.cartId,
         totalPrice,
         serviceFee,
+        licenseFee,
         shippingSubtotal: totalShipping,
         vendor: vendorId,
         vendorName: resolvedVendorName,
@@ -602,10 +644,11 @@ export async function checkoutVendorGroup(
         quoteId: i.quoteId,
         vendorId: i.vendorId,
         vendorName: i.vendorName ?? null,
-        materialConfigId: i.materialConfigId,
+        materialConfigId: configIdById.get(i.id)!,
         quantity: i.quantity,
         materialSubtotal: materialCentsFor(i),
         shippingSubtotal: 0,
+        licenseFee: licenseCentsById.get(i.id) ?? 0,
       }))
     );
 
@@ -909,6 +952,8 @@ async function createStripeSessionForOrder(
     }
   }
 
+  lineItems.push(...(await buildLicenseLineItems(order)));
+
   lineItems.push({
     price_data: {
       currency: "usd",
@@ -1052,6 +1097,17 @@ export async function completePrintOrder(params: {
     if (!addressParsed.success) {
       return { error: "Invalid address information" };
     }
+    // Everything downstream (DB write, CraftCloud order, Stripe) uses the
+    // PARSED values — trimmed, length-capped, unknown keys stripped —
+    // never the raw client payload. Billing is optional in the schema;
+    // CraftCloud's order call takes a billing address, so fall back to
+    // shipping rather than failing after the buyer has paid.
+    const email = addressParsed.data.email;
+    const shipping = addressParsed.data.shipping;
+    const billing = addressParsed.data.billing ?? {
+      ...shipping,
+      isCompany: false,
+    };
 
     // Fetch our print order, verify ownership and status
     const [order] = await db
@@ -1086,7 +1142,8 @@ export async function completePrintOrder(params: {
           feeSheet: {
             clientSecret: resolved.clientSecret,
             orderId: order.id,
-            amountCents: order.serviceFee,
+            amountCents: order.serviceFee + order.licenseFee,
+            ...(order.licenseFee ? { licenseCents: order.licenseFee } : {}),
             email: order.shippingAddress?.email,
           },
         };
@@ -1151,7 +1208,8 @@ export async function completePrintOrder(params: {
         return {
           savedCardConfirm: {
             orderId: order.id,
-            amountCents: order.serviceFee,
+            amountCents: order.serviceFee + order.licenseFee,
+            ...(order.licenseFee ? { licenseCents: order.licenseFee } : {}),
             brand: savedCard.brand,
             last4: savedCard.last4,
           },
@@ -1221,9 +1279,9 @@ export async function completePrintOrder(params: {
     // picks up where the last attempt left off.
     if (order.checkoutModel === "two_step") {
       const prep = await prepareTwoStepOrder(order, {
-        email: params.email,
-        shipping: params.shipping,
-        billing: params.billing,
+        email,
+        shipping,
+        billing,
       });
       if ("error" in prep) {
         await releaseSessionClaim(params.orderId, sentinel);
@@ -1242,9 +1300,9 @@ export async function completePrintOrder(params: {
               order,
               sentinel,
               {
-                email: params.email,
-                shipping: params.shipping,
-                billing: params.billing,
+                email,
+                shipping,
+                billing,
               },
               prep.bridgeSessionUrl
             )
@@ -1262,9 +1320,9 @@ export async function completePrintOrder(params: {
       // PI creation failure, lost sentinel), and the hosted-session
       // path below takes over unchanged.
       const sheet = await prepareEmbeddedFeeSheet(order, sentinel, {
-        email: params.email,
-        shipping: params.shipping,
-        billing: params.billing,
+        email,
+        shipping,
+        billing,
       });
       if (sheet) {
         revalidatePath("/dashboard/orders");
@@ -1275,7 +1333,7 @@ export async function completePrintOrder(params: {
     let sessionResult: Awaited<ReturnType<typeof createStripeSessionForOrder>>;
     try {
       sessionResult = await createStripeSessionForOrder(order, {
-        email: params.email,
+        email,
         isAnonFlow: params.isAnonFlow ?? false,
       });
     } catch (err) {
@@ -1295,9 +1353,9 @@ export async function completePrintOrder(params: {
       .set({
         stripeSessionId: sessionResult.id,
         shippingAddress: {
-          email: params.email,
-          shipping: params.shipping,
-          billing: params.billing,
+          email,
+          shipping,
+          billing,
         },
       })
       .where(
@@ -1412,7 +1470,7 @@ async function tryAuthorizeFeeWithSavedCard(
   try {
     intent = await stripe.paymentIntents.create(
       {
-        amount: order.serviceFee,
+        amount: order.serviceFee + order.licenseFee,
         currency: "usd",
         customer: billingRow.stripeCustomerId,
         payment_method: billingRow.defaultPaymentMethod,
@@ -1602,7 +1660,7 @@ async function prepareEmbeddedFeeSheet(
   try {
     intent = await stripe.paymentIntents.create(
       {
-        amount: order.serviceFee,
+        amount: order.serviceFee + order.licenseFee,
         currency: "usd",
         customer: customerId,
         capture_method: "manual",
@@ -1665,7 +1723,8 @@ async function prepareEmbeddedFeeSheet(
   return {
     clientSecret: intent.client_secret,
     orderId: order.id,
-    amountCents: order.serviceFee,
+    amountCents: order.serviceFee + order.licenseFee,
+            ...(order.licenseFee ? { licenseCents: order.licenseFee } : {}),
     email: contact.email,
   };
 }
@@ -2456,38 +2515,20 @@ export async function requestOrderRefund(
       };
     }
 
-    // Blocked = factory rejected, safe to refund immediately
-    // Ordered = placed but not yet in production — check live status first
-    // Anything else = too late for self-service refund
-    if (order.status === "blocked") {
-      // Factory rejected — refund is straightforward
-    } else if (order.status === "ordered" && order.craftCloudOrderId) {
-      // Check live status before allowing refund — it may have moved to production
-      const liveStatus = await getOrderStatus(order.craftCloudOrderId);
-      const vendorStatus = liveStatus.vendorStatuses[0];
-      if (vendorStatus && vendorStatus.status !== "ordered") {
-        // Already in production or beyond — can't refund self-service
-        // Update our DB to reflect the real status
-        const STATUS_MAP: Record<string, string> = {
-          in_production: "in_production",
-          shipped: "shipped",
-          received: "received",
-          blocked: "blocked",
-          cancelled: "cancelled",
-        };
-        const mapped = STATUS_MAP[vendorStatus.status];
-        if (mapped) {
-          await db
-            .update(printOrders)
-            .set({ status: mapped as typeof order.status })
-            .where(eq(printOrders.id, orderId));
-          revalidatePath(`/dashboard/orders/${orderId}`);
-        }
-        return {
-          error: "This order is already in production and can't be refunded automatically. Please contact support.",
-        };
-      }
-    } else {
+    // Only `blocked` (the factory rejected the order) is safe to refund
+    // self-service. An `ordered` order is live at CraftCloud, and there
+    // is no CraftCloud cancellation API (CON-109): refunding the buyer in
+    // full here would leave the vendor free to produce and ship the print
+    // — and bill us for it. Route those to support, who can coordinate
+    // with the vendor before any money moves. Anything later is too late
+    // for self-service either way.
+    if (order.status === "ordered") {
+      return {
+        error:
+          "This order has already been sent to the manufacturer, so it can't be cancelled automatically. Please email support@materialize.cc and we'll coordinate with the vendor.",
+      };
+    }
+    if (order.status !== "blocked") {
       return { error: "This order can't be refunded at this stage" };
     }
 
@@ -2546,11 +2587,29 @@ export async function requestOrderRefund(
       { idempotencyKey: `print-refund:${order.id}` }
     );
 
-    // Update order status
-    await db
+    // The refund covered any paid listing bought with this print: take
+    // the creator's share back and the buyer's ownership with it.
+    if (order.licenseFee > 0) await revokePrintLicenses(order.id);
+
+    // Conditional on the status we refunded against, so a concurrent
+    // writer (the hourly sync-fulfillment-status cron) is never
+    // overwritten. The refund itself is idempotent per order, so a
+    // retry after a lost write is safe.
+    const updated = await db
       .update(printOrders)
       .set({ status: "refunded" })
-      .where(eq(printOrders.id, orderId));
+      .where(and(eq(printOrders.id, orderId), eq(printOrders.status, "blocked")))
+      .returning({ id: printOrders.id });
+    if (updated.length === 0) {
+      // Money went back to the buyer but the row moved under us —
+      // surface it for a human rather than guessing the right status.
+      logError(
+        "requestOrderRefund.statusWriteLost",
+        new Error(`refund issued but status write lost for order ${orderId}`, {
+          cause: { printOrderId: orderId, paymentIntentId },
+        })
+      );
+    }
 
     revalidatePath(`/dashboard/orders/${orderId}`);
     revalidatePath("/dashboard/orders");

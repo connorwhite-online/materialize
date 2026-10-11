@@ -8,7 +8,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
  *   mockSend       — spy on the instance send method
  */
 
-let fileAssetRows: Array<{ storageKey: string }> = [];
+let fileAssetRows: Array<{ id?: string; storageKey: string }> = [];
 let stepAssetRows: Array<{ storageKey: string | null }> = [];
 let claimIntentRows: Array<{ storageKey: string }> = [];
 let disputeEvidenceRows: Array<{ evidencePhotoKeys: string[] }> = [];
@@ -288,6 +288,30 @@ describe("cron/cleanup-orphan-uploads", () => {
     // One list call per prefix, each returning only its own keys.
     expect(body.scanned).toBe(2);
     expect(body.deleted).toBe(2);
+  });
+
+  // Low-detail previews of paid listings (lib/files/model-preview.ts):
+  // no column points at them, so they live as long as their asset row.
+  it("keeps a preview whose asset exists and sweeps one whose asset is gone", async () => {
+    const old = objectAgedHours(48);
+    fileAssetRows = [{ id: "live-asset", storageKey: "uploads/u/live.stl" }];
+    r2Objects = [
+      { Key: "uploads/u/live.stl", LastModified: old, Size: 1 },
+      { Key: "previews/live-asset.v1.stl", LastModified: old, Size: 1 },
+      { Key: "previews/dead-asset.v1.3mf", LastModified: old, Size: 1 },
+      { Key: "previews/dead-young.v1.stl", LastModified: new Date(), Size: 1 },
+      { Key: "previews/not-ours.txt", LastModified: old, Size: 1 },
+    ];
+
+    const res = await GET(makeRequest("Bearer test-secret"));
+    const body = await res.json();
+    expect(body.orphans).toBe(1);
+    const deleteInput = mockSend.mock.calls.find(
+      (c) => (c[0] as { _type: string })._type === "DeleteObjectsCommand"
+    )![0].input as { Delete: { Objects: Array<{ Key: string }> } };
+    expect(deleteInput.Delete.Objects.map((o) => o.Key)).toEqual([
+      "previews/dead-asset.v1.3mf",
+    ]);
   });
 
   it("retires aged-out grant rows and reports the count", async () => {

@@ -19,7 +19,6 @@ import {
   projects,
   projectFiles,
   projectPhotos,
-  purchases,
   users,
   organizationMembers,
 } from "@/lib/db/schema";
@@ -43,6 +42,10 @@ import {
   viewerCanAttachAllFiles,
 } from "@/lib/authorization";
 import { notifyCollaboratorAddedToProject } from "@/lib/notifications/notify";
+import {
+  archiveProjectRow,
+  countProjectBuyers,
+} from "@/lib/projects/delete-guard";
 
 /**
  * Cache tag for the idle-browse grid on app/(app)/files/(browse)/page.tsx
@@ -588,28 +591,17 @@ export async function deleteProject(
     if (!access.ok) return { error: "Project not found" };
     const project = access.resource;
 
-    const buyerRows = await db
-      .select({ id: purchases.id })
-      .from(purchases)
-      .where(
-        and(
-          eq(purchases.projectId, projectId),
-          eq(purchases.status, "completed")
-        )
-      );
-
-    if (buyerRows.length > 0) {
-      await db
-        .update(projects)
-        .set({ status: "archived", visibility: "private" })
-        .where(eq(projects.id, projectId));
+    // Shared with the MCP delete tool (lib/projects/delete-guard.ts).
+    const buyerCount = await countProjectBuyers(projectId);
+    if (buyerCount > 0) {
+      await archiveProjectRow(projectId);
       revalidatePath(`/projects/${project.slug}`);
       revalidatePath("/dashboard");
       updateTag(IDLE_BROWSE_CACHE_TAG);
       return {
         archived: true,
         reason: "has-buyers",
-        buyerCount: buyerRows.length,
+        buyerCount,
       };
     }
 

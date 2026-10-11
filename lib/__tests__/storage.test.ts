@@ -120,6 +120,26 @@ describe("generateUploadUrl", () => {
       generateUploadUrl("uploads/user-1/abc/model.stl", "model/stl")
     ).rejects.toThrow("presign failed");
   });
+
+  it("signs ContentLength when the caller supplies a size", async () => {
+    getSignedUrlMock.mockResolvedValue("https://r2.example.com/signed-put");
+    await generateUploadUrl("k", "model/stl", 3600, { contentLength: 1234 });
+    const [, cmd] = getSignedUrlMock.mock.calls[0] as [
+      unknown,
+      { params: { ContentLength?: number } },
+    ];
+    expect(cmd.params.ContentLength).toBe(1234);
+  });
+
+  it("leaves ContentLength unsigned when no size is given", async () => {
+    getSignedUrlMock.mockResolvedValue("https://r2.example.com/signed-put");
+    await generateUploadUrl("k", "model/stl");
+    const [, cmd] = getSignedUrlMock.mock.calls[0] as [
+      unknown,
+      { params: { ContentLength?: number } },
+    ];
+    expect(cmd.params.ContentLength).toBeUndefined();
+  });
 });
 
 // ─── generateDownloadUrl ─────────────────────────────────────

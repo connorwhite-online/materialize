@@ -185,3 +185,36 @@ describe("POST /api/upload/presign — happy path key shape", () => {
     expect(body.storageKey).toContain("My_Model.stl");
   });
 });
+
+describe("POST /api/upload/presign — signed size + malformed bodies", () => {
+  it("signs the declared fileSize into the upload URL", async () => {
+    const res = await POST(
+      makeRequest({ filename: "model.stl", contentType: "model/stl", fileSize: 4321 })
+    );
+    expect(res.status).toBe(200);
+    expect(generateUploadUrlMock).toHaveBeenCalledWith(
+      expect.any(String),
+      "model/stl",
+      undefined,
+      { contentLength: 4321 }
+    );
+  });
+
+  it("returns 400 for a fractional fileSize (unsignable Content-Length)", async () => {
+    const res = await POST(
+      makeRequest({ filename: "model.stl", contentType: "model/stl", fileSize: 10.5 })
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it("returns 400 (not 500) for a malformed JSON body", async () => {
+    const res = await POST(
+      new Request("http://localhost/api/upload/presign", {
+        method: "POST",
+        body: "{not json",
+      })
+    );
+    expect(res.status).toBe(400);
+    expect(generateUploadUrlMock).not.toHaveBeenCalled();
+  });
+});

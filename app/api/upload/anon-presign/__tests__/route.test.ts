@@ -97,6 +97,29 @@ describe("POST /api/upload/anon-presign", () => {
     );
   });
 
+  // The size check above only binds the PUT if the size is signed.
+  it("signs the declared fileSize into the URL", async () => {
+    await POST(req());
+    expect(generateUploadUrlMock).toHaveBeenCalledWith(
+      expect.any(String),
+      "application/octet-stream",
+      undefined,
+      { contentLength: 1024 }
+    );
+  });
+
+  it("400s (not 500) on a malformed JSON body", async () => {
+    const res = await POST(
+      new Request("http://localhost/api/upload/anon-presign", {
+        method: "POST",
+        headers: { "x-forwarded-for": "203.0.113.7" },
+        body: "{oops",
+      })
+    );
+    expect(res.status).toBe(400);
+    expect(generateUploadUrlMock).not.toHaveBeenCalled();
+  });
+
   it("grants a distinct key per request", async () => {
     const a = await (await POST(req())).json();
     const b = await (await POST(req())).json();

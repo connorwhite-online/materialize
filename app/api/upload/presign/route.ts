@@ -3,6 +3,7 @@ import { generateUploadUrl } from "@/lib/storage";
 import { nanoid } from "nanoid";
 import { fileExtensionToFormat, MAX_FILE_SIZE } from "@/lib/validations/file";
 import { logError } from "@/lib/logger";
+import { invalidJsonResponse, readJsonObject } from "@/lib/http/json-body";
 
 /**
  * Strip characters that could break a storage key (path separators,
@@ -25,7 +26,8 @@ export async function POST(request: Request) {
       return Response.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const body = await request.json();
+    const body = await readJsonObject(request);
+    if (!body) return invalidJsonResponse();
     const { filename, contentType, fileSize } = body as {
       filename: string;
       contentType: string;
@@ -36,7 +38,7 @@ export async function POST(request: Request) {
       return Response.json({ error: "Filename is required" }, { status: 400 });
     }
 
-    if (typeof fileSize !== "number" || !Number.isFinite(fileSize) || fileSize <= 0) {
+    if (typeof fileSize !== "number" || !Number.isInteger(fileSize) || fileSize <= 0) {
       return Response.json({ error: "Invalid file size" }, { status: 400 });
     }
 
@@ -57,9 +59,13 @@ export async function POST(request: Request) {
 
     const safeName = sanitizeFilename(filename);
     const storageKey = `uploads/${userId}/${nanoid()}/${safeName}`;
+    // Sign the declared size so the MAX_FILE_SIZE check above binds
+    // the actual PUT, not just this request's claim.
     const uploadUrl = await generateUploadUrl(
       storageKey,
-      contentType || "application/octet-stream"
+      contentType || "application/octet-stream",
+      undefined,
+      { contentLength: fileSize }
     );
 
     return Response.json({ uploadUrl, storageKey, format });

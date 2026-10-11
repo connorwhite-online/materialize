@@ -1,11 +1,19 @@
 import { auth } from "@clerk/nextjs/server";
 import { db } from "@/lib/db";
 import { fileAssets, files } from "@/lib/db/schema";
+import { isPublicListing } from "@/lib/files/public-listing";
 import { eq } from "drizzle-orm";
 import { createPriceRequest } from "@/lib/craftcloud/client";
 import { getCraftCloudCatalog } from "@/lib/craftcloud/catalog";
 import { quotesRequestSchema } from "@/lib/validations/print";
 import { logError } from "@/lib/logger";
+import { invalidJsonResponse, readJsonObject } from "@/lib/http/json-body";
+import {
+  consumeRateLimit,
+  RATE_LIMITS,
+  rateLimitCallerKey,
+  rateLimitedResponse,
+} from "@/lib/rate-limit";
 
 /**
  * Start a CraftCloud price request and return its id immediately.
@@ -18,7 +26,14 @@ export async function POST(request: Request) {
   try {
     const { userId } = await auth();
 
-    const body = await request.json();
+    const limited = await consumeRateLimit(
+      RATE_LIMITS.quoteStart,
+      rateLimitCallerKey(request.headers, userId)
+    );
+    if (!limited.ok) return rateLimitedResponse(limited.retryAfterSeconds);
+
+    const body = await readJsonObject(request);
+    if (!body) return invalidJsonResponse();
     const parsed = quotesRequestSchema.safeParse(body);
     if (!parsed.success) {
       return Response.json(
@@ -40,6 +55,7 @@ export async function POST(request: Request) {
           asset: fileAssets,
           fileUserId: files.userId,
           fileStatus: files.status,
+          fileVisibility: files.visibility,
         })
         .from(fileAssets)
         .leftJoin(files, eq(fileAssets.fileId, files.id))
@@ -50,7 +66,7 @@ export async function POST(request: Request) {
       }
 
       const isOwner = userId && assetRow.fileUserId === userId;
-      const isPublished = assetRow.fileStatus === "published";
+      const isPublished = isPublicListing(assetRow);
       if (!isOwner && !isPublished) {
         return Response.json({ error: "Forbidden" }, { status: 403 });
       }

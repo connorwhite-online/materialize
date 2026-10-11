@@ -2,6 +2,10 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 // Swappable order row returned by the db.select mock.
 let selectedOrder: unknown = null;
+// Rows the conditional status UPDATE ... RETURNING reports.
+let updateReturns: Array<{ id: string }> = [{ id: "order-id-1" }];
+const mockUpdateSet = vi.fn();
+const mockUpdateWhere = vi.fn();
 
 vi.mock("@/lib/db", () => ({
   db: {
@@ -11,13 +15,30 @@ vi.mock("@/lib/db", () => ({
       }),
     }),
     update: () => ({
-      set: () => ({ where: () => Promise.resolve() }),
+      set: (values: unknown) => {
+        mockUpdateSet(values);
+        return {
+          where: (w: unknown) => {
+            mockUpdateWhere(w);
+            const p = Promise.resolve() as Promise<void> & {
+              returning: () => Array<{ id: string }>;
+            };
+            p.returning = () => updateReturns;
+            return p;
+          },
+        };
+      },
     }),
   },
 }));
 
 vi.mock("@/lib/db/schema", () => ({
-  printOrders: { __name: "printOrders", id: "id", userId: "user_id" },
+  printOrders: {
+    __name: "printOrders",
+    id: "id",
+    userId: "user_id",
+    status: "status",
+  },
 }));
 
 const mockRefundsCreate = vi.fn(
@@ -39,11 +60,18 @@ vi.mock("@/lib/stripe", () => ({
   }),
 }));
 
+const mockGetOrderStatus = vi.fn();
 vi.mock("@/lib/craftcloud/client", () => ({
-  getOrderStatus: vi.fn(),
+  getOrderStatus: (...a: unknown[]) => mockGetOrderStatus(...a),
+}));
+
+vi.mock("@/lib/logger", () => ({
+  logError: vi.fn(),
+  isRedirectError: () => false,
 }));
 
 import { requestOrderRefund } from "../print";
+import { logError } from "@/lib/logger";
 
 const blockedOrder = {
   id: "order-id-1",
@@ -58,6 +86,7 @@ describe("requestOrderRefund — refund idempotency (CON-46)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     selectedOrder = { ...blockedOrder };
+    updateReturns = [{ id: "order-id-1" }];
   });
 
   it("issues the refund with a deterministic per-order idempotency key", async () => {
@@ -162,5 +191,72 @@ describe("requestOrderRefund — MTR-132 agent-order (pi_ prefixed stripeSession
     expect(res).not.toEqual({ success: true });
     expect(mockSessionRetrieve).not.toHaveBeenCalled();
     expect(mockRefundsCreate).not.toHaveBeenCalled();
+  });
+});
+
+describe("requestOrderRefund — `ordered` orders route to support", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    updateReturns = [{ id: "order-id-1" }];
+  });
+
+  it("refuses a self-service refund for an ordered single-checkout order — CraftCloud has no cancel API, the print may still ship", async () => {
+    selectedOrder = {
+      ...blockedOrder,
+      status: "ordered",
+      craftCloudOrderId: "cc-live",
+    };
+
+    const res = await requestOrderRefund("order-id-1");
+
+    if (!("error" in res)) throw new Error("expected error");
+    expect(res.error).toMatch(/support@materialize\.cc/);
+    expect(mockRefundsCreate).not.toHaveBeenCalled();
+    expect(mockSessionRetrieve).not.toHaveBeenCalled();
+    expect(mockUpdateSet).not.toHaveBeenCalled();
+    // No live CraftCloud read either — nothing about the answer depends on it.
+    expect(mockGetOrderStatus).not.toHaveBeenCalled();
+  });
+
+  it("refuses statuses past blocked/ordered without touching Stripe", async () => {
+    selectedOrder = { ...blockedOrder, status: "in_production" };
+
+    const res = await requestOrderRefund("order-id-1");
+
+    expect(res).toEqual({ error: "This order can't be refunded at this stage" });
+    expect(mockRefundsCreate).not.toHaveBeenCalled();
+  });
+});
+
+describe("requestOrderRefund — conditional status write", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    selectedOrder = { ...blockedOrder };
+    updateReturns = [{ id: "order-id-1" }];
+  });
+
+  it("only flips the row to refunded while it is still blocked", async () => {
+    await requestOrderRefund("order-id-1");
+
+    expect(mockUpdateSet).toHaveBeenCalledWith({ status: "refunded" });
+    // The WHERE is a drizzle SQL object; its serialized chunks name the
+    // status column guard alongside the id.
+    const where = JSON.stringify(mockUpdateWhere.mock.calls[0][0], (_k, v) =>
+      typeof v === "object" && v !== null && "table" in v ? undefined : v
+    );
+    expect(where).toContain("status");
+    expect(where).toContain("blocked");
+  });
+
+  it("logs (and still reports success) when the fulfillment cron moved the row first", async () => {
+    updateReturns = [];
+
+    const res = await requestOrderRefund("order-id-1");
+
+    expect(res).toEqual({ success: true });
+    expect(logError).toHaveBeenCalledWith(
+      "requestOrderRefund.statusWriteLost",
+      expect.any(Error)
+    );
   });
 });

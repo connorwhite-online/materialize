@@ -1,9 +1,16 @@
-import { getPrice } from "@/lib/craftcloud/client";
+import { auth } from "@clerk/nextjs/server";
+import { CraftCloudApiError, getPrice } from "@/lib/craftcloud/client";
 import {
   getCraftCloudCatalog,
   getProviderIndex,
 } from "@/lib/craftcloud/catalog";
 import { logError } from "@/lib/logger";
+import {
+  consumeRateLimit,
+  RATE_LIMITS,
+  rateLimitCallerKey,
+  rateLimitedResponse,
+} from "@/lib/rate-limit";
 
 /**
  * Snapshot the current state of a CraftCloud price request. The
@@ -13,6 +20,10 @@ import { logError } from "@/lib/logger";
  * state with whatever we return (no merging needed, CraftCloud
  * tracks the growing list itself).
  */
+// CraftCloud price ids are opaque tokens (UUIDs live, `mock-price-…`
+// in mock mode). Anything else is not ours to forward upstream.
+const PRICE_ID_PATTERN = /^[A-Za-z0-9_-]{1,100}$/;
+
 export async function GET(request: Request) {
   try {
     const priceId = new URL(request.url).searchParams.get("priceId");
@@ -22,16 +33,29 @@ export async function GET(request: Request) {
         { status: 400 }
       );
     }
+    if (!PRICE_ID_PATTERN.test(priceId)) {
+      return Response.json({ error: "Invalid priceId" }, { status: 400 });
+    }
 
-    const priceResponse = await getPrice(priceId);
+    const { userId } = await auth();
+    const limited = await consumeRateLimit(
+      RATE_LIMITS.quotePoll,
+      rateLimitCallerKey(request.headers, userId)
+    );
+    if (!limited.ok) return rateLimitedResponse(limited.retryAfterSeconds);
 
     // Enrich every quote with catalog metadata — material, finish
     // group, color, provider name, etc. Quotes whose materialConfigId
     // is not in our cached catalog are dropped (should be very rare
     // and usually indicates the catalog is stale relative to new
-    // vendor configs). The cached catalog is shared across all
-    // requests via Next's data cache.
-    const [catalog, providers] = await Promise.all([
+    // vendor configs). The catalog + provider index are memoized per
+    // server instance (see catalog.ts), and fetched alongside the
+    // snapshot so a cold instance doesn't pay for them in series.
+    //
+    // request.signal is forwarded so a poll the client abandoned
+    // (region/quantity change, navigation) stops waiting on upstream.
+    const [priceResponse, catalog, providers] = await Promise.all([
+      getPrice(priceId, { signal: request.signal }),
       getCraftCloudCatalog(),
       getProviderIndex(),
     ]);
@@ -139,6 +163,40 @@ export async function GET(request: Request) {
       allComplete: priceResponse.allComplete,
     });
   } catch (error) {
+    // The client went away mid-poll; nobody reads this response and
+    // it isn't an upstream failure worth logging.
+    if (request.signal.aborted) {
+      return new Response(null, { status: 499 });
+    }
+    // Upstream status classes must survive the hop: the client's
+    // poll loop (components/print/poll-quotes.ts) bails after three
+    // consecutive 4xx — the "stale priceId" exit for a tab that was
+    // backgrounded past CraftCloud's TTL. Flattening every failure to
+    // 500 meant that exit could never fire and the user watched a
+    // loader for the full 90s ceiling.
+    if (error instanceof CraftCloudApiError) {
+      const upstream = error.status;
+      const isClientError =
+        upstream >= 400 &&
+        upstream < 500 &&
+        upstream !== 408 &&
+        upstream !== 429;
+      if (isClientError) {
+        // Expected whenever a priceId ages out — not Sentry-worthy.
+        console.warn("[quotes] poll: priceId rejected upstream", {
+          upstream,
+        });
+        return Response.json(
+          { error: "This quote request has expired. Please refresh quotes." },
+          { status: 410 }
+        );
+      }
+      logError("api/craftcloud/quotes/poll", error);
+      return Response.json(
+        { error: "Failed to fetch quote snapshot." },
+        { status: upstream === 504 ? 504 : 502 }
+      );
+    }
     logError("api/craftcloud/quotes/poll", error);
     return Response.json(
       { error: "Failed to fetch quote snapshot." },

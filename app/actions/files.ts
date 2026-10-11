@@ -44,16 +44,11 @@ import {
   collections,
   collectionItems,
   filePhotos,
-  purchases,
   projectFiles,
-  projects,
-  cartItems,
-  printOrders,
-  printOrderItems,
   ownershipClaimIntents,
   disputes,
 } from "@/lib/db/schema";
-import { eq, and, gt, inArray, isNull } from "drizzle-orm";
+import { eq, and, gt, isNull } from "drizzle-orm";
 import { revalidatePath, updateTag } from "next/cache";
 import { redirect } from "next/navigation";
 import { nanoid } from "nanoid";
@@ -88,7 +83,10 @@ import {
   createDraftFileForUser,
   type CreateDraftFileParams,
 } from "@/lib/files/draft-file";
-import { ACTIVE_ORDER_STATUSES } from "@/lib/print-statuses";
+import {
+  archiveFileListingRow,
+  findFileDeleteBlocker,
+} from "@/lib/files/delete-guard";
 
 /**
  * Cache tag for the idle-browse grid on app/(app)/files/(browse)/page.tsx
@@ -694,30 +692,11 @@ export async function archiveFileListing(fileId: string) {
  * Caller is expected to confirm intent twice — this action does no
  * additional confirmation of its own.
  */
-// Print order statuses where the order is still mid-flow — paid or
-// about to be paid, but not yet received/refunded/cancelled. A file
-// referenced by an active row in either of these states must not be
-// hard-deleted: cascading the fileAsset away would silently drop the
-// line item from a Stripe session, the buyer's library, or a
-// production-side order at CraftCloud.
-//
-// ACTIVE_ORDER_STATUSES lives in lib/print-statuses.ts (not exported
-// from here) because this file has a top-level "use server" directive
-// and Next.js requires every export of such a file to be an async
-// function — a plain const array export fails the build. See that
-// file for the full status-by-status rationale and the CON-153/
-// CON-164/MTR-231 references.
-
-// What an owner's Delete does when the file can't be hard-deleted. It
-// also clears flaggedReason: the owner library keeps auto-flagged files
-// on screen (shownInOwnerLibrary) so the owner notices them, and a
-// flagged file the owner then deletes must leave the library like any
-// other. flaggedAt and flaggedAgainstFileId stay as the audit trail.
-const OWNER_ARCHIVE = {
-  status: "archived" as const,
-  visibility: "private" as const,
-  flaggedReason: null,
-};
+// The archive-vs-hard-delete decision (buyers, carts, print orders in
+// ACTIVE_ORDER_STATUSES across every version) lives in
+// lib/files/delete-guard.ts, shared with the MCP delete tool. See
+// lib/print-statuses.ts for the status-by-status rationale and the
+// CON-153/CON-164/MTR-231 references.
 
 export async function deleteFileListing(
   fileId: string
@@ -734,114 +713,24 @@ export async function deleteFileListing(
     if (!access.ok) return { error: "File not found" };
     const file = access.resource;
 
-    const directBuyers = await db
-      .select({ id: purchases.id })
-      .from(purchases)
-      .where(
-        and(
-          eq(purchases.fileId, fileId),
-          eq(purchases.status, "completed")
-        )
-      );
-
-    // Indirect entitlement: anyone who bought a project containing
-    // this file also owns it. Hard-deleting would silently revoke
-    // their access, so we soft-archive instead.
-    const projectBuyers = await db
-      .select({ id: purchases.id })
-      .from(purchases)
-      .innerJoin(projects, eq(purchases.projectId, projects.id))
-      .innerJoin(projectFiles, eq(projectFiles.projectId, projects.id))
-      .where(
-        and(
-          eq(projectFiles.fileId, fileId),
-          eq(purchases.status, "completed")
-        )
-      );
-
-    const totalBuyers = directBuyers.length + projectBuyers.length;
-    if (totalBuyers > 0) {
-      await db
-        .update(files)
-        .set(OWNER_ARCHIVE)
-        .where(eq(files.id, fileId));
+    // Buyers (direct or via a bundling project) or in-flight carts /
+    // print orders on any version: soft-archive instead of cascading
+    // their rows away. Shared with the MCP delete tool
+    // (lib/files/delete-guard.ts) so the two surfaces can't drift; once
+    // the order completes (or the cart empties), a re-attempt
+    // hard-deletes cleanly.
+    const blocker = await findFileDeleteBlocker(fileId);
+    if (blocker) {
+      await archiveFileListingRow(fileId);
       revalidatePath(`/files/${file.slug}`);
       revalidatePath("/files");
       revalidatePath("/dashboard/uploads");
       updateTag(IDLE_BROWSE_CACHE_TAG);
       return {
         archived: true,
-        reason: "has-buyers",
-        buyerCount: totalBuyers,
+        reason: blocker.reason,
+        buyerCount: blocker.count,
       };
-    }
-
-    // No completed purchases, but the file might still be referenced by
-    // someone's open cart or by a print order that hasn't shipped yet.
-    // Cascading those rows away would silently drop line items from a
-    // pending Stripe session or break a placed CraftCloud order. Soft-
-    // archive in that case too — once the order completes (or the user
-    // empties their cart), a re-attempt will hard-delete cleanly.
-    const fileAssetIds = (
-      await db
-        .select({ id: fileAssets.id })
-        .from(fileAssets)
-        .where(eq(fileAssets.fileId, fileId))
-    ).map((r) => r.id);
-
-    if (fileAssetIds.length > 0) {
-      const [activeCartItems, activeOrderItems, activeSingleOrders] =
-        await Promise.all([
-          db
-            .select({ id: cartItems.id })
-            .from(cartItems)
-            .where(inArray(cartItems.fileAssetId, fileAssetIds))
-            .limit(1),
-          db
-            .select({ id: printOrderItems.id })
-            .from(printOrderItems)
-            .innerJoin(
-              printOrders,
-              eq(printOrderItems.printOrderId, printOrders.id)
-            )
-            .where(
-              and(
-                inArray(printOrderItems.fileAssetId, fileAssetIds),
-                inArray(printOrders.status, [...ACTIVE_ORDER_STATUSES])
-              )
-            )
-            .limit(1),
-          db
-            .select({ id: printOrders.id })
-            .from(printOrders)
-            .where(
-              and(
-                inArray(printOrders.fileAssetId, fileAssetIds),
-                inArray(printOrders.status, [...ACTIVE_ORDER_STATUSES])
-              )
-            )
-            .limit(1),
-        ]);
-
-      const inFlight =
-        activeCartItems.length +
-        activeOrderItems.length +
-        activeSingleOrders.length;
-      if (inFlight > 0) {
-        await db
-          .update(files)
-          .set(OWNER_ARCHIVE)
-          .where(eq(files.id, fileId));
-        revalidatePath(`/files/${file.slug}`);
-        revalidatePath("/files");
-        revalidatePath("/dashboard/uploads");
-        updateTag(IDLE_BROWSE_CACHE_TAG);
-        return {
-          archived: true,
-          reason: "in-flight",
-          buyerCount: inFlight,
-        };
-      }
     }
     // No buyers — safe to hard-delete. Collect every storage key first
     // so we can scrub R2 even after the DB rows are gone.

@@ -301,6 +301,7 @@ export function CartProvider({ children }: { children: ReactNode }) {
         const result = await repriceCartItem({
           cartItemId: id,
           quantity,
+          priceId,
           quoteId: match.quoteId,
           materialPrice: match.price,
         });

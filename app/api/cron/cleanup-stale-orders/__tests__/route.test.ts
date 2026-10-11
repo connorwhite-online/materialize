@@ -71,8 +71,10 @@ function bumpCallCount(name: string): number {
 function selectChain(rows: unknown[]) {
   const promise = Promise.resolve(rows) as Promise<unknown[]> & {
     limit: (n: number) => unknown[];
+    orderBy: () => { limit: (n: number) => unknown[] };
   };
   promise.limit = (n: number) => rows.slice(0, n);
+  promise.orderBy = () => ({ limit: promise.limit });
   return promise;
 }
 
@@ -237,10 +239,18 @@ vi.mock("@/lib/db/schema", () => ({
   },
 }));
 
+const mockSessionRetrieve = vi.fn();
+const mockSessionExpire = vi.fn();
 vi.mock("@/lib/stripe", () => ({
   getStripe: () => ({
     refunds: {
       create: (...args: unknown[]) => mockRefundCreate(...args),
+    },
+    checkout: {
+      sessions: {
+        retrieve: (...args: unknown[]) => mockSessionRetrieve(...args),
+        expire: (...args: unknown[]) => mockSessionExpire(...args),
+      },
     },
   }),
 }));
@@ -310,6 +320,8 @@ describe("cron/cleanup-stale-orders", () => {
     cadGenerationRefs = [];
     resetTableCallCounts();
     mockRefundCreate.mockResolvedValue({ id: "re_1" });
+    mockSessionRetrieve.mockResolvedValue({ status: "open" });
+    mockSessionExpire.mockResolvedValue({ status: "expired" });
     mockDeleteObject.mockResolvedValue(undefined);
     process.env.CRON_SECRET = "test-secret";
   });
@@ -483,6 +495,89 @@ describe("cron/cleanup-stale-orders", () => {
     expect(mockRefundCreate).not.toHaveBeenCalled();
     const cancelledCall = updateCalls.find((c) => c.status === "cancelled");
     expect(cancelledCall).toBeDefined();
+  });
+
+  // ---------------------------------------------------------------------
+  // Checkout sessions on stale rows: expire before cancelling, and never
+  // cancel an order whose session the buyer already completed.
+  // ---------------------------------------------------------------------
+
+  it("expires a still-open Checkout session before cancelling the row", async () => {
+    staleOrderRows = [{ id: "order-open", stripeSessionId: "cs_open_1" }];
+
+    const res = await GET(makeRequest("Bearer test-secret"));
+
+    expect(mockSessionExpire).toHaveBeenCalledWith("cs_open_1");
+    const body = await res.json();
+    expect(body.cancelledOrders).toBe(1);
+    expect(body.skippedPaid).toBe(0);
+    expect(updateCalls.find((c) => c.status === "cancelled")).toBeDefined();
+  });
+
+  it("does not re-expire an already-expired session, and still cancels", async () => {
+    staleOrderRows = [{ id: "order-exp", stripeSessionId: "cs_exp_1" }];
+    mockSessionRetrieve.mockResolvedValue({ status: "expired" });
+
+    const res = await GET(makeRequest("Bearer test-secret"));
+
+    expect(mockSessionExpire).not.toHaveBeenCalled();
+    expect((await res.json()).cancelledOrders).toBe(1);
+  });
+
+  it("skips (never cancels) a row whose Checkout session the buyer completed", async () => {
+    staleOrderRows = [{ id: "order-paid", stripeSessionId: "cs_paid_1" }];
+    mockSessionRetrieve.mockResolvedValue({ status: "complete" });
+
+    const res = await GET(makeRequest("Bearer test-secret"));
+
+    const body = await res.json();
+    expect(body.cancelledOrders).toBe(0);
+    expect(body.skippedPaid).toBe(1);
+    expect(updateCalls).toHaveLength(0);
+    expect(mockSessionExpire).not.toHaveBeenCalled();
+    expect(logError).toHaveBeenCalledWith(
+      "cron/cleanup-stale-orders.completedSession",
+      expect.any(Error)
+    );
+  });
+
+  it("skips a row when the buyer completes checkout between the read and the expire", async () => {
+    staleOrderRows = [{ id: "order-race", stripeSessionId: "cs_race_1" }];
+    mockSessionRetrieve
+      .mockResolvedValueOnce({ status: "open" })
+      .mockResolvedValueOnce({ status: "complete" });
+    mockSessionExpire.mockRejectedValue(new Error("session is not open"));
+
+    const res = await GET(makeRequest("Bearer test-secret"));
+
+    const body = await res.json();
+    expect(body.cancelledOrders).toBe(0);
+    expect(body.skippedPaid).toBe(1);
+    expect(updateCalls).toHaveLength(0);
+  });
+
+  it("skips (rather than cancels blind) when Stripe can't be reached", async () => {
+    staleOrderRows = [{ id: "order-err", stripeSessionId: "cs_err_1" }];
+    mockSessionRetrieve.mockRejectedValue(new Error("stripe down"));
+
+    const res = await GET(makeRequest("Bearer test-secret"));
+
+    const body = await res.json();
+    expect(res.status).toBe(200);
+    expect(body.cancelledOrders).toBe(0);
+    expect(body.skippedPaid).toBe(1);
+    expect(updateCalls).toHaveLength(0);
+  });
+
+  it("never treats a session_claim: sentinel as a Checkout session", async () => {
+    staleOrderRows = [
+      { id: "order-claim", stripeSessionId: "session_claim:abc" },
+    ];
+
+    await GET(makeRequest("Bearer test-secret"));
+
+    expect(mockSessionRetrieve).not.toHaveBeenCalled();
+    expect(updateCalls.find((c) => c.status === "cancelled")).toBeDefined();
   });
 
   // ---------------------------------------------------------------------
