@@ -1,5 +1,7 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
+import { SaveToCollection } from "@/components/collections/save-to-collection";
+import { viewerHasSaved } from "@/lib/collections/saved";
 import Link from "next/link";
 import Image from "next/image";
 import { isSessionGatedImageSrc } from "@/lib/images/session-gated-src";
@@ -165,6 +167,10 @@ export default async function ProjectDetailPage(props: {
   // signing has to wait on its row fetch and is handled separately
   // below. `userOwnsProject` is called once and reused for both the
   // download gate and the build-post gate — same query, same answer.
+  const savedPromise = viewerHasSaved(userId, {
+    kind: "project",
+    id: project.id,
+  });
   const [
     bundledFiles,
     ownsProject,
@@ -295,6 +301,7 @@ export default async function ProjectDetailPage(props: {
         .limit(500)
     ),
   ]);
+  const savedByViewer = await savedPromise;
   const canDownload = ownsProject;
   // Gate for project builds / inline-comment photos. Owner is always
   // covered because `userOwnsProject` returns true for the creator's
@@ -784,7 +791,17 @@ export default async function ProjectDetailPage(props: {
           {/* Project info + actions */}
           <div className="flex flex-col gap-4">
             <div>
-              <h1 className="text-2xl font-bold">{project.name}</h1>
+              <div className="flex items-start gap-3">
+                <h1 className="min-w-0 flex-1 text-2xl font-bold">
+                  {project.name}
+                </h1>
+                <SaveToCollection
+                  target={{ kind: "project", id: project.id }}
+                  initiallySaved={savedByViewer}
+                  signedIn={!!userId}
+                  returnTo={`/projects/${project.slug}`}
+                />
+              </div>
               <div className="mt-2">{renderByline()}</div>
               {project.category && getCategoryLabel(project.category) && (
                 <div className="mt-3">

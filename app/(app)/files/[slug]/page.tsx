@@ -59,6 +59,8 @@ import { PRINTED_STATUSES, ACTIVE_ORDER_STATUSES } from "@/lib/print-statuses";
 import { swallow } from "@/lib/utils/swallow";
 import { fileJsonLd, safeJsonLdScript } from "@/lib/seo/json-ld";
 import { PurchaseButton } from "@/components/purchase/purchase-button";
+import { SaveToCollection } from "@/components/collections/save-to-collection";
+import { viewerHasSaved } from "@/lib/collections/saved";
 import { PayoutSetupWarning } from "@/components/payouts/payout-setup-warning";
 
 async function buildMaterialLabel(configId: string | null): Promise<string | null> {
@@ -155,6 +157,8 @@ export default async function FileDetailPage(props: {
   // depend on each other — fan them out in one roundtrip instead of
   // five sequential awaits. Photo URL signing still has to wait for
   // its row fetch, so it runs after.
+  // Started here so it runs alongside the reads below.
+  const savedPromise = viewerHasSaved(userId, { kind: "file", id: file.id });
   const [assets, photos, buildRows, canPostBuild, canDownload, parentProject] =
     await Promise.all([
       db.select().from(fileAssets).where(eq(fileAssets.fileId, file.id)),
@@ -206,6 +210,7 @@ export default async function FileDetailPage(props: {
         .limit(1)
         .then((rows) => rows[0] ?? null),
     ]);
+  const savedByViewer = await savedPromise;
 
   // Sign R2 URLs in parallel for both gallery sources.
   const [photosWithUrls, buildsWithUrls] = await Promise.all([
@@ -751,9 +756,17 @@ export default async function FileDetailPage(props: {
           {/* File info + actions */}
           <div className="flex flex-col gap-4">
             <div>
-              <div className="flex items-center gap-2">
-                <h1 className="text-2xl font-bold">{file.name}</h1>
-                {verifying && <VerifyingPill />}
+              <div className="flex items-start gap-3">
+                <div className="flex min-w-0 flex-1 items-center gap-2">
+                  <h1 className="text-2xl font-bold">{file.name}</h1>
+                  {verifying && <VerifyingPill />}
+                </div>
+                <SaveToCollection
+                  target={{ kind: "file", id: file.id }}
+                  initiallySaved={savedByViewer}
+                  signedIn={!!userId}
+                  returnTo={`/files/${slug}`}
+                />
               </div>
               <div className="mt-2 space-y-1">
                 <Link
