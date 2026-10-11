@@ -3,7 +3,8 @@ import { parseMeshTriangles } from "@/lib/hashing/mesh-fingerprint";
 import { writeBinaryStl } from "@/lib/mesh/decimate";
 
 const store = new Map<string, Uint8Array>();
-const putObject = vi.fn(async (key: string, body: Uint8Array) => {
+const putObject = vi.fn(async (key: string, body: Uint8Array, type?: string) => {
+  void type;
   store.set(key, body);
 });
 vi.mock("@/lib/storage", () => ({
