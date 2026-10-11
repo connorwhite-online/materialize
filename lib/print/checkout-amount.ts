@@ -9,7 +9,8 @@
  *   - with a breakdown: material × quantity, plus the implied vendor
  *     minimum production fee when positive, plus shipping when positive;
  *   - without one: `totalPrice` as one line;
- *   - plus the service fee either way.
+ *   - plus the service fee and any license fee (lib/print/license.ts)
+ *     either way.
  *
  * The Stripe webhook compares a paid session's `amount_total` against
  * this before placing the CraftCloud order (lib/stripe/
@@ -19,6 +20,7 @@
 export function expectedSingleItemCheckoutCents(order: {
   totalPrice: number;
   serviceFee: number;
+  licenseFee?: number;
   materialSubtotal: number | null;
   shippingSubtotal: number | null;
   quantity: number | null;
@@ -34,5 +36,5 @@ export function expectedSingleItemCheckoutCents(order: {
   } else {
     goods = order.totalPrice;
   }
-  return goods + order.serviceFee;
+  return goods + order.serviceFee + (order.licenseFee ?? 0);
 }

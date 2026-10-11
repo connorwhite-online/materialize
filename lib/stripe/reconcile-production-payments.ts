@@ -5,6 +5,7 @@ import { getStripe } from "@/lib/stripe";
 import { getOrderStatus } from "@/lib/craftcloud/client";
 import { isProductionPaymentConfirmed } from "@/lib/craftcloud/payment-confirmation";
 import { notifyPrintOrderPlaced } from "@/lib/notifications/print-order";
+import { grantPrintLicenses } from "@/lib/print/license";
 import { logError } from "@/lib/logger";
 
 /**
@@ -178,6 +179,7 @@ async function reconcileRow(order: ReconcileRow, result: ReconcileResult) {
             eq(printOrders.status, "awaiting_production_payment"),
           ),
         );
+      await grantPrintLicenses(order.id, order.feePaymentIntentId);
       result.captured++;
       return;
     }
@@ -320,6 +322,12 @@ export async function captureFeeAndPlaceOrder(
       logError("captureFeeAndPlaceOrder:notify", notifyError);
     }
   }
+
+  // The captured hold included any paid listing printed with this
+  // order; grant it and pay its creator (lib/print/license.ts).
+  // Idempotent and never throws, so a retry after a lost status write
+  // is harmless.
+  await grantPrintLicenses(orderId, feePaymentIntentId);
 }
 
 /**

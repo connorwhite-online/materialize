@@ -3,6 +3,7 @@ import { auth } from "@clerk/nextjs/server";
 import { db } from "@/lib/db";
 import { fileAssets, files } from "@/lib/db/schema";
 import { isPublicListing } from "@/lib/files/public-listing";
+import { resolvePrintLicense } from "@/lib/print/license";
 import { eq } from "drizzle-orm";
 import { FileAssetPrintShell } from "@/components/print/file-asset-print-shell";
 import { loadPreviewView } from "@/lib/files/load-preview-view";
@@ -88,12 +89,24 @@ export default async function PrintConfigPage(props: {
   // quote page. Draft / unlinked assets have no listing row.
   const directPreselectMaterialId =
     preselectMaterialId ?? asset.recommendedCcMaterialId ?? null;
-  const [resolvedRecommendedMaterialId, previewView] = await Promise.all([
-    directPreselectMaterialId
-      ? null
-      : resolveRecommendedCraftCloudMaterialId(asset.recommendedMaterialId),
-    asset.listingFileId ? loadPreviewView(asset.listingFileId) : null,
-  ]);
+  const [resolvedRecommendedMaterialId, previewView, licensed] =
+    await Promise.all([
+      directPreselectMaterialId
+        ? null
+        : resolveRecommendedCraftCloudMaterialId(asset.recommendedMaterialId),
+      asset.listingFileId ? loadPreviewView(asset.listingFileId) : null,
+      // A paid listing the viewer doesn't own: printing it also buys it,
+      // so its price belongs in the totals they see. (A creator without
+      // payouts surfaces as a checkout error instead.)
+      isOwner ? null : resolvePrintLicense(userId, asset.id),
+    ]);
+  const fileLicense =
+    licensed?.ok && licensed.license
+      ? {
+          fileName: licensed.license.fileName,
+          licenseCents: licensed.license.licenseCents,
+        }
+      : null;
   const resolvedPreselectMaterialId =
     directPreselectMaterialId ?? resolvedRecommendedMaterialId ?? undefined;
 
@@ -150,6 +163,7 @@ export default async function PrintConfigPage(props: {
         configureHeader={configureHeader}
         projectSlug={projectSlug}
         checkoutModel={getCheckoutModel()}
+        fileLicense={fileLicense}
         initialView={previewView}
       />
     </div>

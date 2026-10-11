@@ -46,6 +46,19 @@ interface PriceDisplayProps {
    * VALUE can't be computed in a client component.
    */
   checkoutModel?: CheckoutModel;
+  /**
+   * A paid listing the buyer doesn't own yet: printing it also buys it
+   * (lib/print/license.ts), so its price is its own line and part of
+   * the total. Server-derived on the page; null otherwise.
+   */
+  fileLicense?: PrintFileLicense | null;
+}
+
+/** Client-safe shape of a print's license line (see lib/print/license.ts). */
+export interface PrintFileLicense {
+  fileName: string;
+  /** Cents. */
+  licenseCents: number;
 }
 
 /**
@@ -65,6 +78,7 @@ export function PriceDisplay({
   shippingLocked,
   shippingLockedNotice,
   checkoutModel = "single",
+  fileLicense = null,
 }: PriceDisplayProps) {
   // Sandbox mode is worth exactly one callout, and this is it: the card
   // with the checkout totals on it. The shipping sheet also wears the
@@ -96,7 +110,8 @@ export function PriceDisplay({
   const preShipping = materialCost + minimumFee;
   const serviceFee =
     calcServiceFee(Math.round(preShipping * 100), checkoutModel) / 100;
-  const total = preShipping + serviceFee + shippingCost;
+  const licenseCost = (fileLicense?.licenseCents ?? 0) / 100;
+  const total = preShipping + serviceFee + shippingCost + licenseCost;
 
   return (
     <Card>
@@ -158,6 +173,19 @@ export function PriceDisplay({
 
         <Separator />
 
+        {fileLicense && (
+          <div>
+            <div className="flex justify-between text-sm">
+              <span className="text-muted-foreground">File price</span>
+              <span>${licenseCost.toFixed(2)}</span>
+            </div>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Paid to the creator once. You&apos;ll own {fileLicense.fileName} after
+              your order is placed.
+            </p>
+          </div>
+        )}
+
         <div className="flex justify-between text-sm">
           <span className="text-muted-foreground">Service fee (3%)</span>
           <span>${serviceFee.toFixed(2)}</span>
@@ -182,8 +210,9 @@ export function PriceDisplay({
         {checkoutModel === "two_step" && (
           <p className="mt-2 rounded-lg border border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
             You&apos;ll see two charges: a hold for the Materialize service
-            fee shown above (only charged once your order is placed) and
-            CraftCloud&apos;s charge for production + shipping.
+            fee{fileLicense ? " and file price" : ""} shown above (only
+            charged once your order is placed) and CraftCloud&apos;s charge
+            for production + shipping.
           </p>
         )}
       </CardContent>

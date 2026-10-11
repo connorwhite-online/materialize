@@ -7,6 +7,7 @@ import { createOrder } from "@/lib/craftcloud/client";
 import { getStripe } from "@/lib/stripe";
 import { logError } from "@/lib/logger";
 import { notifyPrintOrderPlaced } from "@/lib/notifications/print-order";
+import { grantPrintLicenses } from "@/lib/print/license";
 import { expectedSingleItemCheckoutCents } from "@/lib/print/checkout-amount";
 
 /**
@@ -211,6 +212,10 @@ export async function handlePrintOrderPayment(
     if (order.status !== "cart_created") {
       if (order.status === "ordered") {
         await clearCartItemsForOrder(printOrderId, order.userId);
+        // Idempotent; finishes a grant an earlier delivery died in.
+        if (order.licenseFee > 0) {
+          await grantPrintLicenses(printOrderId, opts?.paymentIntentId ?? null);
+        }
       }
       return;
     }
@@ -230,6 +235,9 @@ export async function handlePrintOrderPayment(
         .set({ status: "ordered" })
         .where(eq(printOrders.id, printOrderId));
       await clearCartItemsForOrder(printOrderId, order.userId);
+      if (order.licenseFee > 0) {
+        await grantPrintLicenses(printOrderId, opts?.paymentIntentId ?? null);
+      }
     }
     return;
   }
@@ -300,6 +308,13 @@ export async function handlePrintOrderPayment(
   // order placement we just committed.
   if (placed.length > 0) {
     await notifyPrintOrderPlaced(printOrderId);
+  }
+
+  // Placed: a paid listing printed with this order is now the buyer's,
+  // and its creator is paid (lib/print/license.ts). Idempotent, so it
+  // runs whichever worker won the write. Never throws.
+  if (order.licenseFee > 0) {
+    await grantPrintLicenses(printOrderId, opts?.paymentIntentId ?? null);
   }
 
   // MONEY-2: clear the cart lines this order came from now that it has

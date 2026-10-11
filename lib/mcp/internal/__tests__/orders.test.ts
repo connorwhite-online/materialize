@@ -48,6 +48,16 @@ const USERS = { __table: "users" };
 const TOKEN_SPENDING_LEDGER = { __table: "token_spending_ledger" };
 const PRINT_ORDER_ITEMS = { __table: "print_order_items" };
 
+// Paid-listing licenses are covered in lib/print/__tests__/license.test.ts;
+// here every printed file is free.
+vi.mock("@/lib/print/license", () => ({
+  LICENSE_PAYOUTS_DISABLED_ERROR: "license payouts disabled",
+  resolvePrintLicense: vi.fn(async () => ({ ok: true, license: null })),
+  buildLicenseLineItems: vi.fn(async () => []),
+  grantPrintLicenses: vi.fn(async () => {}),
+  revokePrintLicenses: vi.fn(async () => {}),
+}));
+
 vi.mock("@/lib/db/schema", () => ({
   printOrders: PRINT_ORDERS,
   fileAssets: FILE_ASSETS,

@@ -188,6 +188,8 @@ const requestAuth = new AsyncLocalStorage<{ auth?: MaterializeAuthInfo }>();
 function priceFields(result: {
   totalPriceCents: number;
   serviceFeeCents: number;
+  /** The paid listing's price, when printing it also buys it. */
+  licenseFeeCents?: number;
   breakdown?: {
     productionCents: number;
     minimumFeeCents: number;
@@ -195,9 +197,13 @@ function priceFields(result: {
   };
 }) {
   return {
-    amountDueCents: result.totalPriceCents + result.serviceFeeCents,
+    amountDueCents:
+      result.totalPriceCents +
+      result.serviceFeeCents +
+      (result.licenseFeeCents ?? 0),
     totalPriceCents: result.totalPriceCents,
     serviceFeeCents: result.serviceFeeCents,
+    ...(result.licenseFeeCents ? { licenseFeeCents: result.licenseFeeCents } : {}),
     ...(result.breakdown
       ? {
           productionCents: result.breakdown.productionCents,

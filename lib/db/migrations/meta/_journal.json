@@ -505,6 +505,13 @@
       "when": 1786100600000,
       "tag": "0072_craftcloud_vendor_minimums",
       "breakpoints": true
+    },
+    {
+      "idx": 73,
+      "version": "7",
+      "when": 1786100700000,
+      "tag": "0073_print_license_fees",
+      "breakpoints": true
     }
   ]
 }

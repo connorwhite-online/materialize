@@ -12,6 +12,7 @@ import {
   CHECKOUT_CURRENCY,
   reconcileQuote,
 } from "@/lib/pricing/reconcile-quote";
+import { resolvePrintLicense } from "@/lib/print/license";
 
 export type CartItemWithMeta = {
   id: string;
@@ -30,6 +31,12 @@ export type CartItemWithMeta = {
   countryCode: string;
   /** ISO timestamp the cart row was last written. */
   updatedAt: string;
+  /**
+   * Cents. A paid listing the buyer doesn't own is bought with the
+   * print, once per file per vendor group — the same rule
+   * checkoutVendorGroup charges by (lib/print/license.ts). 0 otherwise.
+   */
+  licenseCents: number;
 };
 
 export async function addToCart(params: {
@@ -368,10 +375,24 @@ export async function getCart(): Promise<
       .where(eq(cartItems.userId, userId))
       .orderBy(cartItems.createdAt);
 
+    // Same once-per-file-per-vendor-group rule checkout charges by.
+    const licenseCents = new Map<string, number>();
+    const seen = new Set<string>();
+    for (const r of rows) {
+      const licensed = await resolvePrintLicense(userId, r.fileAssetId);
+      const license = licensed.ok ? licensed.license : null;
+      if (!license) continue;
+      const key = `${r.vendorId}:${license.fileId}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      licenseCents.set(r.id, license.licenseCents);
+    }
+
     return {
       items: rows.map((r) => ({
         ...r,
         updatedAt: r.updatedAt.toISOString(),
+        licenseCents: licenseCents.get(r.id) ?? 0,
       })),
     };
   } catch (error) {

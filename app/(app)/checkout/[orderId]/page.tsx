@@ -99,6 +99,7 @@ export default async function CheckoutPage(props: {
         productionFee={impliedProductionFee}
         totalPrice={order.totalPrice}
         serviceFee={order.serviceFee}
+        licenseFee={order.licenseFee}
       />
     </div>
   );

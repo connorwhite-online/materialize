@@ -75,6 +75,16 @@ const mockGetPrice = vi.fn((..._args: unknown[]) =>
   Promise.resolve(priceSnapshot())
 );
 
+// Paid-listing licenses are covered in lib/print/__tests__/license.test.ts;
+// here every printed file is free.
+vi.mock("@/lib/print/license", () => ({
+  LICENSE_PAYOUTS_DISABLED_ERROR: "license payouts disabled",
+  resolvePrintLicense: vi.fn(async () => ({ ok: true, license: null })),
+  buildLicenseLineItems: vi.fn(async () => []),
+  grantPrintLicenses: vi.fn(async () => {}),
+  revokePrintLicenses: vi.fn(async () => {}),
+}));
+
 vi.mock("@/lib/craftcloud/client", () => ({
   createCart: (...args: unknown[]) => mockCreateCart(...args),
   createOrder: vi.fn(),

@@ -9,7 +9,11 @@ import type {
 } from "./material-picker/types";
 import { modelFitsInVolume } from "@/lib/craftcloud/fits-volume";
 import type { MaterialsManifestResponse } from "@/app/api/craftcloud/materials-manifest/route";
-import { PriceDisplay, type MinimumFeeInfo } from "./price-display";
+import {
+  PriceDisplay,
+  type MinimumFeeInfo,
+  type PrintFileLicense,
+} from "./price-display";
 import type { CheckoutModel } from "@/lib/env";
 import type { Currency } from "@/lib/craftcloud/types";
 import { type SavedCheckoutAddress } from "./shipping-address-form";
@@ -159,6 +163,8 @@ interface QuoteConfiguratorProps {
    * "single" so existing call sites/tests are unaffected.
    */
   checkoutModel?: CheckoutModel;
+  /** Paid listing the buyer doesn't own: its price joins the totals. */
+  fileLicense?: PrintFileLicense | null;
   /**
    * Owner-chosen snapshot angle, loaded by the server page via
    * `loadPreviewView`. Applied once the viewer's automatic fit
@@ -201,6 +207,7 @@ export function QuoteConfigurator({
   rightAnnex,
   headerSlot,
   checkoutModel = "single",
+  fileLicense = null,
   initialView,
 }: QuoteConfiguratorProps) {
   const isDraft = !!draftMode;
@@ -1643,6 +1650,7 @@ export function QuoteConfigurator({
                 : null
             }
             checkoutModel={checkoutModel}
+            fileLicense={fileLicense}
           />
           <ShippingSheet
             open={shippingSheetOpen}
@@ -1676,6 +1684,7 @@ export function QuoteConfigurator({
                 : null
             }
             checkoutModel={checkoutModel}
+            fileLicense={fileLicense}
             onAddressSubmit={handleAddressSubmit}
             isSubmittingAddress={false}
             anonMode={isAnon}

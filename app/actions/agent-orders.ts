@@ -10,6 +10,7 @@ import {
   files,
   tokenSpendingLedger,
 } from "@/lib/db/schema";
+import { buildLicenseLineItems } from "@/lib/print/license";
 import { getStripe } from "@/lib/stripe";
 import { findMaterialConfig, findProvider } from "@/lib/craftcloud/catalog";
 import { sendCancellationConfirmedEmail } from "@/lib/mcp/email";
@@ -251,6 +252,8 @@ async function mintStripeSession(params: {
       quantity: 1,
     });
   }
+
+  lineItems.push(...(await buildLicenseLineItems(order)));
 
   lineItems.push({
     price_data: {

@@ -33,6 +33,8 @@ type DisplayItem = {
   quantity: number;
   materialPrice: number;
   shippingPrice: number;
+  /** Cents; the paid-listing price this line also buys (0 if none). */
+  licenseCents: number;
   /** True when the underlying quote is old enough to be at risk of
    * having expired on CraftCloud's side (DB rows only — local
    * items are always fresh since they live for one browser session). */
@@ -63,6 +65,7 @@ function toDisplayItems(
     materialPrice: i.materialPrice,
     shippingPrice: i.shippingPrice,
     staleQuote: now - new Date(i.updatedAt).getTime() > STALE_QUOTE_AGE_MS,
+    licenseCents: i.licenseCents ?? 0,
   }));
   const fromLocal: DisplayItem[] = localItems.map((i) => ({
     id: i.localId,
@@ -76,6 +79,8 @@ function toDisplayItems(
     materialPrice: Math.round(i.materialPrice * 100),
     shippingPrice: Math.round(i.shippingPrice * 100),
     staleQuote: false,
+    // The visitor's own upload: nothing to license.
+    licenseCents: 0,
   }));
   return [...fromDb, ...fromLocal];
 }
@@ -371,7 +376,8 @@ function VendorGroup({
   // what the server actually charges (including the two_step $0.50
   // minimum clamp).
   const serviceFee = calcServiceFee(material, checkoutModel);
-  const total = material + serviceFee + shipping;
+  const license = group.items.reduce((sum, i) => sum + i.licenseCents, 0);
+  const total = material + serviceFee + shipping + license;
 
   const handleCheckout = async () => {
     setError(null);
@@ -446,6 +452,12 @@ function VendorGroup({
           <span>Material</span>
           <PriceCell cents={material} pending={groupRepricing} />
         </div>
+        {license > 0 && (
+          <div className="flex justify-between text-muted-foreground">
+            <span>File price</span>
+            <span>${(license / 100).toFixed(2)}</span>
+          </div>
+        )}
         <div className="flex justify-between text-muted-foreground">
           <span>Service fee (3%)</span>
           <PriceCell cents={serviceFee} pending={groupRepricing} />

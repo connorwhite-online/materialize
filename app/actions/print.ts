@@ -59,6 +59,11 @@ import {
   rateLimitCallerKey,
 } from "@/lib/rate-limit";
 import { userCanPrintAsset } from "@/lib/entitlement";
+import {
+  buildLicenseLineItems,
+  resolvePrintLicense,
+  revokePrintLicenses,
+} from "@/lib/print/license";
 import { promoteStudioDraftsForAssets } from "@/lib/studio-drafts";
 import { dedupeShippingByShipId } from "@/lib/pricing/shipping";
 import type { Address, Currency, PriceResponse } from "@/lib/craftcloud/types";
@@ -350,6 +355,11 @@ export async function createPrintOrder(params: {
       return { error: "File not found" };
     }
 
+    // Printing a paid listing the buyer doesn't own also buys it.
+    const licensed = await resolvePrintLicense(userId, data.fileAssetId);
+    if (!licensed.ok) return { error: licensed.error };
+    const licenseFee = licensed.license?.licenseCents ?? 0;
+
     // Re-derive everything we bill from CraftCloud's own snapshot of
     // this quote rather than trusting the client: the per-unit price
     // (MTR-130), the quantity the quoteId bakes in (CraftCloud builds the
@@ -404,6 +414,7 @@ export async function createPrintOrder(params: {
         craftCloudCartId: cart.cartId,
         totalPrice,
         serviceFee,
+        licenseFee,
         materialSubtotal,
         shippingSubtotal,
         quantity: quote.quantity,
@@ -522,6 +533,22 @@ export async function checkoutVendorGroup(
     const materialCentsFor = (item: (typeof items)[number]) =>
       reconciledMaterialCentsById.get(item.id)!;
 
+    // Paid listings the buyer doesn't own are bought with the print —
+    // once per file, on the first line that carries it, however many
+    // lines or units print it.
+    const licenseCentsById = new Map<string, number>();
+    const licensedFileIds = new Set<string>();
+    for (const item of items) {
+      const licensed = await resolvePrintLicense(userId, item.fileAssetId);
+      if (!licensed.ok) return { error: licensed.error };
+      const license = licensed.license;
+      if (license && !licensedFileIds.has(license.fileId)) {
+        licensedFileIds.add(license.fileId);
+        licenseCentsById.set(item.id, license.licenseCents);
+      }
+    }
+    const licenseFee = [...licenseCentsById.values()].reduce((a, b) => a + b, 0);
+
     const shippingIds = [...new Set(items.map((i) => i.shippingId))];
     const cart = await createCart({
       shippingIds,
@@ -593,6 +620,7 @@ export async function checkoutVendorGroup(
         craftCloudCartId: cart.cartId,
         totalPrice,
         serviceFee,
+        licenseFee,
         shippingSubtotal: totalShipping,
         vendor: vendorId,
         vendorName: resolvedVendorName,
@@ -620,6 +648,7 @@ export async function checkoutVendorGroup(
         quantity: i.quantity,
         materialSubtotal: materialCentsFor(i),
         shippingSubtotal: 0,
+        licenseFee: licenseCentsById.get(i.id) ?? 0,
       }))
     );
 
@@ -923,6 +952,8 @@ async function createStripeSessionForOrder(
     }
   }
 
+  lineItems.push(...(await buildLicenseLineItems(order)));
+
   lineItems.push({
     price_data: {
       currency: "usd",
@@ -1111,7 +1142,8 @@ export async function completePrintOrder(params: {
           feeSheet: {
             clientSecret: resolved.clientSecret,
             orderId: order.id,
-            amountCents: order.serviceFee,
+            amountCents: order.serviceFee + order.licenseFee,
+            ...(order.licenseFee ? { licenseCents: order.licenseFee } : {}),
             email: order.shippingAddress?.email,
           },
         };
@@ -1176,7 +1208,8 @@ export async function completePrintOrder(params: {
         return {
           savedCardConfirm: {
             orderId: order.id,
-            amountCents: order.serviceFee,
+            amountCents: order.serviceFee + order.licenseFee,
+            ...(order.licenseFee ? { licenseCents: order.licenseFee } : {}),
             brand: savedCard.brand,
             last4: savedCard.last4,
           },
@@ -1437,7 +1470,7 @@ async function tryAuthorizeFeeWithSavedCard(
   try {
     intent = await stripe.paymentIntents.create(
       {
-        amount: order.serviceFee,
+        amount: order.serviceFee + order.licenseFee,
         currency: "usd",
         customer: billingRow.stripeCustomerId,
         payment_method: billingRow.defaultPaymentMethod,
@@ -1627,7 +1660,7 @@ async function prepareEmbeddedFeeSheet(
   try {
     intent = await stripe.paymentIntents.create(
       {
-        amount: order.serviceFee,
+        amount: order.serviceFee + order.licenseFee,
         currency: "usd",
         customer: customerId,
         capture_method: "manual",
@@ -1690,7 +1723,8 @@ async function prepareEmbeddedFeeSheet(
   return {
     clientSecret: intent.client_secret,
     orderId: order.id,
-    amountCents: order.serviceFee,
+    amountCents: order.serviceFee + order.licenseFee,
+            ...(order.licenseFee ? { licenseCents: order.licenseFee } : {}),
     email: contact.email,
   };
 }
@@ -2552,6 +2586,10 @@ export async function requestOrderRefund(
       },
       { idempotencyKey: `print-refund:${order.id}` }
     );
+
+    // The refund covered any paid listing bought with this print: take
+    // the creator's share back and the buyer's ownership with it.
+    if (order.licenseFee > 0) await revokePrintLicenses(order.id);
 
     // Conditional on the status we refunded against, so a concurrent
     // writer (the hourly sync-fulfillment-status cron) is never

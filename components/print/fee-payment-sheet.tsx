@@ -47,6 +47,8 @@ export interface FeeSheetPayload {
   clientSecret: string;
   orderId: string;
   amountCents: number;
+  /** Part of amountCents that is a paid listing's price (lib/print/license.ts). */
+  licenseCents?: number;
   /**
    * Buyer email — prefills the Payment Element's billing details so
    * the sheet never asks for it a second time (also lets Link
@@ -131,6 +133,9 @@ export function FeePaymentSheet({ sheet, onClose }: FeePaymentSheetProps) {
           />
         </div>
         <p className="text-xs leading-relaxed text-muted-foreground">
+          {sheet.licenseCents
+            ? `Includes the ${fmt(sheet.licenseCents)} file price. `
+            : ""}
           Held now, charged only when your order is placed. Production and
           shipping are paid to CraftCloud in the next step.
         </p>
@@ -365,6 +370,8 @@ function fmt(cents: number): string {
 export interface SavedCardConfirmPayload {
   orderId: string;
   amountCents: number;
+  /** Part of amountCents that is a paid listing's price (lib/print/license.ts). */
+  licenseCents?: number;
   /** Card brand ("visa", "mastercard", …) or PM type ("link"). */
   brand: string;
   /** Last four digits; null for non-card methods (Link). */
@@ -438,7 +445,7 @@ export function SavedCardFeeSheet({
             metal chip on the right midline, pan on the face. */}
         <div>
           <p className="text-xs font-medium text-muted-foreground">
-            Service fee
+            {confirm.licenseCents ? "Service fee + file price" : "Service fee"}
           </p>
           <p className="text-3xl font-bold tabular-nums">
             {fmt(confirm.amountCents)}

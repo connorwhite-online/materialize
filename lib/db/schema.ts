@@ -648,6 +648,15 @@ export const purchases = pgTable("purchases", {
   serviceFee: integer("service_fee").notNull(), // cents
   creatorPayout: integer("creator_payout").notNull(), // cents
   stripePaymentIntentId: text("stripe_payment_intent_id"),
+  // Set when the purchase came with a print of a paid listing rather
+  // than a direct sale (lib/print/license.ts). The charge then belongs
+  // to the print order — stripePaymentIntentId stays null so the
+  // listing-refund webhook never touches it — and the creator is paid
+  // by a separate transfer, recorded here once it succeeds.
+  printOrderId: uuid("print_order_id").references(() => printOrders.id, {
+    onDelete: "set null",
+  }),
+  stripeTransferId: text("stripe_transfer_id"),
   status: purchaseStatusEnum("status").notNull().default("pending"),
   createdAt: timestamp("created_at", { withTimezone: true })
     .notNull()
@@ -660,6 +669,7 @@ export const purchases = pgTable("purchases", {
   // look up the row by PaymentIntent id only — without this index
   // every event scans the full purchases table.
   index("purchases_stripe_payment_intent_idx").on(table.stripePaymentIntentId),
+  index("purchases_print_order_id_idx").on(table.printOrderId),
   check(
     "purchases_target_exactly_one",
     sql`(${table.fileId} IS NOT NULL AND ${table.projectId} IS NULL) OR (${table.fileId} IS NULL AND ${table.projectId} IS NOT NULL)`
@@ -767,6 +777,11 @@ export const printOrders = pgTable("print_orders", {
   stripeSessionId: text("stripe_session_id"),
   totalPrice: integer("total_price").notNull(), // cents
   serviceFee: integer("service_fee").notNull(), // cents
+  // Price of the paid listing(s) printed in this order that the buyer
+  // didn't already own (lib/print/license.ts). Charged on top of
+  // totalPrice + serviceFee and kept out of totalPrice so the implied
+  // production-fee math never absorbs it. 0 for anything else.
+  licenseFee: integer("license_fee").notNull().default(0), // cents
   // Breakdown of totalPrice — persisted so Stripe Checkout can show
   // print/shipping/qty as distinct line items instead of one lump.
   // Nullable for rows created before the breakdown columns existed.
@@ -916,6 +931,8 @@ export const printOrderItems = pgTable("print_order_items", {
   quantity: integer("quantity").notNull().default(1),
   materialSubtotal: integer("material_subtotal").notNull(), // cents, unit price
   shippingSubtotal: integer("shipping_subtotal").notNull(), // cents
+  // This line's share of printOrders.licenseFee (once per file, not per unit).
+  licenseFee: integer("license_fee").notNull().default(0), // cents
   createdAt: timestamp("created_at", { withTimezone: true })
     .notNull()
     .defaultNow(),
