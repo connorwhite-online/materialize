@@ -17,6 +17,7 @@ import { CollectionSettingsMenu } from "@/components/profile/collection-settings
 import { getLicenseMeta } from "@/lib/licenses";
 import {
   FileCard,
+  FileCardCreator,
   FileCardPriceBadge,
 } from "@/components/files/file-card";
 
@@ -29,6 +30,15 @@ type FileItem = {
   price: number;
   license: string;
   sortOrder: number;
+  creator: Creator;
+};
+
+// Collections hold other people's work (saved from file and project
+// pages), so every card names who made it.
+type Creator = {
+  username: string | null;
+  displayName: string | null;
+  avatarUrl: string | null;
 };
 
 type ProjectItem = {
@@ -41,6 +51,7 @@ type ProjectItem = {
   license: string;
   fileCount: number;
   sortOrder: number;
+  creator: Creator;
 };
 
 type Item = FileItem | ProjectItem;
@@ -99,9 +110,13 @@ export default async function CollectionPage(props: {
         price: files.price,
         license: files.license,
         sortOrder: collectionItems.sortOrder,
+        username: users.username,
+        displayName: users.displayName,
+        avatarUrl: users.avatarUrl,
       })
       .from(collectionItems)
       .innerJoin(files, eq(collectionItems.fileId, files.id))
+      .innerJoin(users, eq(files.userId, users.id))
       .where(
         and(
           eq(collectionItems.collectionId, collection.id),
@@ -125,9 +140,13 @@ export default async function CollectionPage(props: {
         price: projects.price,
         license: projects.license,
         sortOrder: collectionItems.sortOrder,
+        username: users.username,
+        displayName: users.displayName,
+        avatarUrl: users.avatarUrl,
       })
       .from(collectionItems)
       .innerJoin(projects, eq(collectionItems.projectId, projects.id))
+      .innerJoin(users, eq(projects.userId, users.id))
       .where(
         and(
           eq(collectionItems.collectionId, collection.id),
@@ -176,6 +195,7 @@ export default async function CollectionPage(props: {
       price: r.price,
       license: r.license,
       sortOrder: r.sortOrder,
+      creator: r,
     })),
     ...projectRows.map<ProjectItem>((r) => ({
       kind: "project",
@@ -187,6 +207,7 @@ export default async function CollectionPage(props: {
       license: r.license,
       fileCount: fileCounts.get(r.id) ?? 0,
       sortOrder: r.sortOrder,
+      creator: r,
     })),
   ].sort((a, b) => a.sortOrder - b.sortOrder);
 
@@ -246,7 +267,7 @@ export default async function CollectionPage(props: {
           {items.map((item) => {
             const license =
               getLicenseMeta(item.license)?.shortName ?? item.license;
-            const subtitle =
+            const meta =
               item.kind === "project"
                 ? `${item.fileCount} ${item.fileCount === 1 ? "file" : "files"} · ${license}`
                 : license;
@@ -262,7 +283,16 @@ export default async function CollectionPage(props: {
                 thumbnailUrl={item.thumbnailUrl}
                 placeholder={item.kind === "file" ? "3D Preview" : "Project"}
                 overlay={<FileCardPriceBadge priceCents={item.price} />}
-                subtitle={subtitle}
+                subtitle={
+                  <FileCardCreator
+                    username={item.creator.username}
+                    displayName={item.creator.displayName}
+                    avatarUrl={item.creator.avatarUrl}
+                  />
+                }
+                meta={
+                  <p className="mt-0.5 truncate text-[11px] text-muted-foreground">{meta}</p>
+                }
               />
             );
           })}

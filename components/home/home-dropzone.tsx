@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { FolderOpenIcon, LayersIcon } from "lucide-react";
+import { LayersIcon } from "lucide-react";
 import { FileUploader } from "@/components/upload/file-uploader";
 import { useStartPrintFlow } from "@/components/upload/use-start-print-flow";
 import { Button } from "@/components/ui/button";
@@ -9,8 +9,9 @@ import { Button } from "@/components/ui/button";
 /**
  * Authed-home create cluster: a featured file dropzone (uploads to R2,
  * becomes a draft listing, lands on `/print/[fileAssetId]` — same chain
- * as the /print idle pane) plus New Project / New Collection. Both
- * navigate to their create pages (`/projects/new`, `/collections/new`).
+ * as the /print idle pane) plus New Project. Collections are started
+ * from the Save button on file and project pages instead
+ * (components/collections/save-to-collection.tsx).
  */
 export function HomeDropzone() {
   const { start, phase, progress, error } = useStartPrintFlow();
@@ -39,7 +40,7 @@ export function HomeDropzone() {
         )}
       </div>
 
-      <div className="mt-3 grid grid-cols-2 gap-2">
+      <div className="mt-3">
         <Button
           variant="outline"
           size="lg"
@@ -48,15 +49,6 @@ export function HomeDropzone() {
         >
           <LayersIcon className="size-4" />
           New Project
-        </Button>
-        <Button
-          variant="outline"
-          size="lg"
-          className="h-11 min-w-0 w-full"
-          render={<Link href="/collections/new" />}
-        >
-          <FolderOpenIcon className="size-4" />
-          New Collection
         </Button>
       </div>
     </div>

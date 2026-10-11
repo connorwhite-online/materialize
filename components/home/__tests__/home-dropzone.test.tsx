@@ -32,8 +32,8 @@ describe("HomeDropzone", () => {
     expect(screen.queryByText("Upload a file")).toBeNull();
     const project = screen.getByRole("button", { name: /new project/i });
     expect(project.getAttribute("href")).toBe("/projects/new");
-    const collection = screen.getByRole("button", { name: /new collection/i });
-    expect(collection.getAttribute("href")).toBe("/collections/new");
+    // Collections start from the Save button on file and project pages.
+    expect(screen.queryByRole("button", { name: /new collection/i })).toBeNull();
     expect(screen.getByTestId("dropzone-primitives")).toBeTruthy();
   });
 
